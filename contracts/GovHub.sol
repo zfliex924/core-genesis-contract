@@ -14,9 +14,9 @@ contract GovHub is System, IParamSubscriber {
   using RLPDecode for RLPDecode.RLPItem;
 
   uint256 public constant PROPOSAL_MAX_OPERATIONS = 1;
-  uint256 public constant VOTING_PERIOD = 201600;
+  uint256 public constant VOTING_PERIOD = 600;
   uint256 public constant EXECUTING_PERIOD = 201600;
-  bytes public constant INIT_MEMBERS = hex"f86994548e6acce441866674e04ab84587af2d394034c094bb06d463bc143eecc4a0cfa35e0346d5690fa9f694e2fe60f349c6e1a85caad1d22200c289da40dc1294b198db68258f06e79d415a0998be7f9b38ea722694dd173b85f306128f1b10d7d7219059c28c6d6c09";
+  bytes public constant INIT_MEMBERS = hex"f83f941ef01e76f1aad50144a32680f16aa97a10f8af9594140a939b5a10952f958a08244d93185f6a0bc91e94b129986cab3b865a6267415ee4ca2d86a5704fde";
 
   uint256 public proposalMaxOperations;
   uint256 public votingPeriod;

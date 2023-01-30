@@ -40,7 +40,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   uint256 public constant ROUND_SIZE=100;
   uint256 public constant MAXIMUM_WEIGHT=20;
   uint256 public constant CONFIRM_BLOCK = 6;
-  uint256 public constant INIT_ROUND_INTERVAL = 86400;
+  uint256 public constant INIT_ROUND_INTERVAL = 1800;
 
   uint256 public callerCompensationMolecule;
   uint256 public rewardForSyncHeader;
