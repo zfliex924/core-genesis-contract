@@ -166,13 +166,12 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     // equality allows block with same score to become an (alternate) Tip, so
     // that when an (existing) Tip becomes stale, the chain can continue with
     // the alternate Tip
-    if (scoreBlock >= highScore) {
       if (blockHeight > getHeight(heaviestBlock)) {
         addMinerPower(blockHash);
       }
       heaviestBlock = blockHash;
       highScore = scoreBlock;
-    }
+    
     emit StoreHeader(blockHash, candidateAddr, rewardAddr, blockHeight, bindingHash);
   }
 
@@ -324,7 +323,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     // Check proof of work matches claimed amount
     // we do not do other validation (eg timestamp) to save gas
     if (blockHash == 0 || uint256(blockHash) >= target) {
-      return (blockHeight, scoreBlock, ERR_PROOF_OF_WORK);
+      return (blockHeight, scoreBlock, 0);
     }
     blockHeight = 1 + getHeight(hashPrevBlock);
     uint32 prevBits = getBits(hashPrevBlock);
@@ -336,7 +335,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
        * the main chain, they will not have impact.
        */
       if (bits != prevBits && prevBits != 0) {
-        return (blockHeight, scoreBlock, ERR_DIFFICULTY);
+        return (blockHeight, scoreBlock, 0);
       }
     } else {
       uint256 prevTarget = targetFromBits(prevBits);
@@ -360,7 +359,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
       uint32 newBits = toCompactBits(newTarget);
       if (bits != newBits && newBits != 0) { // newBits != 0 to allow first header
-        return (blockHeight, scoreBlock, ERR_RETARGET);
+        return (blockHeight, scoreBlock, 0);
       }
     }
     

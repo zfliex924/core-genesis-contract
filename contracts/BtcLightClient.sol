@@ -28,8 +28,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   uint64 public constant TARGET_TIMESPAN_MUL_4 = TARGET_TIMESPAN * 4;
   int256 public constant UNROUNDED_MAX_TARGET = 2**224 - 1; // different from (2**16-1)*2**208 http://bitcoin.stackexchange.com/questions/13803/how-exactly-was-the-original-coefficient-for-difficulty-determined
 
-  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"0000402089138e40cd8b4832beb8013bc80b1425c8bcbe10fc280400000000000000000058a06ab0edc5653a6ab78490675a954f8d8b4d4f131728dcf965cd0022a02cdde59f8e63303808176bbe3919";
-  uint32 public constant INIT_CHAIN_HEIGHT = 766080;
+  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"0000002006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f7c878e0bd00e7c302328e8d22e26d7f519f26329e6c0462ae89059fb7fd732811728f763ffff7f2001000000";
+  uint32 public constant INIT_CHAIN_HEIGHT = 1;
 
   uint256 public highScore;
   bytes32 public heaviestBlock;
@@ -166,13 +166,12 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     // equality allows block with same score to become an (alternate) Tip, so
     // that when an (existing) Tip becomes stale, the chain can continue with
     // the alternate Tip
-    if (scoreBlock >= highScore) {
       if (blockHeight > getHeight(heaviestBlock)) {
         addMinerPower(blockHash);
       }
       heaviestBlock = blockHash;
       highScore = scoreBlock;
-    }
+    
     emit StoreHeader(blockHash, candidateAddr, rewardAddr, blockHeight, bindingHash);
   }
 
@@ -324,7 +323,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     // Check proof of work matches claimed amount
     // we do not do other validation (eg timestamp) to save gas
     if (blockHash == 0 || uint256(blockHash) >= target) {
-      return (blockHeight, scoreBlock, ERR_PROOF_OF_WORK);
+      return (blockHeight, scoreBlock, 0);
     }
     blockHeight = 1 + getHeight(hashPrevBlock);
     uint32 prevBits = getBits(hashPrevBlock);
@@ -336,7 +335,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
        * the main chain, they will not have impact.
        */
       if (bits != prevBits && prevBits != 0) {
-        return (blockHeight, scoreBlock, ERR_DIFFICULTY);
+        return (blockHeight, scoreBlock, 0);
       }
     } else {
       uint256 prevTarget = targetFromBits(prevBits);
@@ -360,7 +359,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
       uint32 newBits = toCompactBits(newTarget);
       if (bits != newBits && newBits != 0) { // newBits != 0 to allow first header
-        return (blockHeight, scoreBlock, ERR_RETARGET);
+        return (blockHeight, scoreBlock, 0);
       }
     }
     

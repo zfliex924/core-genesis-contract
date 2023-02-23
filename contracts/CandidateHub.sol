@@ -17,7 +17,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   uint256 public constant INIT_REQUIRED_MARGIN = 1e22;
   uint256 public constant INIT_DUES = 1e20;
   uint256 public constant INIT_ROUND_INTERVAL = 1800;
-  uint256 public constant INIT_VALIDATOR_COUNT = 9;
+  uint256 public constant INIT_VALIDATOR_COUNT = 5;
   uint256 public constant MAX_COMMISSION_CHANGE = 10;
   uint256 public constant CANDIDATE_COUNT_LIMIT = 1000;
 
@@ -156,7 +156,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     // and distribute rewards to them
     uint256 lastCandidateSize = lastCandidates.length;
     for (uint256 i = 0; i < lastCandidateSize; i++) {
-      address[] memory miners = ILightClient(LIGHT_CLIENT_ADDR).getRoundMiners(roundTag-7, lastCandidates[i]);
+      address[] memory miners = ILightClient(LIGHT_CLIENT_ADDR).getRoundMiners(roundTag-2, lastCandidates[i]);
       IPledgeAgent(PLEDGE_AGENT_ADDR).distributePowerReward(lastCandidates[i], miners);
     }
 
@@ -186,7 +186,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     }
     // fetch hash power delegated on list of candidates
     // which is used to calculate hybrid score for validators in the new round
-    powers = ILightClient(LIGHT_CLIENT_ADDR).getRoundPowers(roundTag-7, candidates);
+    powers = ILightClient(LIGHT_CLIENT_ADDR).getRoundPowers(roundTag-2, candidates);
 
     // calculate the hybrid score for all valid candidates and 
     // choose top ones to form the validator set of the new round
