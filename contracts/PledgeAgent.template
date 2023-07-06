@@ -48,11 +48,30 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   // It is initialized to 1.
   uint256 public roundTag;
 
+  struct TransferReceipt {
+    uint256 rewardIndex;
+    uint256 deposit;
+    address agent;
+  }
+
   struct CoinDelegator {
+    // the deposit amount used to collect history reward.
+    // if the changeRound over than reward round, use newDeposit instead
+    uint256 deposit;
+    // newest deposit amount
+    uint256 newDeposit;
+    uint256 changeRound;
+    uint256 rewardIndex;
+    address[] transferAgentList;
+    mapping(address => TransferReceipt) transferReceiptMap;
+  }
+
+  struct MemoryCoinDelegator {
     uint256 deposit;
     uint256 newDeposit;
     uint256 changeRound;
     uint256 rewardIndex;
+    TransferReceipt[] transferReceiptList;
   }
 
   struct Reward {
@@ -252,15 +271,31 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(agent)) {
       revert InactiveAgent(agent);
     }
-    uint256 newDeposit = delegateCoin(agent, msg.sender, msg.value);
+    uint256 newDeposit = delegateCoin(agent, msg.sender, msg.value, new TransferReceipt[](0));
     emit delegatedCoin(agent, msg.sender, msg.value, newDeposit);
   }
 
   /// Undelegate coin from a validator
   /// @param agent The operator address of validator
   function undelegateCoin(address agent) external {
-    uint256 deposit = undelegateCoin(agent, msg.sender);
-    payable(msg.sender).transfer(deposit);
+    undelegateCoin(agent, 0);
+  }
+
+  /// Undelegate coin from a validator
+  /// @param agent The operator address of validator
+  /// @param amount The coin amount for undelegate
+  function undelegateCoin(address agent, uint256 amount) public {
+    (uint256 deposit, TransferReceipt[] memory trList) = undelegateCoin(agent, msg.sender, amount);
+    (bool success, ) = msg.sender.call{value: deposit, gas: 50000}("");
+    if (!success) {
+      rewardMap[msg.sender] += deposit;
+    }
+    for(uint256 i = 0; i < trList.length; ++i) {
+      TransferReceipt memory tr = trList[i];
+      Agent storage tra = agentsMap[tr.agent];
+      Reward storage trr = tra.rewardSet[tra.rewardSet.length - 1];
+      trr.coin -= tr.deposit;
+    }
     emit undelegatedCoin(agent, msg.sender, deposit);
   }
 
@@ -268,14 +303,22 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param sourceAgent The validator to transfer coin stake from
   /// @param targetAgent The validator to transfer coin stake to
   function transferCoin(address sourceAgent, address targetAgent) external {
+    transferCoin(sourceAgent, targetAgent, 0);
+  }
+
+  /// Transfer coin stake to a new validator
+  /// @param sourceAgent The validator to transfer coin stake from
+  /// @param targetAgent The validator to transfer coin stake to
+  /// @param amount The coin amount for transfer
+  function transferCoin(address sourceAgent, address targetAgent, uint256 amount) public {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetAgent)) {
       revert InactiveAgent(targetAgent);
     }
     if (sourceAgent == targetAgent) {
       revert SameCandidate(sourceAgent, targetAgent);
     }
-    uint256 deposit = undelegateCoin(sourceAgent, msg.sender);
-    uint256 newDeposit = delegateCoin(targetAgent, msg.sender, deposit);
+    (uint256 deposit, TransferReceipt[] memory trList) = undelegateCoin(sourceAgent, msg.sender, amount);
+    uint256 newDeposit = delegateCoin(targetAgent, msg.sender, deposit, trList);
     emit transferredCoin(sourceAgent, targetAgent, msg.sender, deposit, newDeposit);
   }
 
@@ -294,16 +337,23 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 agentSize = agentList.length;
     for (uint256 i = 0; i < agentSize; ++i) {
       Agent storage a = agentsMap[agentList[i]];
-      if (a.rewardSet.length == 0) continue;
+      if (a.rewardSet.length == 0) {
+        continue;
+      }
       CoinDelegator storage d = a.cDelegatorMap[msg.sender];
-      if (d.newDeposit == 0) continue;
+      if (d.newDeposit == 0) {
+        continue;
+      }
       int256 roundCount = int256(a.rewardSet.length - d.rewardIndex);
       reward = collectCoinReward(a, d, roundLimit);
       roundLimit -= roundCount;
       rewardSum += reward;
       // if there are rewards to be collected, leave them there
-      if (roundLimit < 0) break;
+      if (roundLimit < 0) {
+        break;
+      }
     }
+
     if (rewardSum != 0) {
       distributeReward(payable(msg.sender), rewardSum);
     }
@@ -312,105 +362,178 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
   /*********************** Internal methods ***************************/
   function distributeReward(address payable delegator, uint256 reward) internal {
-    (bool success, bytes memory data) = delegator.call{value: reward, gas: 50000}("");
+    (bool success, ) = delegator.call{value: reward, gas: 50000}("");
     emit claimedReward(delegator, msg.sender, reward, success);
     if (!success) {
-      rewardMap[msg.sender] = reward;
+      rewardMap[msg.sender] += reward;
     }
   }
 
-  function delegateCoin(
-    address agent,
-    address delegator,
-    uint256 deposit
-  ) internal returns (uint256) {
+  function delegateCoin(address agent, address delegator, uint256 deposit, TransferReceipt[] memory trList) internal returns (uint256) {
+    require(deposit >= requiredCoinDeposit, "deposit is too small");
     Agent storage a = agentsMap[agent];
-    uint256 newDeposit = a.cDelegatorMap[delegator].newDeposit + deposit;
+    CoinDelegator storage d = a.cDelegatorMap[delegator];
+    uint256 newDeposit = d.newDeposit + deposit;
 
     a.totalDeposit += deposit;
     if (newDeposit == deposit) {
-      require(deposit >= requiredCoinDeposit, "deposit is too small");
-      uint256 rewardIndex = a.rewardSet.length;
-      a.cDelegatorMap[delegator] = CoinDelegator(0, deposit, roundTag, rewardIndex);
+      d.newDeposit = deposit;
+      d.changeRound = roundTag;
+      d.rewardIndex = a.rewardSet.length;
     } else {
-      require(deposit != 0, "deposit value is zero");
-      CoinDelegator storage d = a.cDelegatorMap[delegator];
       uint256 rewardAmount = collectCoinReward(a, d, 0x7FFFFFFF);
       if (d.changeRound < roundTag) {
         d.deposit = d.newDeposit;
         d.changeRound = roundTag;
       }
       d.newDeposit = newDeposit;
-      if (rewardAmount > 0) {
+      if (rewardAmount != 0) {
         distributeReward(payable(delegator), rewardAmount);
       }
     }
+
+    for (uint256 i = 0; i < trList.length; ++i) {
+      TransferReceipt storage oldTr = d.transferReceiptMap[trList[i].agent];
+      if (oldTr.deposit == 0){
+        oldTr.rewardIndex = trList[i].rewardIndex;
+        oldTr.deposit = trList[i].deposit;
+        d.transferAgentList.push(trList[i].agent);
+      } else {
+        oldTr.deposit += trList[i].deposit;
+      }
+    }
     return newDeposit;
   }
-
-  function undelegateCoin(address agent, address delegator) internal returns (uint256) {
+  
+  function undelegateCoin(address agent, address delegator, uint256 amount) internal returns (uint256, TransferReceipt[] memory trList) {
     Agent storage a = agentsMap[agent];
     CoinDelegator storage d = a.cDelegatorMap[delegator];
     uint256 newDeposit = d.newDeposit;
+    if (amount == 0) {
+      amount = newDeposit;
+    }
     require(newDeposit != 0, "delegator does not exist");
-
+    if (newDeposit != amount) {
+      require(amount >= requiredCoinDeposit, "undelegate amount is too small"); 
+      require(newDeposit >= requiredCoinDeposit + amount, "remain amount is too small");
+    }
     uint256 rewardAmount = collectCoinReward(a, d, 0x7FFFFFFF);
 
-    a.totalDeposit -= newDeposit;
-    if (a.rewardSet.length != 0) {
-      Reward storage r = a.rewardSet[a.rewardSet.length - 1];
-      if (r.round == roundTag) {
-        if (d.changeRound < roundTag) {
-          r.coin -= newDeposit;
-        } else {
-          r.coin -= d.deposit;
+    uint256 trlSize = d.transferAgentList.length;
+    uint256 resSize;
+    uint256 deductedDeposit;
+    while (resSize < trlSize && deductedDeposit < amount) {
+      address trAgent = d.transferAgentList[trlSize - 1 - resSize];
+      deductedDeposit += d.transferReceiptMap[trAgent].deposit;
+      ++resSize;
+    }
+
+    uint256 deposit = d.changeRound < roundTag ? newDeposit : d.deposit;
+    a.totalDeposit -= amount;
+    newDeposit -= amount;
+    if (deductedDeposit < amount) {
+      if (a.rewardSet.length != 0 && a.rewardSet[a.rewardSet.length - 1].round == roundTag) {
+        if (newDeposit < deposit) {
+          deductedDeposit = deductedDeposit + deposit - newDeposit;
+          deposit = newDeposit;
+          ++resSize;
         }
       }
+    } else {
+      deductedDeposit = amount;
     }
-    delete a.cDelegatorMap[delegator];
-    if (rewardAmount > 0) {
+
+    if (deductedDeposit != 0) {
+      trList = new TransferReceipt[](resSize);
+      for (uint256 i = trlSize; i > 0 && deductedDeposit > 0; --i) {
+        address trAgent = d.transferAgentList[i-1];
+        TransferReceipt storage tr = d.transferReceiptMap[trAgent];
+        if (deductedDeposit >= tr.deposit) {
+          deductedDeposit -= tr.deposit;
+          trList[trlSize - i] = TransferReceipt(tr.rewardIndex, tr.deposit, trAgent);
+          delete d.transferReceiptMap[trAgent];
+          d.transferAgentList.pop();
+        } else {
+          trList[trlSize - i] = TransferReceipt(tr.rewardIndex, deductedDeposit, trAgent);
+          tr.deposit -= deductedDeposit;
+          deductedDeposit = 0;
+        }
+      }
+
+      if (deductedDeposit > 0) {
+        trList[trlSize] = TransferReceipt(a.rewardSet.length - 1, deductedDeposit, agent);
+      }
+    } 
+
+    if (newDeposit == 0) {
+      delete a.cDelegatorMap[delegator];
+    } else {
+      d.deposit = deposit;
+      d.newDeposit = newDeposit;
+      d.changeRound = roundTag;
+    }
+
+    if (rewardAmount != 0) {
       distributeReward(payable(delegator), rewardAmount);
     }
-    return newDeposit;
+    return (amount, trList);
   }
 
-  function collectCoinReward(
-    Agent storage a,
-    CoinDelegator storage d,
-    int256 roundLimit
-  ) internal returns (uint256 rewardAmount) {
+  function collectCoinReward(Reward storage r, uint256 deposit) internal returns (uint256 rewardAmount) {
+    require(r.coin >= deposit, "reward is not enough");
+    uint256 curReward;
+    if (r.coin == deposit) {
+      curReward = r.remainReward;
+      r.coin = 0;
+    } else {
+      uint256 rsPower = stateMap[r.round].power;
+      curReward = (r.totalReward * deposit * rsPower) / r.score;
+      require(r.remainReward >= curReward, "there is not enough reward");
+      r.coin -= deposit;
+      r.remainReward -= curReward;
+    }
+    return curReward;
+  }
+
+  function collectCoinReward(Agent storage a, CoinDelegator storage d, int256 roundLimit) internal returns (uint256 rewardAmount) {
+    uint256 curRound = roundTag;
+    for (uint256 i = d.transferAgentList.length; i > 0; --i) {
+      address trAgent = d.transferAgentList[i-1];
+      TransferReceipt memory tr = d.transferReceiptMap[trAgent];
+      Agent storage tra = agentsMap[trAgent];
+      Reward storage r = tra.rewardSet[tr.rewardIndex];
+      if (r.round == curRound) {
+        break;
+      }
+      rewardAmount += collectCoinReward(r, tr.deposit);
+      if (r.coin == 0) {
+        delete tra.rewardSet[tr.rewardIndex];
+      }
+      delete d.transferReceiptMap[trAgent];
+      d.transferAgentList.pop();
+    }
+
+    uint256 changeRound = d.changeRound;
     uint256 rewardLength = a.rewardSet.length;
     uint256 rewardIndex = d.rewardIndex;
-    rewardAmount = 0;
-    if (rewardIndex >= rewardLength) {
-      return rewardAmount;
-    }
     if (rewardIndex + uint256(roundLimit) < rewardLength) {
       rewardLength = rewardIndex + uint256(roundLimit);
     }
-    uint256 curReward;
-    uint256 changeRound = d.changeRound;
 
     while (rewardIndex < rewardLength) {
       Reward storage r = a.rewardSet[rewardIndex];
-      if (r.round == roundTag) break;
+      if (r.round == curRound) {
+        break;
+      }
       uint256 deposit = d.newDeposit;
       if (r.round == changeRound) {
         deposit = d.deposit;
         d.deposit = d.newDeposit;
       }
-      require(r.coin >= deposit, "reward is not enough");
-      if (r.coin == deposit) {
-        curReward = r.remainReward;
+      rewardAmount += collectCoinReward(r, deposit);
+      if (r.coin == 0) {
         delete a.rewardSet[rewardIndex];
-      } else {
-        uint256 rsPower = stateMap[r.round].power;
-        curReward = (r.totalReward * deposit * rsPower) / r.score;
-        require(r.remainReward >= curReward, "there is not enough reward");
-        r.coin -= deposit;
-        r.remainReward -= curReward;
       }
-      rewardAmount += curReward;
       rewardIndex++;
     }
 
@@ -450,8 +573,21 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param agent The operator address of validator
   /// @param delegator The delegator address
   /// @return CoinDelegator Information of the delegator
-  function getDelegator(address agent, address delegator) external view returns (CoinDelegator memory) {
-    return agentsMap[agent].cDelegatorMap[delegator];
+  function getDelegator(address agent, address delegator) external view returns (MemoryCoinDelegator memory) {
+    CoinDelegator storage d = agentsMap[agent].cDelegatorMap[delegator];
+    MemoryCoinDelegator memory md;
+    md.deposit = d.deposit;
+    md.newDeposit = d.newDeposit;
+    md.changeRound = d.changeRound;
+    md.rewardIndex = d.rewardIndex;
+    uint256 trSize = d.transferAgentList.length;
+    md.transferReceiptList = new TransferReceipt[](trSize);
+    for (uint256 i = 0; i < trSize; ++i) {
+      address trAgent = d.transferAgentList[i];
+      TransferReceipt memory tr = d.transferReceiptMap[trAgent];
+      md.transferReceiptList[i] = TransferReceipt(tr.rewardIndex, tr.deposit, trAgent);
+    }
+    return md;
   }
 
   /// Get reward information of a validator by index
