@@ -25,7 +25,7 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
   uint32 public constant CHAINID = 1116;
   uint256 public constant INIT_FELONY_DEPOSIT = 1e21;
   uint256 public constant INIT_FELONY_ROUND = 2;
-  uint256 public constant INFINITY_ROUND = 0xFFFFFFFFFFFFFFFF;
+  uint256 public constant INFINITY_ROUND = 0xFFFFFFFF;
 
   // State of the contract
   address[] public validators;
