@@ -29,7 +29,7 @@ program.option(
 program.option(
     "--executingPeriod <executingPeriod>",
     "executingPeriod",
-    201600
+    600
 )
 
 program.option("--testnet <testnet>",

@@ -92,7 +92,6 @@ contract GovHub is System, IParamSubscriber {
   function init() external onlyNotInit {
     proposalMaxOperations = PROPOSAL_MAX_OPERATIONS;
     votingPeriod = VOTING_PERIOD;
-    executingPeriod = EXECUTING_PERIOD;
     RLPDecode.RLPItem[] memory items = INIT_MEMBERS.toRLPItem().toList();
     uint256 itemSize = items.length;
     for (uint256 i = 0; i < itemSize; i++) {

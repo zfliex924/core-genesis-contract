@@ -17,7 +17,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   uint256 public constant INIT_REQUIRED_MARGIN = 1e22;
   uint256 public constant INIT_DUES = 1e20;
   uint256 public constant INIT_ROUND_INTERVAL = 1800;
-  uint256 public constant INIT_VALIDATOR_COUNT = 5;
+  uint256 public constant INIT_VALIDATOR_COUNT = 7;
   uint256 public constant MAX_COMMISSION_CHANGE = 10;
   uint256 public constant CANDIDATE_COUNT_LIMIT = 1000;
 
