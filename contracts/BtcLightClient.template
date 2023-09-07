@@ -334,13 +334,14 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     }
     uint32 bits = flip4Bytes(uint32(loadInt256(104, headerBytes) >> 224)); // 72 is offset for 'bits'
     uint256 target = targetFromBits(bits);
+    blockHeight = 1 + getHeight(hashPrevBlock);
 
     // Check proof of work matches claimed amount
     // we do not do other validation (eg timestamp) to save gas
     if (blockHash == 0 || uint256(blockHash) >= target) {
-      return (blockHeight, scoreBlock, 0);
+      return (blockHeight, scorePrevBlock, 0);
     }
-    blockHeight = 1 + getHeight(hashPrevBlock);
+    
     uint32 prevBits = getBits(hashPrevBlock);
     if (blockHeight % DIFFICULTY_ADJUSTMENT_INTERVAL != 0) {// since blockHeight is 1 more than blockNumber; OR clause is special case for 1st header
       /* we need to check prevBits isn't 0 otherwise the 1st header
@@ -350,7 +351,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
        * the main chain, they will not have impact.
        */
       if (bits != prevBits && prevBits != 0) {
-        return (blockHeight, scoreBlock, 0);
+        return (blockHeight, scorePrevBlock, 0);
       }
     } else {
       uint256 prevTarget = targetFromBits(prevBits);
@@ -374,7 +375,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
       uint32 newBits = toCompactBits(newTarget);
       if (bits != newBits && newBits != 0) { // newBits != 0 to allow first header
-        return (blockHeight, scoreBlock, 0);
+        return (blockHeight, scorePrevBlock, 0);
       }
     }
     
