@@ -129,6 +129,10 @@ Promise.all([
     "foundation",
     "contracts/Foundation.sol",
     "Foundation"
+  ),compileContract(
+    "schedule",
+    "contracts/Schedule.sol",
+    "Schedule"
   )
 ]).then(result => {
 

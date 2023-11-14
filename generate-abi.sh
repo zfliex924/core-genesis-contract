@@ -2,7 +2,7 @@ name=$1
 
 contracts=( "BtcLightClient" "Burn" "CandidateHub" "Foundation" "GovHub" \
     "PledgeAgent" "RelayerHub" "SlashIndicator" "SystemReward" \
-    "ValidatorSet" )
+    "ValidatorSet" "Schedule" )
 
 for e in ${contracts[@]}
 do
