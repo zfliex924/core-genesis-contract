@@ -284,12 +284,12 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   }
 
   function checkTxProof(bytes32 txid, uint32 blockHeight, uint32 confirmBlock, bytes32[] calldata nodes, uint256 index) public view override returns (bool) {
-    require(blockHeight + confirmBlock <= getChainTipHeight(), "block not confirm");
-    require(txid != bytes32(0), 'txid should be non-zero');
     bytes32 blockHash = height2HashMap[blockHeight];
-    require(blockHash != bytes32(0), 'block does not exist');
+    if (blockHeight + confirmBlock > getChainTipHeight() || txid == bytes32(0) || blockHash == bytes32(0)) {
+      return false;
+    }
 
-    bytes32 root = getMerkleRoot(blockHash);
+    bytes32 root = bytes32(loadInt256(68, blockChain[blockHash]));
     if (nodes.length == 0) {
       return txid == root;
     }
