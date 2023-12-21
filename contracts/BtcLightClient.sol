@@ -283,6 +283,14 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     }
   }
 
+  /// Checks if a tx is included and confirmed on Bitcoin
+  /// @dev Checks if the block is confirmed, and Merkle proof is valid
+  /// @param txid Desired tx Id in LE form
+  /// @param blockHeight of the desired tx
+  /// @param confirmBlock of the tx confirmation
+  /// @param nodes Part of the Merkle tree from the tx to the root in LE form (called Merkle proof)
+  /// @param index of the tx in Merkle tree
+  /// @return True if the provided tx is confirmed on Bitcoin
   function checkTxProof(bytes32 txid, uint32 blockHeight, uint32 confirmBlock, bytes32[] calldata nodes, uint256 index) public view override returns (bool) {
     bytes32 blockHash = height2HashMap[blockHeight];
     if (blockHeight + confirmBlock > getChainTipHeight() || txid == bytes32(0) || blockHash == bytes32(0)) {
