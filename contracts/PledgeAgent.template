@@ -487,7 +487,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   function transferBtc(uint256 brindex, address targetAgent) public {
     BtcReceipt storage br = btcDelegatorMap[msg.sender][brindex];
     require(br.agent != targetAgent, "can not transfer to the same validator");
-    require(br.endRound > roundTag, "lock round ended");
+    require(br.endRound > roundTag + 1, "insufficient locking rounds");
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetAgent)) {
       revert InactiveAgent(targetAgent);
     }
