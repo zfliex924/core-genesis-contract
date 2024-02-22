@@ -509,6 +509,9 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
     BtcReceipt[] storage brList = btcDelegatorMap[msg.sender];
     uint256 brindex = brList.length;
+    if (brindex > CLAIM_ROUND_LIMIT) {
+      brindex = CLAIM_ROUND_LIMIT;
+    }
     while(brindex > 0) {
       brindex -= 1;
       BtcReceipt storage br = brList[brindex];
