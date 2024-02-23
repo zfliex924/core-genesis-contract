@@ -472,7 +472,11 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).isCandidateByOperate(br.agent)) {
       revert InactiveAgent(br.agent);
     }
-    btcFeeInfoMap[delegator].push(BtcFee(fee, payable(msg.sender)));
+
+    if (fee != 0) {
+      btcFeeInfoMap[delegator].push(BtcFee(fee, payable(msg.sender)));
+    }
+    
     emit delegatedBtc(br.agent, delegator, script, br.value, blockHeight, txid, br.endRound, fee);
 
     Agent storage a = agentsMap[br.agent];
@@ -481,7 +485,6 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     a.totalBtc += br.value;
 
     btcDelegatorMap[delegator].push(br);
-    
   }
 
   function transferBtc(uint256 brindex, address targetAgent) public {
@@ -534,10 +537,10 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
         claimRound += 1;
       }
       
-      if (br.endRound <= curRound && claimRound <  CLAIM_ROUND_LIMIT) {
-        uint256 len = brList.length;
-        if(brindex != len - 1) {
-          brList[brindex] = brList[len-1];
+      if (br.endRound <= curRound && claimRound < CLAIM_ROUND_LIMIT) {
+        uint256 back_index = brList.length - 1;
+        if(brindex != back_index) {
+          brList[brindex] = brList[back_index];
         }
         brList.pop();
       } else {
@@ -554,9 +557,6 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       if (bf.fee <= rewardSum) {
         feeReward = bf.fee;
         rewardSum -= bf.fee;
-        if (bfIndex != bfList.length - 1) {
-          bfList[bfIndex] = bfList[bfList.length-1];
-        }
         bfList.pop();
       } else {
         feeReward = rewardSum;
