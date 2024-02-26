@@ -574,20 +574,21 @@ library BitcoinHelper {
 
     /// @notice             extracts the Op Return Payload
     /// @dev                structure of the input is: 1 byte op return + 2 bytes indicating the length of payload + max length for op return payload is 80 bytes
-    /// @param _spkView     the scriptPubkey
+    /// @param _skp         the scriptPubkey
     /// @return             the Op Return Payload (or null if not a valid Op Return output)
-    function opReturnPayload(bytes29 _spkView) internal pure typeAssert(_spkView, BTCTypes.ScriptPubkey) returns (bytes29) {
-        uint64 _bodyLength = indexCompactInt(_spkView, 0);
-        uint64 _payloadLen = _spkView.indexUint(2, 1).toUint64();
-        if (_spkView.indexUint(1, 1) == 0x6a) {
-            if (_spkView.indexUint(2, 1) == 0x4c) {
-                require(_spkView.indexUint(3, 1) == _bodyLength - 3 && 
+    function opReturnPayload(bytes29 _skp) internal pure typeAssert(_skp, BTCTypes.ScriptPubkey) returns (bytes29) {
+        uint64 _bodyLength = indexCompactInt(_skp, 0);
+        if (_skp.indexUint(1, 1) == 0x6a) {
+            if (_skp.indexUint(2, 1) == 0x4c) {
+                uint64 _payloadLen = _skp.indexUint(3, 1).toUint64();
+                require(_payloadLen == _bodyLength - 3 && 
                     _bodyLength <= 83 && _bodyLength >= 79, "BitcoinHelper: invalid opreturn");
-                return _spkView.slice(4, _payloadLen, uint40(BTCTypes.OpReturnPayload));
+                return _skp.slice(4, _payloadLen, uint40(BTCTypes.OpReturnPayload));
             } else {
-                require(_spkView.indexUint(2, 1) == _bodyLength - 2 && 
+                uint64 _payloadLen = _skp.indexUint(2, 1).toUint64();
+                require(_payloadLen == _bodyLength - 2 && 
                     _bodyLength <= 77 && _bodyLength >= 4, "BitcoinHelper: invalid opreturn");
-                return _spkView.slice(3, _payloadLen, uint40(BTCTypes.OpReturnPayload));
+                return _skp.slice(3, _payloadLen, uint40(BTCTypes.OpReturnPayload));
             }
         }
         return TypedMemView.nullView();
