@@ -771,12 +771,13 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   }
 
   function parseAndCheckPayload(bytes29 payload) internal pure returns (address delegator, address agent, uint256 fee) {
-    require(payload.len() >= 47, "payload length is too small");
+    require(payload.len() >= 48, "payload length is too small");
     require(payload.indexUint(0, 4) == BTC_STAKE_MAGIC, "wrong magic");
-    require(payload.indexUint(4, 2) == CHAINID, "wrong chain id");
-    delegator= payload.indexAddress(6);
-    agent = payload.indexAddress(26);
-    fee = payload.indexUint(46, 1) * FEE_FACTOR;
+    require(payload.indexUint(4, 1) == 1, "wrong version");
+    require(payload.indexUint(5, 2) == CHAINID, "wrong chain id");
+    delegator= payload.indexAddress(7);
+    agent = payload.indexAddress(27);
+    fee = payload.indexUint(47, 1) * FEE_FACTOR;
   }
 
   function parseLockTime(bytes memory script) internal pure returns (uint32) {
