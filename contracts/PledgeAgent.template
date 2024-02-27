@@ -74,11 +74,9 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   // debtDepositMap keeps delegator's amount of CORE which should be deducted when claiming rewards in every round
   mapping(uint256 => mapping(address => uint256)) public debtDepositMap;
 
+  BtcReceipt[] public btcReceiptList;
+
   mapping(bytes32 => uint256) public confirmedTxMap;
-
-  mapping(address => BtcReceipt[]) public btcDelegatorMap;
-
-  mapping(address => BtcFee[]) public btcFeeInfoMap;
 
   mapping(uint256 => BtcExpireInfo) round2expireInfoMap;
 
@@ -92,14 +90,13 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
   struct BtcReceipt {
     address agent;
+    address delegator;
     uint256 value;
     uint256 endRound;
     uint256 rewardIndex;
-  }
-
-  struct BtcFee {
-    uint256 fee;
+    uint256 transferInIndex;
     address payable feeReceiver;
+    uint256 fee;
   }
 
   struct BtcExpireInfo {
@@ -149,7 +146,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /*********************** events **************************/
   event paramChange(string key, bytes value);
   event delegatedCoin(address indexed agent, address indexed delegator, uint256 amount, uint256 totalAmount);
-  event delegatedBtc(address indexed agent, address indexed delegator, bytes script, uint256 amount, uint32 blockHeight, bytes32 txid, uint256 endRound, uint256 fee);
+  event delegatedBtc(bytes32 indexed txid, uint256 indexed brIndex, bytes script, uint32 blockHeight);
   event undelegatedCoin(address indexed agent, address indexed delegator, uint256 amount);
   event transferredCoin(
     address indexed sourceAgent,
@@ -159,16 +156,19 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 totalAmount
   );
   event transferredBtc(
-    address indexed sourceAgent,
-    address indexed targetAgent,
-    address indexed delegator,
+    bytes32 indexed txid,
+    uint256 indexed brIndex,
+    uint256 indexed inBrIndex,
+    address sourceAgent,
+    address targetAgent,
+    address delegator,
     uint256 amount,
     uint256 totalAmount
   );
   event roundReward(address indexed agent, uint256 coinReward, uint256 powerReward);
   event claimedReward(address indexed delegator, address indexed operator, uint256 amount, bool success);
-  event transferredBtcFee(address indexed delegator, address payable feeReceiver, uint256 fee);
-  event failedTransferBtcFee(address indexed delegator, address payable feeReceiver, uint256 fee);
+  event transferredBtcFee( uint256 indexed brIndex, address payable feeReceiver, uint256 fee);
+  event failedTransferBtcFee( uint256 indexed brIndex, address payable feeReceiver, uint256 fee);
 
   /// The validator candidate is inactive, it is expected to be active
   /// @param candidate Address of the validator candidate
@@ -459,36 +459,39 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     require(confirmedTxMap[txid] == 0, "btc tx confirmed");
     require(ILightClient(LIGHT_CLIENT_ADDR).
       checkTxProof(txid, blockHeight, (btcConfirmBlock == 0 ? INIT_BTC_CONFIRM_BLOCK : btcConfirmBlock), nodes, index), "btc tx not confirmed");
-    confirmedTxMap[txid] = 1;
+    uint256 brIndex = btcReceiptList.length;
+    confirmedTxMap[txid] = brIndex + 1;
 
     (,,bytes29 voutView,)  = btcTx.extractTx();
     bytes29 payload;
     (br.value, payload) = voutView.parseToScriptValueAndData(script);
     require(br.value > (minBtcValue == 0 ? INIT_MIN_BTC_VALUE : minBtcValue), "staked value does not meet requirement");
 
-    address delegator;
     uint256 fee;
-    (delegator, br.agent, fee) = parseAndCheckPayload(payload);
+    (br.delegator, br.agent, fee) = parseAndCheckPayload(payload);
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).isCandidateByOperate(br.agent)) {
       revert InactiveAgent(br.agent);
     }
 
+    emit delegatedBtc(txid, brIndex, script, blockHeight);
+
     if (fee != 0) {
-      btcFeeInfoMap[delegator].push(BtcFee(fee, payable(msg.sender)));
+      br.fee = fee;
+      br.feeReceiver = payable(msg.sender);
     }
-    
-    emit delegatedBtc(br.agent, delegator, script, br.value, blockHeight, txid, br.endRound, fee);
 
     Agent storage a = agentsMap[br.agent];
     br.rewardIndex = a.rewardSet.length;
     updateExpireInfo(br);
     a.totalBtc += br.value;
 
-    btcDelegatorMap[delegator].push(br);
+    btcReceiptList.push(br);
   }
 
-  function transferBtc(uint256 brindex, address targetAgent) public {
-    BtcReceipt storage br = btcDelegatorMap[msg.sender][brindex];
+  function transferBtc(bytes32 txid, address targetAgent) public {
+    require(confirmedTxMap[txid] != 0, "btc tx not found");
+    uint256 brIndex = confirmedTxMap[txid] - 1;
+    BtcReceipt storage br = btcReceiptList[brIndex];
     require(br.agent != targetAgent, "can not transfer to the same validator");
     require(br.endRound > roundTag + 1, "insufficient locking rounds");
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetAgent)) {
@@ -496,79 +499,51 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     }
 
     Agent storage ta = agentsMap[targetAgent];
-    BtcReceipt memory tbr = BtcReceipt(targetAgent, br.value, br.endRound, ta.rewardSet.length);
+    BtcReceipt memory inBr = BtcReceipt(br.agent, br.delegator, br.value, roundTag + 1, br.rewardIndex, br.transferInIndex, payable(0x00), 0);
     round2expireInfoMap[br.endRound].agent2valueMap[br.agent] -= br.value;
-    br.endRound = roundTag + 1;
+    br.agent = targetAgent;
+    br.rewardIndex = ta.rewardSet.length;
     updateExpireInfo(br);
-    updateExpireInfo(tbr);
+    updateExpireInfo(inBr);
     ta.totalBtc += br.value;
-    btcDelegatorMap[msg.sender].push(tbr);
-    emit transferredBtc(br.agent, targetAgent, msg.sender, br.value, ta.totalBtc);
+    btcReceiptList.push(inBr);
+    br.transferInIndex = btcReceiptList.length;
+    emit transferredBtc(txid, brIndex, br.transferInIndex, br.agent, targetAgent, msg.sender, br.value, ta.totalBtc);
   }
 
-  function claimBtcReward() external returns (uint256 rewardSum) {
-    uint256 claimRound;
-    uint256 curRound = roundTag;
+  function claimBtcReward(bytes32[] calldata txidList) external returns (uint256 rewardSum) {
+    uint256 claimLimit = CLAIM_ROUND_LIMIT;
+    uint256 i = txidList.length;
+    while(i > 0 && claimLimit != 0) {
+      i -= 1;
+      bytes32 txid = txidList[i];
+      require(confirmedTxMap[txid] != 0, "btc tx not found");
+      uint256 brIndex = confirmedTxMap[txid] - 1;
+      BtcReceipt storage br = btcReceiptList[brIndex];
+      require(br.delegator == msg.sender, "not the delegator of this btc receipt");
 
-    BtcReceipt[] storage brList = btcDelegatorMap[msg.sender];
-    uint256 brindex = brList.length;
-    if (brindex > CLAIM_ROUND_LIMIT) {
-      brindex = CLAIM_ROUND_LIMIT;
-    }
-    while(brindex > 0) {
-      brindex -= 1;
-      BtcReceipt storage br = brList[brindex];
-      Agent storage a = agentsMap[br.agent];
-      uint256 rewardLength = a.rewardSet.length;
-      uint256 rewardIndex = br.rewardIndex;
-      while (rewardIndex < rewardLength && claimRound < CLAIM_ROUND_LIMIT) {
-        Reward storage r = a.rewardSet[rewardIndex];
-        uint256 rRound = r.round;
-        if (rRound == curRound || br.endRound <= rRound) {
-          break;
+      uint256 reward;
+      (reward, claimLimit) = collectBtcReward(brIndex, claimLimit);
+            
+      uint256 feeReward;
+      if (br.fee <= reward) {
+        feeReward = br.fee;
+        br.fee = 0;
+      } else {
+        feeReward = reward;
+        br.fee -= reward;
+      }
+
+      if (feeReward != 0) {
+        bool success = br.feeReceiver.send(feeReward);
+        if (success) {
+          emit transferredBtcFee(brIndex, br.feeReceiver, feeReward);
+        } else {
+          emit failedTransferBtcFee(brIndex, br.feeReceiver, feeReward);
         }
-        uint256 deposit = br.value * stateMap[rRound].btcFactor;
-        rewardSum += collectCoinReward(r, deposit);
-        
-        if (r.coin == 0) {
-          delete a.rewardSet[rewardIndex];
-        }
-        rewardIndex += 1;
-        claimRound += 1;
       }
       
-      if (br.endRound <= curRound && claimRound < CLAIM_ROUND_LIMIT) {
-        uint256 back_index = brList.length - 1;
-        if(brindex != back_index) {
-          brList[brindex] = brList[back_index];
-        }
-        brList.pop();
-      } else {
-        br.rewardIndex = rewardIndex;
-      }
-    }
-
-    BtcFee[] storage bfList = btcFeeInfoMap[msg.sender];
-    uint256 bfIndex = bfList.length;
-    while(bfIndex > 0 && rewardSum != 0) {
-      bfIndex -= 1;
-      BtcFee memory bf = bfList[bfIndex];
-      uint256 feeReward;
-      if (bf.fee <= rewardSum) {
-        feeReward = bf.fee;
-        rewardSum -= bf.fee;
-        bfList.pop();
-      } else {
-        feeReward = rewardSum;
-        bfList[bfIndex].fee -= feeReward;
-        rewardSum = 0;
-      }
-      bool success = bf.feeReceiver.send(feeReward);
-      if (success) {
-        emit transferredBtcFee(msg.sender, bf.feeReceiver, bf.fee);
-      } else {
-        emit failedTransferBtcFee(msg.sender, bf.feeReceiver, bf.fee);
-      }
+      rewardSum += reward - feeReward;
     }
 
     if (rewardSum != 0) {
@@ -798,6 +773,43 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     expireInfo.agent2valueMap[br.agent] = expireValue + br.value;
   }
 
+  function collectBtcReward(uint256 brIndex, uint256 claimLimit) internal returns (uint256, uint256) {
+    uint256 curRound = roundTag;
+    BtcReceipt storage br = btcReceiptList[brIndex];
+    require(br.delegator == msg.sender, "not the delegator of this btc receipt");
+    uint256 reward = 0;
+    if (br.transferInIndex != 0) {
+      (reward, claimLimit) = collectBtcReward(br.transferInIndex-1, claimLimit);
+      br.transferInIndex = 0;
+    }
+    if (claimLimit == 0) {
+      return (reward, claimLimit);
+    }
+    Agent storage a = agentsMap[br.agent];
+    uint256 rewardIndex = br.rewardIndex;
+    uint256 rewardLength = a.rewardSet.length;
+    uint256 rRound;
+    while (rewardIndex < rewardLength && claimLimit != 0) {
+      Reward storage r = a.rewardSet[rewardIndex];
+      rRound = r.round;
+      if (rRound == curRound || br.endRound <= rRound) {
+        break;
+      }
+      uint256 deposit = br.value * stateMap[rRound].btcFactor;
+      reward += collectCoinReward(r, deposit);
+      if (r.coin == 0) {
+        delete a.rewardSet[rewardIndex];
+      }
+      rewardIndex += 1;
+      claimLimit -= 1;
+    }
+    if (br.endRound <= (rRound == 0 ? curRound : rRound)) {
+      delete btcReceiptList[brIndex];
+    }
+    br.rewardIndex = rewardIndex;
+    return (reward, claimLimit);
+  }
+
   /*********************** Governance ********************************/
   /// Update parameters through governance vote
   /// @param key The name of the parameter
@@ -839,7 +851,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     } else if (Memory.compareStrings(key, "minBtcValue")) {
       uint256 newMinBtcValue = BytesToTypes.bytesToUint256(32, value);
       if (newMinBtcValue == 0) {
-        revert OutOfBounds(key, newMinBtcValue, 1e8, type(uint256).max);
+        revert OutOfBounds(key, newMinBtcValue, 1e4, type(uint256).max);
       }
       minBtcValue = newMinBtcValue;
     } else {
