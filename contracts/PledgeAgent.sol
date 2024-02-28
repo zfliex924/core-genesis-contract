@@ -884,7 +884,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param round The end round of the btc lock
   /// @param agent The operator address of validator
   /// @return expireValue The expire value of the agent in the round
-  function getExpireInfo(uint256 round, address agent) external view returns (uint256){
+  function getExpireValue(uint256 round, address agent) external view returns (uint256){
     BtcExpireInfo storage expireInfo = round2expireInfoMap[round];
     return expireInfo.agent2valueMap[agent];
   }
