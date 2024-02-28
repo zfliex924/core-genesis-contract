@@ -780,7 +780,9 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 reward = 0;
     if (br.transferInIndex != 0) {
       (reward, claimLimit) = collectBtcReward(br.transferInIndex-1, claimLimit);
-      br.transferInIndex = 0;
+      if (btcReceiptList[br.transferInIndex-1].value == 0) {
+        br.transferInIndex = 0;
+      }
     }
     if (claimLimit == 0) {
       return (reward, claimLimit);
@@ -805,8 +807,9 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     }
     if (br.endRound <= (rRound == 0 ? curRound : rRound)) {
       delete btcReceiptList[brIndex];
+    } else {
+      br.rewardIndex = rewardIndex;
     }
-    br.rewardIndex = rewardIndex;
     return (reward, claimLimit);
   }
 
