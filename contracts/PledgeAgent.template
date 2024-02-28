@@ -524,26 +524,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
       uint256 reward;
       (reward, claimLimit) = collectBtcReward(brIndex, claimLimit);
-            
-      uint256 feeReward;
-      if (br.fee <= reward) {
-        feeReward = br.fee;
-        br.fee = 0;
-      } else {
-        feeReward = reward;
-        br.fee -= reward;
-      }
-
-      if (feeReward != 0) {
-        bool success = br.feeReceiver.send(feeReward);
-        if (success) {
-          emit transferredBtcFee(brIndex, br.feeReceiver, feeReward);
-        } else {
-          emit failedTransferBtcFee(brIndex, br.feeReceiver, feeReward);
-        }
-      }
-      
-      rewardSum += reward - feeReward;
+      rewardSum += reward;
     }
 
     if (rewardSum != 0) {
@@ -805,6 +786,27 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       claimLimit -= 1;
     }
     
+    uint256 fee = br.fee;
+    uint256 feeReward;
+    if (fee != 0) {
+      if (fee <= reward) {
+        feeReward = fee;
+      } else {
+        feeReward = reward;
+      }
+
+      if (feeReward != 0) {
+        br.fee -= feeReward;
+        reward -= feeReward;
+        bool success = br.feeReceiver.send(feeReward);
+        if (success) {
+          emit transferredBtcFee(brIndex, br.feeReceiver, feeReward);
+        } else {
+          emit failedTransferBtcFee(brIndex, br.feeReceiver, feeReward);
+        }
+      }
+    }
+
     if (br.endRound <= (rewardIndex == rewardLength ? curRound : a.rewardSet[rewardIndex].round)) {
       delete btcReceiptList[brIndex];
     } else {
