@@ -790,10 +790,9 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     Agent storage a = agentsMap[br.agent];
     uint256 rewardIndex = br.rewardIndex;
     uint256 rewardLength = a.rewardSet.length;
-    uint256 rRound;
     while (rewardIndex < rewardLength && claimLimit != 0) {
       Reward storage r = a.rewardSet[rewardIndex];
-      rRound = r.round;
+      uint256 rRound = r.round;
       if (rRound == curRound || br.endRound <= rRound) {
         break;
       }
@@ -805,7 +804,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       rewardIndex += 1;
       claimLimit -= 1;
     }
-    if (br.endRound <= (rRound == 0 ? curRound : rRound)) {
+    
+    if (br.endRound <= (rewardIndex == rewardLength ? curRound : a.rewardSet[rewardIndex].round)) {
       delete btcReceiptList[brIndex];
     } else {
       br.rewardIndex = rewardIndex;
