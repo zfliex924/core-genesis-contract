@@ -241,10 +241,14 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
     for (uint256 r = roundTag + 1; r <= round; ++r) {
       BtcExpireInfo storage expireInfo = round2expireInfoMap[r];
-      uint256 len = expireInfo.agentAddrList.length;
-      for (uint256 j = 0; j < len; ++j) {
+      uint256 j = expireInfo.agentAddrList.length;
+      while (j > 0) {
+        j--;
         address agent = expireInfo.agentAddrList[j];
         agentsMap[agent].totalBtc -= expireInfo.agent2valueMap[agent];
+        expireInfo.agentAddrList.pop();
+        delete expireInfo.agent2valueMap[agent];
+        delete expireInfo.agentExsitMap[agent];
       }
       delete round2expireInfoMap[r];
     }
@@ -515,9 +519,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
   function claimBtcReward(bytes32[] calldata txidList) external returns (uint256 rewardSum) {
     uint256 claimLimit = CLAIM_ROUND_LIMIT;
-    uint256 i = txidList.length;
-    while(i > 0 && claimLimit != 0) {
-      i -= 1;
+    uint256 len = txidList.length;
+    for(uint256 i = 0; i < len && claimLimit != 0; i++) {
       bytes32 txid = txidList[i];
       require(confirmedTxMap[txid] != 0, "btc tx not found");
       uint256 brIndex = confirmedTxMap[txid] - 1;
