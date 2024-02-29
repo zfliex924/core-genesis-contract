@@ -500,8 +500,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     }
 
     Agent storage ta = agentsMap[targetAgent];
-    BtcReceipt memory inBr;
-    BtcReceipt(inAgent, address(0x00), br.value, roundTag + 1, br.rewardIndex, br.transferInIndex, payable(0x00), 0);
+    BtcReceipt memory inBr = BtcReceipt(inAgent, address(0x00), br.value, roundTag + 1, br.rewardIndex, br.transferInIndex, payable(0x00), 0);
     round2expireInfoMap[br.endRound].agent2valueMap[inAgent] -= br.value;
     br.agent = targetAgent;
     br.rewardIndex = ta.rewardSet.length;
@@ -759,16 +758,12 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   function collectBtcReward(uint256 brIndex, uint256 claimLimit) internal returns (uint256, uint256) {
     uint256 curRound = roundTag;
     BtcReceipt storage br = btcReceiptList[brIndex];
-    require(br.delegator == msg.sender, "not the delegator of this btc receipt");
     uint256 reward = 0;
     if (br.transferInIndex != 0) {
       (reward, claimLimit) = collectBtcReward(br.transferInIndex-1, claimLimit);
       if (btcReceiptList[br.transferInIndex-1].value == 0) {
         br.transferInIndex = 0;
       }
-    }
-    if (claimLimit == 0) {
-      return (reward, claimLimit);
     }
     Agent storage a = agentsMap[br.agent];
     uint256 rewardIndex = br.rewardIndex;
