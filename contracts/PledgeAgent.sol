@@ -102,6 +102,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   struct BtcExpireInfo {
     address[] agentAddrList;
     mapping(address => uint256) agent2valueMap;
+    mapping(address => uint256) agentExsitMap;
   }
 
   struct CoinDelegator {
@@ -482,7 +483,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
     Agent storage a = agentsMap[br.agent];
     br.rewardIndex = a.rewardSet.length;
-    updateExpireInfo(br);
+    addExpire(br);
     a.totalBtc += br.value;
 
     btcReceiptList.push(br);
@@ -504,8 +505,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     round2expireInfoMap[br.endRound].agent2valueMap[inAgent] -= br.value;
     br.agent = targetAgent;
     br.rewardIndex = ta.rewardSet.length;
-    updateExpireInfo(br);
-    updateExpireInfo(inBr);
+    addExpire(br);
+    addExpire(inBr);
     ta.totalBtc += br.value;
     btcReceiptList.push(inBr);
     br.transferInIndex = btcReceiptList.length;
@@ -746,13 +747,13 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     return uint32(t.reverseUint256() & 0xFFFFFFFF);
   } 
 
-  function updateExpireInfo(BtcReceipt memory br) internal {
+  function addExpire(BtcReceipt memory br) internal {
     BtcExpireInfo storage expireInfo = round2expireInfoMap[br.endRound];
-    uint256 expireValue = expireInfo.agent2valueMap[br.agent];
-    if (expireValue == 0) {
+    if (expireInfo.agentExsitMap[br.agent] == 0) {
       expireInfo.agentAddrList.push(br.agent);
+      expireInfo.agentExsitMap[br.agent] = 1;
     }
-    expireInfo.agent2valueMap[br.agent] = expireValue + br.value;
+    expireInfo.agent2valueMap[br.agent] += br.value;
   }
 
   function collectBtcReward(uint256 brIndex, uint256 claimLimit) internal returns (uint256, uint256) {
