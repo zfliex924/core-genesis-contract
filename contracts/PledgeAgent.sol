@@ -492,15 +492,17 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     require(confirmedTxMap[txid] != 0, "btc tx not found");
     uint256 brIndex = confirmedTxMap[txid] - 1;
     BtcReceipt storage br = btcReceiptList[brIndex];
-    require(br.agent != targetAgent, "can not transfer to the same validator");
+    address inAgent = br.agent;
+    require(inAgent != targetAgent, "can not transfer to the same validator");
     require(br.endRound > roundTag + 1, "insufficient locking rounds");
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetAgent)) {
       revert InactiveAgent(targetAgent);
     }
 
     Agent storage ta = agentsMap[targetAgent];
-    BtcReceipt memory inBr = BtcReceipt(br.agent, br.delegator, br.value, roundTag + 1, br.rewardIndex, br.transferInIndex, payable(0x00), 0);
-    round2expireInfoMap[br.endRound].agent2valueMap[br.agent] -= br.value;
+    BtcReceipt memory inBr;
+    BtcReceipt(inAgent, address(0x00), br.value, roundTag + 1, br.rewardIndex, br.transferInIndex, payable(0x00), 0);
+    round2expireInfoMap[br.endRound].agent2valueMap[inAgent] -= br.value;
     br.agent = targetAgent;
     br.rewardIndex = ta.rewardSet.length;
     updateExpireInfo(br);
@@ -508,7 +510,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     ta.totalBtc += br.value;
     btcReceiptList.push(inBr);
     br.transferInIndex = btcReceiptList.length;
-    emit transferredBtc(txid, brIndex, br.transferInIndex, br.agent, targetAgent, msg.sender, br.value, ta.totalBtc);
+    emit transferredBtc(txid, brIndex, br.transferInIndex - 1, inAgent, targetAgent, msg.sender, br.value, ta.totalBtc);
   }
 
   function claimBtcReward(bytes32[] calldata txidList) external returns (uint256 rewardSum) {
