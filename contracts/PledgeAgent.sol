@@ -337,7 +337,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       return;
     }
     RoundState storage rs = stateMap[roundTag];
-    uint256 reward = rs.coin * POWER_BLOCK_FACTOR * rs.powerFactor / 10000 * r.totalReward / r.score;
+    uint256 reward = (rs.coin + rs.btc * rs.btcFactor) * POWER_BLOCK_FACTOR * rs.powerFactor / 10000 * r.totalReward / r.score;
     uint256 minerSize = miners.length;
 
     uint256 powerReward = reward * minerSize;
