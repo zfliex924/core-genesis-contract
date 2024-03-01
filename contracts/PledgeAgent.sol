@@ -32,11 +32,12 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   uint256 public constant INIT_MIN_BTC_LOCK_ROUND = 7;
   uint256 public constant ROUND_INTERVAL = 86400;
   uint256 public constant INIT_MIN_BTC_VALUE = 1e6;
-  uint256 public constant INIT_BTC_FACTOR = 5e14;
+  uint256 public constant INIT_BTC_FACTOR = 5e4;
   uint256 public constant BTC_STAKE_MAGIC = 0x5341542b;
   uint256 public constant CHAINID = 1116;
   uint256 public constant FEE_FACTOR = 1e18;
   uint256 public constant CLAIM_ROUND_LIMIT = 500;
+  uint256 public constant BTC_UNIT_CONVERSION = 1e10;
 
   uint256 public requiredCoinDeposit;
 
@@ -269,7 +270,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       totalBtc += a.btc;
     }
     
-    uint256 bf = btcFactor == 0 ? INIT_BTC_FACTOR : btcFactor;
+    uint256 bf = (btcFactor == 0 ? INIT_BTC_FACTOR : btcFactor) * BTC_UNIT_CONVERSION;
     uint256 pf = powerFactor;
     
     // calc hybrid score
@@ -839,7 +840,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     } else if (Memory.compareStrings(key, "btcFactor")) {
       uint256 newBtcFactor = BytesToTypes.bytesToUint256(32, value);
       if (newBtcFactor == 0) {
-        revert OutOfBounds(key, newBtcFactor, 1e10, type(uint256).max);
+        revert OutOfBounds(key, newBtcFactor, 1, type(uint256).max);
       }
       btcFactor = newBtcFactor;
     } else if (Memory.compareStrings(key, "minBtcLockRound")) {
