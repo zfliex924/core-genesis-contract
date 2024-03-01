@@ -75,20 +75,29 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   // debtDepositMap keeps delegator's amount of CORE which should be deducted when claiming rewards in every round
   mapping(uint256 => mapping(address => uint256)) public debtDepositMap;
 
+  // HARDFORK V-1.0.7
+  // btcReceiptList keeps all BTC staking receipts on Core
   BtcReceipt[] public btcReceiptList;
 
+  // confirmedTxMap tells if a BTC staking transaction is confirmed on Core
   mapping(bytes32 => uint256) public confirmedTxMap;
 
+  // round2expireInfoMap keeps the amount of expired BTC staking value for each round
   mapping(uint256 => BtcExpireInfo) round2expireInfoMap;
 
+  // staking weight of each BTC vs. CORE
   uint256 public btcFactor;
 
+  // minimum rounds to stake for a BTC staking transaction
   uint256 public minBtcLockRound;
 
+  // the number of blocks to mark a BTC staking transaction as confirmed
   uint32 public btcConfirmBlock;
 
+  // minimum value to stake for a BTC staking transaction
   uint256 public minBtcValue;
 
+  // HARDFORK V-1.0.7
   struct BtcReceipt {
     address agent;
     address delegator;
@@ -100,6 +109,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 fee;
   }
 
+  // HARDFORK V-1.0.7
   struct BtcExpireInfo {
     address[] agentAddrList;
     mapping(address => uint256) agent2valueMap;
@@ -240,6 +250,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 candidateSize = candidates.length;
     require(candidateSize == powers.length, "the length of candidates and powers should be equal");
 
+    // HARDFORK V-1.0.7
+    // the expired BTC staking values will be removed before calculating hybrid score for validators
     for (uint256 r = roundTag + 1; r <= round; ++r) {
       BtcExpireInfo storage expireInfo = round2expireInfoMap[r];
       uint256 j = expireInfo.agentAddrList.length;
@@ -274,6 +286,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 pf = powerFactor;
     
     // calc hybrid score
+    // HARDFORK V-1.0.7 BTC staking is added when calculating the hybrid score
     scores = new uint256[](candidateSize);
     for (uint256 i = 0; i < candidateSize; ++i) {
       Agent storage a = agentsMap[candidates[i]];
@@ -296,6 +309,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 validatorSize = validators.length;
     for (uint256 i = 0; i < validatorSize; ++i) {
       Agent storage a = agentsMap[validators[i]];
+      // HARDFORK V-1.0.7 BTC staking is added when calculating the hybrid score
       uint256 btcScore = a.btc * rs.btcFactor;
       uint256 score = a.power * (rs.coin + rs.btc * rs.btcFactor) * rs.powerFactor / 10000 + (a.coin + btcScore) * rs.power;
       a.rewardSet.push(Reward(0, 0, score, a.coin + btcScore, round));
@@ -452,7 +466,24 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     }
     return (rewardSum, roundLimit >= 0);
   }
-
+  
+  // HARDFORK V-1.0.7 
+  // User workflow to delegate BTC to Core blockchain
+  //  1. A user creates a bitcoin transaction, locks up certain amount ot Bitcoin in one of the transaction output for certain period.
+  //     The transaction should also have an op_return output which contains the staking information, such as the validator and reward addresses. 
+  //  2. Transmit the transaction to Core blockchain by calling the below method `delegateBtc`.
+  //  3. The user can claim rewards using the reward address set in step 1 during the staking period.
+  //  4. The user can spend the timelocked UTXO using the redeem script when the lock expires.
+  //     The redeem script should start with a time lock. such as:
+  //         <abstract locktime> OP_CLTV OP_DROP <pubKey> OP_CHECKSIG
+  //         <abstract locktime> OP_CLTV OP_DROP OP_DUP OP_HASH160 <pubKey Hash> OP_EQUALVERIFY OP_CHECKSIG
+  //         <abstract locktime> OP_CLTV OP_DROP M <pubKey1> <pubKey1> ... <pubKeyN> N OP_CHECKMULTISIG
+  /// delegate BTC to Core network
+  /// @param btcTx the BTC transaction data
+  /// @param blockHeight block height of the transaction
+  /// @param nodes part of the Merkle tree from the tx to the root in LE form (called Merkle proof)
+  /// @param index index of the tx in Merkle tree
+  /// @param script the corresponding redeem script of the locked up output
   function delegateBtc(bytes calldata btcTx, uint32 blockHeight, bytes32[] memory nodes, uint256 index, bytes memory script) external {
     require(script[0] == bytes1(uint8(0x04)) && script[5] == bytes1(uint8(0xb1)), "not a valid redeem script");
 
@@ -494,6 +525,10 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     btcReceiptList.push(br);
   }
 
+  // HARDFORK V-1.0.7 
+  /// transfer staked BTC to a different validator
+  /// @param txid id of the BTC staking transaction
+  /// @param targetAgent the new validator address to stake to
   function transferBtc(bytes32 txid, address targetAgent) public {
     require(confirmedTxMap[txid] != 0, "btc tx not found");
     uint256 brIndex = confirmedTxMap[txid] - 1;
@@ -518,6 +553,10 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     emit transferredBtc(txid, brIndex, br.transferInIndex - 1, inAgent, targetAgent, msg.sender, br.value, ta.totalBtc);
   }
 
+  // HARDFORK V-1.0.7 
+  /// claim BTC staking rewards
+  /// @param txidList the list of receipts to claim BTC staking rewards 
+  /// @return rewardSum amount of reward claimed
   function claimBtcReward(bytes32[] calldata txidList) external returns (uint256 rewardSum) {
     uint256 claimLimit = CLAIM_ROUND_LIMIT;
     uint256 len = txidList.length;
