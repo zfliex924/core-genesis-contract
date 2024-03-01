@@ -177,6 +177,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 amount,
     uint256 totalAmount
   );
+  event btcPledgeExpired(bytes32 indexed txid, address indexed delegator);
   event roundReward(address indexed agent, uint256 coinReward, uint256 powerReward);
   event claimedReward(address indexed delegator, address indexed operator, uint256 amount, bool success);
   event transferredBtcFee( uint256 indexed brIndex, address payable feeReceiver, uint256 fee);
@@ -565,11 +566,15 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       require(confirmedTxMap[txid] != 0, "btc tx not found");
       uint256 brIndex = confirmedTxMap[txid] - 1;
       BtcReceipt storage br = btcReceiptList[brIndex];
-      require(br.delegator == msg.sender, "not the delegator of this btc receipt");
+      address delegator = br.delegator;
+      require(delegator == msg.sender, "not the delegator of this btc receipt");
 
       uint256 reward;
       (reward, claimLimit) = collectBtcReward(brIndex, claimLimit);
       rewardSum += reward;
+      if (br.value == 0) {
+        emit btcPledgeExpired(txid, delegator);
+      }
     }
 
     if (rewardSum != 0) {
