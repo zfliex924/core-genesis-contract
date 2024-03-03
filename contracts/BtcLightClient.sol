@@ -29,8 +29,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   uint64 public constant TARGET_TIMESPAN_MUL_4 = TARGET_TIMESPAN * 4;
   int256 public constant UNROUNDED_MAX_TARGET = 2**224 - 1; // different from (2**16-1)*2**208 http://bitcoin.stackexchange.com/questions/13803/how-exactly-was-the-original-coefficient-for-difficulty-determined
 
-  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"0000002006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f7c878e0bd00e7c302328e8d22e26d7f519f26329e6c0462ae89059fb7fd732811728f763ffff7f2001000000";
-  uint32 public constant INIT_CHAIN_HEIGHT = 1;
+  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00400231e9ee1956222a741e5d79f8aaa8c35b0d8a666dc8b0e6b768b422000000000000c0370935585f7670f952ed06816afdd34958012c626cab08d9b446672decaffe9214e46518fe271908327127";
+  uint32 public constant INIT_CHAIN_HEIGHT = 2580310;
 
   uint256 public highScore;
   bytes32 public heaviestBlock;
