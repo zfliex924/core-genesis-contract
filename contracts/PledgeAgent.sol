@@ -432,7 +432,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @return (Amount claimed, Are all rewards claimed)
   function claimReward(address[] calldata agentList) external returns (uint256, bool) {
     // limit round count to control gas usage
-    int256 roundLimit = 500;
+    int256 roundLimit = CLAIM_ROUND_LIMIT;
     uint256 reward;
     uint256 rewardSum = rewardMap[msg.sender];
     if (rewardSum != 0) {
