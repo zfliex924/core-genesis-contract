@@ -178,7 +178,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     uint256 totalAmount
   );
   event btcPledgeExpired(bytes32 indexed txid, address indexed delegator);
-  event roundReward(address indexed agent, uint256 coinReward, uint256 powerReward);
+  event roundReward(address indexed agent, uint256 coinReward, uint256 powerReward, uint256 btcReward);
   event claimedReward(address indexed delegator, address indexed operator, uint256 amount, bool success);
   event transferredBtcFee( uint256 indexed brIndex, address payable feeReceiver, uint256 fee);
   event failedTransferBtcFee( uint256 indexed brIndex, address payable feeReceiver, uint256 fee);
@@ -234,7 +234,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       r.remainReward = rewardList[i];
       uint256 coinReward = rewardList[i] * a.coin * rs.power / roundScore;
       uint256 powerReward = rewardList[i] * a.power * rs.coin / 10000 * rs.powerFactor / roundScore;
-      emit roundReward(agentList[i], coinReward, powerReward);
+      uint256 btcReward = rewardList[i] * a.btc * rs.btcFactor * rs.power / roundScore;
+      emit roundReward(agentList[i], coinReward, powerReward, btcReward);
     }
   }
 
@@ -343,9 +344,10 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
     uint256 powerReward = reward * minerSize;
     uint256 undelegateCoinReward;
-    if (a.coin > r.coin) {
+    uint256 btcScore = a.btc * rs.btcFactor;
+    if (a.coin + btcScore > r.coin) {
       // undelegatedCoin = a.coin - r.coin
-      undelegateCoinReward = r.totalReward * (a.coin - r.coin) * rs.power / r.score;
+      undelegateCoinReward = r.totalReward * (a.coin + btcScore - r.coin) * rs.power / r.score;
     }
     uint256 remainReward = r.remainReward;
     require(remainReward >= powerReward + undelegateCoinReward, "there is not enough reward");
@@ -432,7 +434,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @return (Amount claimed, Are all rewards claimed)
   function claimReward(address[] calldata agentList) external returns (uint256, bool) {
     // limit round count to control gas usage
-    int256 roundLimit = 500;
+    int256 roundLimit = CLAIM_ROUND_LIMIT;
     uint256 reward;
     uint256 rewardSum = rewardMap[msg.sender];
     if (rewardSum != 0) {
@@ -843,9 +845,9 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
       if (feeReward != 0) {
         br.fee -= feeReward;
-        reward -= feeReward;
         bool success = br.feeReceiver.send(feeReward);
         if (success) {
+          reward -= feeReward;
           emit transferredBtcFee(brIndex, br.feeReceiver, feeReward);
         } else {
           emit failedTransferBtcFee(brIndex, br.feeReceiver, feeReward);
