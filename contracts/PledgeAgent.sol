@@ -199,7 +199,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     minBtcLockRound = INIT_MIN_BTC_LOCK_ROUND;
     btcConfirmBlock = INIT_BTC_CONFIRM_BLOCK;
     minBtcValue = INIT_MIN_BTC_VALUE;
-    roundTag = 1;
+    roundTag = block.timestamp / ROUND_INTERVAL;
     alreadyInit = true;
   }
 

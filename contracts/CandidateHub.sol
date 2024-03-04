@@ -92,7 +92,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     roundInterval = INIT_ROUND_INTERVAL;
     validatorCount = INIT_VALIDATOR_COUNT;
     maxCommissionChange = MAX_COMMISSION_CHANGE;
-    roundTag = 7;
+    roundTag = block.timestamp / INIT_ROUND_INTERVAL;
     alreadyInit = true;
   }
   
