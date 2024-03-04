@@ -199,7 +199,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     minBtcLockRound = INIT_MIN_BTC_LOCK_ROUND;
     btcConfirmBlock = INIT_BTC_CONFIRM_BLOCK;
     minBtcValue = INIT_MIN_BTC_VALUE;
-    roundTag = 1;
+    roundTag = block.timestamp / ROUND_INTERVAL;
     alreadyInit = true;
   }
 
@@ -558,7 +558,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
   // HARDFORK V-1.0.7 
   /// claim BTC staking rewards
-  /// @param txidList the list of receipts to claim BTC staking rewards 
+  /// @param txidList the list of BTC staking transaction id to claim rewards 
   /// @return rewardSum amount of reward claimed
   function claimBtcReward(bytes32[] calldata txidList) external returns (uint256 rewardSum) {
     uint256 claimLimit = CLAIM_ROUND_LIMIT;
