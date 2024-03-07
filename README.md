@@ -20,13 +20,15 @@ This repo holds all the genesis contracts on Core blockchain, which are part of 
 
 
 ## Prepare
+Install ganache globally:
+```shell script
+npm install -g ganache
+```
 
 Install dependency:
 ```shell script
 npm install
 ```
-
-
 
 ## Run Tests
 

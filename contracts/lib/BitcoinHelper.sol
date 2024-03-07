@@ -447,7 +447,7 @@ library BitcoinHelper {
     function parseToScriptValueAndData(
         bytes29 _voutView,
         bytes memory _script
-    ) internal pure typeAssert(_voutView, BTCTypes.Vout) returns (uint64 bitcoinAmount, bytes29 arbitraryData) {
+    ) internal pure typeAssert(_voutView, BTCTypes.Vout) returns (uint64 bitcoinAmount, bytes29 arbitraryData, uint256 outputIndex) {
         bytes29 _outputView;
         bytes29 _scriptPubkeyView;
         bytes29 _scriptPubkeyWithLength;
@@ -477,6 +477,7 @@ library BitcoinHelper {
                     _scriptPubkeyView.index(2, 32) == sha256(_script))
                 ) {
                     bitcoinAmount = value(_outputView);
+                    outputIndex = index;
                 }
             } else {
                 // Returns the whole bytes array
