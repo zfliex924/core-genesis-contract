@@ -29,8 +29,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   uint64 public constant TARGET_TIMESPAN_MUL_4 = TARGET_TIMESPAN * 4;
   int256 public constant UNROUNDED_MAX_TARGET = 2**224 - 1; // different from (2**16-1)*2**208 http://bitcoin.stackexchange.com/questions/13803/how-exactly-was-the-original-coefficient-for-difficulty-determined
 
-  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00400231e9ee1956222a741e5d79f8aaa8c35b0d8a666dc8b0e6b768b422000000000000c0370935585f7670f952ed06816afdd34958012c626cab08d9b446672decaffe9214e46518fe271908327127";
-  uint32 public constant INIT_CHAIN_HEIGHT = 2580310;
+  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"0060a22616eecf9b5c5205de70a5c0b4608e0dde7c907c6e9201330d1d00000000000000fb2b1bd579afe7e2956d965e5a85bdb65cee51eb04b3dcdbfa86379870446ab6eabf0b6650e2261938b05017";
+  uint32 public constant INIT_CHAIN_HEIGHT = 2584914;
 
   uint256 public highScore;
   bytes32 public heaviestBlock;
@@ -42,7 +42,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   uint256 public constant MAXIMUM_WEIGHT=20;
   uint256 public constant CONFIRM_BLOCK = 6;
   uint256 public constant INIT_ROUND_INTERVAL = 1800;
-  uint256 public constant POWER_ROUND_GAP = 7;
+  uint256 public constant POWER_ROUND_GAP = 2;
   uint256 public constant INIT_STORE_BLOCK_GAS_PRICE = 35e9;
 
   uint256 public callerCompensationMolecule;
@@ -283,6 +283,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   /// @return True if the provided tx is confirmed on Bitcoin
   function checkTxProof(bytes32 txid, uint32 blockHeight, uint32 confirmBlock, bytes32[] calldata nodes, uint256 index) external view override returns (bool) {
     bytes32 blockHash = height2HashMap[blockHeight];
+    
     if (blockHeight + confirmBlock > getChainTipHeight() || txid == bytes32(0) || blockHash == bytes32(0)) {
       return false;
     }
@@ -668,4 +669,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   function getRoundCandidates(uint256 roundTimeTag) external override view returns (address[] memory candidates) {
     return roundPowerMap[roundTimeTag].candidates;
   }
+  
+  
 }

@@ -42,7 +42,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   uint256 public constant MAXIMUM_WEIGHT=20;
   uint256 public constant CONFIRM_BLOCK = 6;
   uint256 public constant INIT_ROUND_INTERVAL = {{initRoundInterval}};
-  uint256 public constant POWER_ROUND_GAP = 7;
+  uint256 public constant POWER_ROUND_GAP = 2;
   uint256 public constant INIT_STORE_BLOCK_GAS_PRICE = 35e9;
 
   uint256 public callerCompensationMolecule;
@@ -283,6 +283,11 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   /// @return True if the provided tx is confirmed on Bitcoin
   function checkTxProof(bytes32 txid, uint32 blockHeight, uint32 confirmBlock, bytes32[] calldata nodes, uint256 index) external view override returns (bool) {
     bytes32 blockHash = height2HashMap[blockHeight];
+    {% if mock %}
+    if (checkResult == true){
+      return checkResult;
+    }
+    {% endif %}
     if (blockHeight + confirmBlock > getChainTipHeight() || txid == bytes32(0) || blockHash == bytes32(0)) {
       return false;
     }
@@ -668,4 +673,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   function getRoundCandidates(uint256 roundTimeTag) external override view returns (address[] memory candidates) {
     return roundPowerMap[roundTimeTag].candidates;
   }
+  {% if mock %}
+  bool public checkResult;
+  {% endif %}
+  
 }

@@ -162,6 +162,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   /// The `turn round` workflow
   /// @dev this method is called by Golang consensus engine at the end of a round
   function turnRound() external onlyCoinbase onlyInit onlyZeroGasPrice {
+    
     // distribute rewards for the about to end round
     address[] memory lastCandidates = IValidatorSet(VALIDATOR_CONTRACT_ADDR).distributeReward();
 
