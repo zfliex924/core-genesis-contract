@@ -21,6 +21,10 @@ const validators = [
      "feeAddr": "0xed008886add78c088e81301e2bc9dfb44f753e5f",
    },
    {
+    "consensusAddr": "0x92b07445d6ba10feae3f0690d8d98b8c4610b829",
+    "feeAddr": "0x92b07445d6ba10feae3f0690d8d98b8c4610b829",
+  },
+   {
      "consensusAddr": "0x961da3b345986135554ab4220481c537cd6a58f5",
      "feeAddr": "0x961da3b345986135554ab4220481c537cd6a58f5",
    },
@@ -72,6 +76,9 @@ const validators = [
   },{
     "consensusAddr": "0x3dec0c35abf13f8d8558c27cb4fc75d841eaec7b",
     "feeAddr": "0x3dec0c35abf13f8d8558c27cb4fc75d841eaec7b",
+  },{
+    "consensusAddr": "0xd98a88fc7913cf5fdfa7bd0172d1b9d07614233f",
+    "feeAddr": "0xd98a88fc7913cf5fdfa7bd0172d1b9d07614233f",
   },{
     "consensusAddr": "0xdd58df5584fee7ee2f33a154aebb4069e21da550",
     "feeAddr": "0xdd58df5584fee7ee2f33a154aebb4069e21da550",
