@@ -18,7 +18,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   uint256 public constant INIT_REQUIRED_MARGIN = 1e22;
   uint256 public constant INIT_DUES = 1e20;
   uint256 public constant INIT_ROUND_INTERVAL = 86400;
-  uint256 public constant INIT_VALIDATOR_COUNT = 21;
+  uint256 public constant INIT_VALIDATOR_COUNT = 27;
   uint256 public constant MAX_COMMISSION_CHANGE = 10;
   uint256 public constant CANDIDATE_COUNT_LIMIT = 1000;
 
@@ -162,6 +162,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   /// The `turn round` workflow
   /// @dev this method is called by Golang consensus engine at the end of a round
   function turnRound() external onlyCoinbase onlyInit onlyZeroGasPrice {
+    
     // distribute rewards for the about to end round
     address[] memory lastCandidates = IValidatorSet(VALIDATOR_CONTRACT_ADDR).distributeReward();
 
