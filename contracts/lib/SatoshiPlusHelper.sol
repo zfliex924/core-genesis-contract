@@ -6,7 +6,7 @@ library SatoshiPlusHelper {
   uint256 public constant BTC_STAKE_MAGIC = 0x5341542b;
   uint256 public constant BTC_DECIMAL = 1e8;
   uint256 public constant CORE_DECIMAL = 1e18;
-  uint256 public constant ROUND_INTERVAL = 86400;
+  uint256 public constant ROUND_INTERVAL = 1800;
   uint256 public constant CHAINID = 1112;
 
   // Bech32 encoded segwit addresses start with a human-readable part
