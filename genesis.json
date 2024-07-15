@@ -14,6 +14,11 @@
     "hashPowerBlock": 0,
     "zeusBlock": 0,
     "heraBlock": 0,
+    "poseidonBlock": 0,
+    "hertzBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "shanghaiTime": 0,
     "satoshi": {
       "period": 3,
       "epoch": 20,
