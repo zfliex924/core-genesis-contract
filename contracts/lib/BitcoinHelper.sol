@@ -6,11 +6,11 @@ import "./SafeCast.sol";
 
 enum ScriptTypes {
     P2PK, // 32 bytes
-    P2PKH, // 20 bytes        
-    P2SH, // 20 bytes          
-    P2WPKH, // 20 bytes          
+    P2PKH, // 20 bytes
+    P2SH, // 20 bytes
+    P2WPKH, // 20 bytes
     P2WSH, // 32 bytes
-    P2TR // 32 bytes               
+    P2TR // 32 bytes
 }
 
 library BitcoinHelper {
@@ -148,7 +148,7 @@ library BitcoinHelper {
     function extractOutpoint(
         bytes memory _vin,
         uint _index
-    ) internal pure returns (bytes32, uint) {
+    ) internal pure returns (bytes32, uint32) {
         bytes29 vin = tryAsVin(_vin.ref(uint40(BTCTypes.Unknown)));
         require(!vin.isNull(), "BitcoinHelper: vin is null");
         return extractOutpoint(vin, _index);
@@ -163,7 +163,7 @@ library BitcoinHelper {
     function extractOutpoint(
         bytes29 _vinView,
         uint _index
-    ) internal pure typeAssert(_vinView, BTCTypes.Vin) returns (bytes32 _txId, uint _outputIndex) {
+    ) internal pure typeAssert(_vinView, BTCTypes.Vin) returns (bytes32 _txId, uint32 _outputIndex) {
         bytes29 input = indexVin(_vinView, _index);
         bytes29 _outpoint = outpoint(input);
         _txId = txidLE(_outpoint);
@@ -248,6 +248,19 @@ library BitcoinHelper {
         bytes29 output;
         output = indexVout(_voutView, _index);
         _value = value(output);
+    }
+
+    /// @notice              Finds the value of a specific output
+    /// @dev                 Reverts if vout is null
+    /// @param _voutView     The vout of a Bitcoin transaction
+    /// @param _index        Index of output
+    /// @return _value       Value of the specified output
+    /// @return _pkScriptView  Parsed pk script view
+    function parseOutputValueAndScript(bytes29 _voutView, uint _index) internal pure typeAssert(_voutView, BTCTypes.Vout) returns (uint64 _value, bytes29 _pkScriptView) {
+        bytes29 output = indexVout(_voutView, _index);
+        _value = value(output);
+        _pkScriptView = scriptPubkey(output);
+        //_lockingScript = _lockingScriptBytes29.clone();
     }
 
     /// @notice                   Finds total outputs value
@@ -352,7 +365,7 @@ library BitcoinHelper {
         return parseValueHavingLockingScript(voutView, _lockingScript);
     }
 
-        /// @notice                           Parses the BTC amount of a transaction
+    /// @notice                           Parses the BTC amount of a transaction
     /// @dev                              Finds the BTC amount that has been sent to the locking script
     ///                                   Returns zero if no matching locking scrip is found
     /// @param _voutView                  The vout of a Bitcoin transaction
@@ -447,7 +460,7 @@ library BitcoinHelper {
     function parseToScriptValueAndData(
         bytes29 _voutView,
         bytes memory _script
-    ) internal pure typeAssert(_voutView, BTCTypes.Vout) returns (uint64 bitcoinAmount, bytes29 arbitraryData, uint256 outputIndex) {
+    ) internal pure typeAssert(_voutView, BTCTypes.Vout) returns (uint64 bitcoinAmount, bytes29 arbitraryData, uint32 outputIndex) {
         bytes29 _outputView;
         bytes29 _scriptPubkeyView;
         bytes29 _scriptPubkeyWithLength;
@@ -477,7 +490,7 @@ library BitcoinHelper {
                     _scriptPubkeyView.index(2, 32) == sha256(_script))
                 ) {
                     bitcoinAmount = value(_outputView);
-                    outputIndex = index;
+                    outputIndex = uint32(index);
                 }
             } else {
                 // Returns the whole bytes array

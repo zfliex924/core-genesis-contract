@@ -7,14 +7,14 @@ const init_cycle = require("./init_cycle")
 program.version("0.0.1");
 program.option(
     "-t, --template <template>",
-    "PledgeAgent template file",
-    "./contracts/PledgeAgent.template"
+    "SatoshiPlus template file",
+    "./contracts/lib/SatoshiPlusHelper.template"
 );
 
 program.option(
     "-o, --output <output-file>",
-    "PledgeAgent.sol",
-    "./contracts/PledgeAgent.sol"
+    "SatoshiPlusHelper.sol",
+    "./contracts/lib/SatoshiPlusHelper.sol"
 )
 
 program.option("--mock <mock>",
@@ -22,15 +22,15 @@ program.option("--mock <mock>",
     false);
 program.option("-c, --chainid <chainid>", "chain id", "1112")
 
+
 program.parse(process.argv);
 
 const data = {
-  initRoundInterval: init_cycle.roundInterval,
   chainid: program.chainid,
-  mock: program.mock,
+  initRoundInterval: init_cycle.roundInterval,
 };
 
 const templateString = fs.readFileSync(program.template).toString();
 const resultString = nunjucks.renderString(templateString, data);
 fs.writeFileSync(program.output, resultString);
-console.log("PledgeAgent file updated.");
+console.log("SatoshiPlusHelper file updated.");

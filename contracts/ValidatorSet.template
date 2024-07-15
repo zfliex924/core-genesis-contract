@@ -6,7 +6,7 @@ import "./lib/BytesToTypes.sol";
 import "./lib/Memory.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/IValidatorSet.sol";
-import "./interface/IPledgeAgent.sol";
+import "./interface/IStakeHub.sol";
 import "./interface/ISystemReward.sol";
 import "./interface/ICandidateHub.sol";
 import "./lib/RLPDecode.sol";
@@ -118,7 +118,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   /// Distribute rewards to validators (and delegators through PledgeAgent)
   /// @dev this method is called by the CandidateHub contract at the beginning of turn round
   /// @dev this is where we deal with reward distribution logics
-  function distributeReward() external override onlyCandidate returns (address[] memory operateAddressList) {
+  function distributeReward(uint256 roundTag) external override onlyCandidate returns (address[] memory operateAddressList) {
     address payable feeAddress;
     uint256 validatorReward;
 
@@ -158,7 +158,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       }
     }
 
-    IPledgeAgent(PLEDGE_AGENT_ADDR).addRoundReward{ value: rewardSum }(operateAddressList, rewardList);
+    IStakeHub(STAKE_HUB_ADDR).addRoundReward{ value: rewardSum }(operateAddressList, rewardList, roundTag);
     totalInCome = 0;
     return operateAddressList;
   } 
@@ -213,15 +213,15 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     return consensusAddrs;
   }
 
-  /// Get list of operate in the current round
-  /// @return List of operate addresses
-  function getOperates() external view returns (address[] memory) {
+  /// Get ops list of validators in the current round
+  /// @return List of validator consensus addresses
+  function getValidatorOps() external override view returns (address[] memory) {
     uint256 validatorSize = currentValidatorSet.length;
-    address[] memory OperateAddrs = new address[](validatorSize);
+    address[] memory opAddrs = new address[](validatorSize);
     for (uint256 i = 0; i < validatorSize; i++) {
-      OperateAddrs[i] = currentValidatorSet[i].operateAddress;
+      opAddrs[i] = currentValidatorSet[i].operateAddress;
     }
-    return OperateAddrs;
+    return opAddrs;
   }
 
   /// Get incoming, which is the reward to distribute at the end of the round, of a validator
@@ -301,7 +301,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       }
     }
     ICandidateHub(CANDIDATE_HUB_ADDR).jailValidator(operateAddress, felonyRound, felonyDeposit);
-    IPledgeAgent(PLEDGE_AGENT_ADDR).onFelony(operateAddress);
+
+    (bool success, bytes memory data) = PLEDGE_AGENT_ADDR.call{gas: 50000}(abi.encodeWithSignature("onFelony(address)", operateAddress));
+    require (success, "PLEDGE_AGENT_ADDR.onFelony failed.");
   }
 
   /*********************** Param update ********************************/
