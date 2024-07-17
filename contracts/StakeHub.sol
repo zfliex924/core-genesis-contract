@@ -67,7 +67,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   function init() external onlyNotInit {
     // add three collaterals into list
-    collaterals.push(Collateral("CORE", CORE_AGENT_ADDR, 1, 6000));
+    collaterals.push(Collateral("CORE", PLEDGE_AGENT_ADDR, 1, 6000));
     collaterals.push(Collateral("HASHPOWER", HASH_AGENT_ADDR, HASH_UNIT_CONVERSION * INIT_HASH_FACTOR, 2000));
     collaterals.push(Collateral("BTC", BTC_AGENT_ADDR, BTC_UNIT_CONVERSION * INIT_BTC_FACTOR, 4000));
 
@@ -145,7 +145,8 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
       for (uint256 j = 0; j < candidateSize; ++j) {
         scores[j] += amounts[j] * t;
         candiate = candidates[j];
-        if (candidateAmountMap[candiate].length <= i) {
+        // length should never be less than i
+        if (candidateAmountMap[candiate].length == i) {
           candidateAmountMap[candiate].push(amounts[j]);
         } else {
           candidateAmountMap[candiate][i] = amounts[j];
@@ -242,6 +243,16 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     emit paramChange(key, value);
   }
 
+  /*********************** External methods ********************************/
+  function getCandidateAmounts(address candidate) external view returns (uint256[] memory) {
+    return candidateAmountMap[candidate];
+  }
+
+  function getCollaterals() external view returns (Collateral[] memory) {
+    return collaterals;
+  }
+
+  /*********************** Internal methods ********************************/
   function _initHybridScore() internal {
     // get validator set
     address[] memory validators = IValidatorSet(VALIDATOR_CONTRACT_ADDR).getValidatorOps();
