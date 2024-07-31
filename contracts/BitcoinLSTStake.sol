@@ -15,13 +15,15 @@ import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+/// This contract handles LST BTC staking. 
+/// Relayers submit BTC stake/redeem transactions to Core chain here.
 contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuard {
   using BitcoinHelper for *;
   using TypedMemView for *;
   using BytesLib for *;
 
-  uint32 public constant WST_ACTIVE = 1;
-  uint32 public constant WST_INACTIVE = 2;
+  uint32 public constant WALLET_ACTIVE = 1;
+  uint32 public constant WALLET_INACTIVE = 2;
 
   bytes1 constant OP_DUP = 0x76;
   bytes1 constant OP_HASH160 = 0xa9;
@@ -33,32 +35,37 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   bytes1 constant OP_0 = 0;
   bytes1 constant OP_1 = 0x51;
 
-  uint64 public constant WTYPE_UNKNOWN = 0;
+  uint32 public constant WTYPE_UNKNOWN = 0;
   // 25 OP_DUP OP_HASH160 OP_DATA_20 <hash160> OP_EQUALVERIFY OP_CHECKSIG
-  uint64 public constant WTYPE_P2PKH = 1;
+  uint32 public constant WTYPE_P2PKH = 1;
   // 23 OP_HASH160 OP_DATA_20 <hash160> OP_EQUAL
-  uint64 public constant WTYPE_P2SH = 2;
+  uint32 public constant WTYPE_P2SH = 2;
   // 22 witnessVer OP_0 OP_DATA_20 <hash160>
-  uint64 public constant WTYPE_P2WPKH = 4;
+  uint32 public constant WTYPE_P2WPKH = 4;
   // 34 witnessVer OP_0 OP_DATA_32 <32-byte-hash>
-  uint64 public constant WTYPE_P2WSH = 8;
+  uint32 public constant WTYPE_P2WSH = 8;
   // 34 witnessVer OP_1 OP_DATA_32 <32-byte-hash>
-  uint64 public constant WTYPE_P2TAPROOT = 16;
+  uint32 public constant WTYPE_P2TAPROOT = 16;
 
   uint64 public constant INIT_UTXO_FEE = 1e4;
 
-  // This field records each btc staking tx, and it will never be clean.
+  uint256 public constant TLP_BASE = 1e4;
+
+  // This field records each btc staking tx, and it will never be cleared.
   // key: bitcoin tx id
-  // value: bitcoin stake record.
+  // value: bitcoin stake record
   mapping(bytes32 => BtcTx) public btcTxMap;
 
-  // The lst token contract's address.
+  // The lst token contract address.
   address public lstToken;
 
-  // delegated real value.
-  uint64 public totalAmount;
+  // staked BTC amount when the last round snapshot is taken
+  uint64 public stakedAmount;
 
-  // key: delegator
+  // realtime staked BTC amount
+  uint64 public realtimeAmount;
+
+  // key: delegator address
   // value: stake info.
   mapping(address => UserStakeInfo) public userStakeInfo;
 
@@ -77,20 +84,29 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   // the current round, it is updated in setNewRound.
   uint256 public roundTag;
 
-  // Initial round
+  // initial round
   uint256 public initRound;
 
-  // wallet lists
+  // a list of BTC wallet address which holds the BTC assets for the lst product
   WalletInfo[] public wallets;
 
   // key: keccak256 of pkscript.
-  // value: index of wallets plus one.
+  // value: index+1 of wallets.
   mapping(bytes32 => uint256) walletMap;
 
+  // a list of lst redeem/burn request whose BTC payout transaction are in pending status
   Redeem[] public redeemRequests;
 
-  // The btc fee which is cost when redeem btc.
+  // Fee paid in BTC to burn lst tokens
   uint64 public utxoFee;
+
+  // Time grading applied to BTC stakers
+  // There is no timelock set in the BTC lst stake transaction, as a result a same rate is set to apply to all
+  // TODO these values should be saved for each round; otherwise make sure to clear up unclaimed rewards in each round
+  uint256 public tlpRate;
+
+  // whether the time grading is enabled
+  bool public isActive;
 
   struct BtcTx {
     uint64 amount;
@@ -98,25 +114,25 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   }
 
   struct Redeem {
+    bytes32 hash; // it may be 20-byte-hash or 32-bytes-hash.
+    uint32  addrType;
     address delegator;
     uint64  amount;
-    bytes32 pkscript0;
-    bytes32 pkscript1;
   }
 
   struct WalletInfo {
-    bytes32 hash; //it may be 20-byte-hash or 32-bytes-hash.
-    uint64 addrType;
+    bytes32 hash; // it may be 20-byte-hash or 32-bytes-hash.
+    uint32 addrType;
     uint32 status;
   }
 
-  // User stake information
   struct UserStakeInfo {
-    uint256 changeRound;// the round of any op, including mint/burn/transfer/claim.
-    uint64 totalAmount; // Total amount of BTC staked including the one staked in changeRound
-    uint64 stakedAmount;// Amount of BTC staked which can claim reward.
+    uint256 changeRound; // the round when last op happens, including mint/burn/transfer/claim.
+    uint64 realtimeAmount; // realtime staked BTC amount
+    uint64 stakedAmount; // staked BTC amount when the last round snapshot is taken
   }
 
+  /*********************** events **************************/
   event paramChange(string key, bytes value);
   event delegated(bytes32 indexed txid, address indexed delegator, uint64 amount);
   event redeemed(address indexed delegator, uint64 amount, uint64 utxoFee, bytes pkscript);
@@ -129,11 +145,14 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     _;
   }
 
+  /*********************** Init ********************************/
+
   function init() external onlyNotInit {
     utxoFee = INIT_UTXO_FEE;
     initRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
     roundTag = initRound;
     btcConfirmBlock = SatoshiPlusHelper.INIT_BTC_CONFIRM_BLOCK;
+    tlpRate = TLP_BASE;
     alreadyInit = true;
   }
 
@@ -143,8 +162,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   ///
   /// User workflow to delegate BTC to Core blockchain
   ///  1. A user creates a bitcoin transaction.
-  ///  2. Relayer commit BTC tx to Core chain.
-  ///  3. Contract mint btc lst token.
+  ///  2. Relayer commits BTC tx to Core chain.
+  ///  3. Contract mints btc lst token.
   ///
   /// @param btcTx the BTC transaction data
   /// @param blockHeight block height of the transaction
@@ -155,9 +174,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     bytes32 txid = btcTx.calculateTxId();
     BtcTx storage bt = btcTxMap[txid];
     require(bt.amount == 0, "btc tx is already delegated.");
-    require(
-        ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index),
-        "btc tx isn't confirmed");
+    (bool txChecked, ) = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
+    require(txChecked, "btc tx isn't confirmed");
     checkWallet(script);
 
     address delegator;
@@ -182,10 +200,10 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
 
     _afterMint(delegator, btcAmount);
 
-    totalAmount += btcAmount;   
+    realtimeAmount += btcAmount;   
   }
 
-  /// Bitcoin undelegate, it is called by relayer
+  /// Bitcoin LST undelegate, it is called by relayer
   /// This method is used to clear redeem requests.
   ///
   /// @param btcTx the BTC transaction data
@@ -194,8 +212,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param index index of the tx in Merkle tree
   function undelegate(bytes calldata btcTx, uint32 blockHeight, bytes32[] memory nodes, uint256 index) external override nonReentrant {
     bytes32 txid = btcTx.calculateTxId();
-    require(ILightClient(LIGHT_CLIENT_ADDR).
-      checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index), "btc tx not confirmed");
+    (bool txChecked, ) = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
+    require(txChecked, "btc tx not confirmed");
     (,, bytes29 voutView,) = btcTx.extractTx();
 
     // Finds total number of outputs
@@ -203,28 +221,19 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     uint64 _amount;
     bytes29 _pkScript;
     uint256 redeemSize;
-    bytes32 pk0;
-    bytes32 pk1;
-    uint8 pklen;
+    bytes32 hash;
+    uint32 addrType;
 
     for (uint32 i = 0; i < _numberOfOutputs; ++i) {
       (_amount, _pkScript) = voutView.parseOutputValueAndScript(i);
-      pklen = uint8(_pkScript.length);
-      if (pklen <= 32) {
-        pk0 = _pkScript.index(0, pklen);
-        pk1 = 0;
-      } else {
-        pk0 = _pkScript.index(0, 32);
-        pk1 = _pkScript.index(32, pklen - 32);
-      }
+      (hash, addrType) = extractPkScriptAddr(_pkScript.clone());
       redeemSize = redeemRequests.length;
-      for (uint256 j = 0; j < redeemSize; ++j) {
-        Redeem storage rd = redeemRequests[j];
-        if (rd.amount == _amount && rd.pkscript0 == pk0 && rd.pkscript1 == pk1) {
-          // emit event
+      for (uint256 j = redeemSize; j != 0; --j) {
+        Redeem storage rd = redeemRequests[j - 1];
+        if (rd.amount == _amount && rd.hash == hash && rd.addrType == addrType) {
           emit undelegated(txid, i, rd.delegator, _amount, _pkScript.clone());
-          if (j + 1 < redeemSize) {
-            rd = redeemRequests[redeemSize-1];
+          if (j != redeemRequests.length) {
+            rd = redeemRequests[redeemRequests.length - 1];
           }
           redeemRequests.pop();
           break;
@@ -236,7 +245,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     }
   }
 
-  /// Receive round rewards from BitcoinAgent. It is triggered at the beginning of turn round
+  /// Receive round rewards from BitcoinAgent. It is triggered at the beginning of turn round.
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
   function distributeReward(address[] calldata validators, uint256[] calldata rewardList) external override onlyBtcAgent {
@@ -245,19 +254,19 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     for (uint256 i = 0; i < validatorSize; ++i) {
       reward += rewardList[i];
     }
-    if (totalAmount == 0) {
+    if (stakedAmount == 0) {
       accuredRewardPerBTCMap[roundTag] = accuredRewardPerBTCMap[roundTag-1];
     } else {
-      accuredRewardPerBTCMap[roundTag] = accuredRewardPerBTCMap[roundTag-1] + reward * SatoshiPlusHelper.BTC_DECIMAL / totalAmount;
+      accuredRewardPerBTCMap[roundTag] = accuredRewardPerBTCMap[roundTag-1] + reward * SatoshiPlusHelper.BTC_DECIMAL / stakedAmount;
     }
   }
 
-  /// Get stake amount.
+  /// Get staked BTC amount.
   ///
   /// @param candidates List of candidate operator addresses
   /// @return amounts List of amounts of all special candidates in this round
   function getStakeAmounts(address[] calldata candidates) external override view returns (uint256[] memory amounts) {
-    // Use a simple stake strategy: average on old validators.
+    // LST BTC are hypothetically designed to stake evenly to the living validators
     uint256 length = candidates.length;
     amounts = new uint256[](length);
     uint256 sustainValidatorCount;
@@ -268,7 +277,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       }
     }
     if (sustainValidatorCount != 0) {
-      uint256 avgAmount = totalAmount / sustainValidatorCount;
+      uint256 avgAmount = realtimeAmount / sustainValidatorCount;
       for (uint256 i = 0; i < length; i++) {
         if (amounts[i] == 1) {
           amounts[i] = avgAmount;
@@ -280,59 +289,64 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// Start new round, this is called by the CandidateHub contract
   /// @param round The new round tag
   function setNewRound(address[] calldata /*validators*/, uint256 round) external override onlyBtcAgent {
+    stakedAmount = realtimeAmount;
     roundTag = round;
   }
 
-  /// Do some preparement before new round.
+  /// Prepare for the new round
   function prepare(uint256) external override {
-    // nothing.
+    // nothing to prepare
   }
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
   /// @return reward Amount claimed
-  function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward) {
-    return _updateUserRewards(delegator, true);
+  /// @return rewardUnclaimed Amount unclaimed
+  function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward, uint256 rewardUnclaimed) {
+    reward = _updateUserRewards(delegator, true);
+    // apply time grading
+    if (isActive) {
+      uint256 rewardClaimed = reward * tlpRate / TLP_BASE;
+      rewardUnclaimed = reward - rewardClaimed;
+      reward = rewardClaimed;
+    }
+    
+    return (reward, rewardUnclaimed);
   }
 
   /*********************** External implementations ***************************/
-  /// Redeem bitcoin, create a redeem request and burn lst token.
+  /// Burn LST token and redeem BTC assets.
+  /// This method is called by LST holders.
   ///
   /// @param amount redeem amount
   /// @param pkscript pkscript used in txout
   function redeem(uint64 amount, bytes calldata pkscript) external nonReentrant {
-    (, uint64 txType) = extractPkScriptAddr(pkscript);
-    require(txType != WTYPE_UNKNOWN, "invalid pkscript");
+    (bytes32 hash, uint32 addrType) = extractPkScriptAddr(pkscript);
+    require(addrType != WTYPE_UNKNOWN, "invalid pkscript");
 
     UserStakeInfo storage user = userStakeInfo[msg.sender];
-    uint64 balance = user.totalAmount;
+    uint64 balance = user.realtimeAmount;
     // check there is enough balance.
     require(amount + utxoFee <= balance, "Not enough btc token");
     if (amount == 0) {
       require (balance >= 2 * utxoFee, "The redeem amount is too small.");
       amount = balance - utxoFee;
     }
-    uint8 pklen = uint8(pkscript.length);
-    bytes32 pk0;
-    bytes32 pk1;
-    if (pklen <= 32) {
-      pk0 = pkscript.indexBytes32(0, pklen);
-    } else {
-      pk0 = pkscript.indexBytes32(0, 32);
-      pk1 = pkscript.indexBytes32(32, pklen - 32);
-    }
-    // push btcaddress into redeem.
-    redeemRequests.push(Redeem(msg.sender, amount, pk0, pk1));
+
+    redeemRequests.push(Redeem(hash, addrType, msg.sender, amount));
 
     uint64 burnAmount = amount + utxoFee;
     IBitcoinLSTToken(lstToken).burn(msg.sender, uint256(burnAmount));
     emit redeemed(msg.sender, amount, utxoFee, pkscript);
 
     _afterBurn(msg.sender, burnAmount);
-    totalAmount -= burnAmount;
+    realtimeAmount -= burnAmount;
   }
 
-  /// callback when btclst token transferred.
+  /// This method should be called whenever lst token transfer happens
+  /// @param from ERC20 standard from address
+  /// @param to ERC20 standard to address
+  /// @param value the amount of tokens to transfer
   function onTokenTransfer(address from, address to, uint256 value) external onlyBtcLSTToken {
     uint64 amount = uint64(value);
     require(uint256(amount) == value, 'btc amount limit uint64');
@@ -356,6 +370,18 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       address newLstTokenAddr = value.toAddress(0);
       require(newLstTokenAddr != address(0), "token address is empty");
       lstToken = newLstTokenAddr;
+    } else if (Memory.compareStrings(key, "tlpRate")) {
+      uint256 newtlpRate = value.toUint256(0);
+      if (newtlpRate > TLP_BASE) {
+        revert OutOfBounds(key, newtlpRate, 0, TLP_BASE);
+      }
+      tlpRate = newtlpRate;
+    } else if (Memory.compareStrings(key, "isActive")) {
+      uint256 newIsActive = value.toUint256(0);
+      if (newIsActive > 1) {
+        revert OutOfBounds(key, newIsActive, 0, 1);
+      }
+      isActive = newIsActive == 1;
     } else {
       require(false, "unknown param");
     }
@@ -363,42 +389,52 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   }
 
   /*********************** Inner Methods *****************************/
+  /// Add a new BTC wallet which holds the BTC assets for the LST product
+  /// This method can only be called by `updateParam()` through governance vote
+  /// @param pkscript public key script of the wallet
   function addWallet(bytes memory pkscript) internal {
     bytes32 walletKey = keccak256(abi.encodePacked(pkscript));
     uint256 index1 = walletMap[walletKey];
     if (index1 > 0) {
-      if (wallets[index1 - 1].status != WST_ACTIVE) {
-        wallets[index1 - 1].status = WST_ACTIVE;
+      if (wallets[index1 - 1].status != WALLET_ACTIVE) {
+        wallets[index1 - 1].status = WALLET_ACTIVE;
       }
     } else {
-      (bytes32 _hash, uint64 _type) = extractPkScriptAddr(pkscript);
+      (bytes32 _hash, uint32 _type) = extractPkScriptAddr(pkscript);
       require(_type != WTYPE_UNKNOWN, "Invalid BTC wallet");
-      wallets.push(WalletInfo(_hash, _type, WST_ACTIVE));
+      wallets.push(WalletInfo(_hash, _type, WALLET_ACTIVE));
       index1 = wallets.length;
       walletMap[walletKey] = index1;
     }
     emit addedWallet(wallets[index1-1].hash, wallets[index1-1].addrType);
   }
 
+  /// Remove a BTC wallet
+  /// This method can only be called by `updateParam()` through governance vote
+  /// @param pkscript public key script of the wallet
   function removeWallet(bytes memory pkscript) internal {
     bytes32 walletKey = keccak256(abi.encodePacked(pkscript));
     uint256 index1 = walletMap[walletKey];
     require(index1 != 0, "Wallet not found");
     WalletInfo storage w = wallets[index1 - 1];
-    if (w.status != WST_INACTIVE) {
-     w.status = WST_INACTIVE;
+    if (w.status != WALLET_INACTIVE) {
+     w.status = WALLET_INACTIVE;
     }
     emit removedWallet(w.hash, w.addrType);
   }
 
+  /// check whether the BTC transaction aims for LST staking
+  /// @param pkscript redeem script of the locked up output
   function checkWallet(bytes memory pkscript) internal view {
     bytes32 walletKey = keccak256(abi.encodePacked(pkscript));
     uint256 index1 = walletMap[walletKey];
     require(index1 != 0, "Wallet not found");
-    require(wallets[index1 - 1].status == WST_ACTIVE, "wallet inactive");
+    require(wallets[index1 - 1].status == WALLET_ACTIVE, "wallet inactive");
   }
 
-  function extractPkScriptAddr(bytes memory pkScript) internal pure returns (bytes32 whash, uint64 txType) {
+  /// extract address information from pkscript
+  /// @param pkScript pkscript used in txout
+  function extractPkScriptAddr(bytes memory pkScript) internal pure returns (bytes32 whash, uint32 addrType) {
     uint256 len = pkScript.length;
     if (len == 25) {
       // pay-to-pubkey-hash
@@ -433,6 +469,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     return (0, WTYPE_UNKNOWN);
   }
 
+  /// get accrued reward for each unit of BTC of a given round
+  /// @param round the round to retrieve reward value
   function getRoundRewardPerBTC(uint256 round) internal view returns (uint256 reward) {
     if (round <= initRound) {
       return 0;
@@ -446,8 +484,11 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     return 0;
   }
 
+  /// calculate user reward and update internal reward map
+  /// @param userAddress the user address to update
+  /// @param claim whether the return amount of reward will be claimed
+  /// @return reward amount of user reward updated/claimed
   function _updateUserRewards(address userAddress, bool claim) internal returns (uint256 reward) {
-
     UserStakeInfo storage user = userStakeInfo[userAddress];
     uint256 changeRound = user.changeRound;
     if (changeRound != 0 && changeRound < roundTag) {
@@ -455,11 +496,11 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       uint256 lastRoundReward = getRoundRewardPerBTC(lastRoundTag);
       reward = uint256(user.stakedAmount) * (lastRoundReward - getRoundRewardPerBTC(changeRound - 1)) / SatoshiPlusHelper.BTC_DECIMAL;
 
-      if (user.totalAmount != user.stakedAmount && changeRound <= lastRoundTag) {
+      if (user.realtimeAmount != user.stakedAmount) {
         if (changeRound < lastRoundTag) {
-          reward += (user.totalAmount - user.stakedAmount) * (lastRoundReward - getRoundRewardPerBTC(changeRound)) / SatoshiPlusHelper.BTC_DECIMAL;
+          reward += (user.realtimeAmount - user.stakedAmount) * (lastRoundReward - getRoundRewardPerBTC(changeRound)) / SatoshiPlusHelper.BTC_DECIMAL;
         }
-        user.stakedAmount = user.totalAmount;
+        user.stakedAmount = user.realtimeAmount;
       }
     }
     if (changeRound != roundTag) {
@@ -475,28 +516,35 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     }
   }
 
+  /// this method is called when lst tokens are burnt
+  /// @param from the address to burn the tokens
+  /// @param value the amount of tokens to burn
   function _afterBurn(address from, uint64 value) internal {
     require(from != address(0), "invalid sender");
     UserStakeInfo storage user = userStakeInfo[from];
-    uint64 balance = user.totalAmount;
+    uint64 balance = user.realtimeAmount;
     require(value <= balance, "Insufficient balance");
     _updateUserRewards(from, false);
-    user.totalAmount -= value;
-    if (user.totalAmount < user.stakedAmount) {
-      user.stakedAmount = user.totalAmount;
+    user.realtimeAmount -= value;
+    if (user.realtimeAmount < user.stakedAmount) {
+      user.stakedAmount = user.realtimeAmount;
     }
   }
 
+  /// this method is called when lst tokens are mint
+  /// @param to the address to mint tokens
+  /// @param value the amount of tokens to mint
   function _afterMint(address to, uint64 value) internal {
     require(to != address(0), "invalid receiver");
     _updateUserRewards(to, false);
-    userStakeInfo[to].totalAmount += value;
+    userStakeInfo[to].realtimeAmount += value;
   }
 
 
   /// Parses the target output and the op_return of a transaction
   /// @dev  Finds the BTC amount that payload size is less than 80 bytes
   /// @param _voutView    The vout of a Bitcoin transaction
+  /// @param _lockingScript redeem script of the locked up output
   /// @return btcAmount   Amount of BTC to stake
   /// @return outputIndex The output index of target output.
   /// @return delegator   The one who delegate the Bitcoin
@@ -535,6 +583,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     require(btcAmount != 0, "staked value is zero");
   }
 
+  /// parse the payload and do sanity check for SAT+ bytes
+  /// @param payload the BTC transaction payload
   function parsePayloadAndCheckProtocol(bytes29 payload) internal pure returns (address delegator, uint256 fee) {
     require(payload.len() >= 28, "payload length is too small");
     require(payload.indexUint(0, 4) == SatoshiPlusHelper.BTC_STAKE_MAGIC, "wrong magic");

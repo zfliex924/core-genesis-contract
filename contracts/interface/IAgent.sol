@@ -2,6 +2,14 @@
 pragma solidity 0.8.4;
 
 interface IAgent {
+  /// The validator candidate is inactive, it is expected to be active
+  /// @param candidate Address of the validator candidate
+  error InactiveCandidate(address candidate);
+
+  /// Same address provided when transfer.
+  /// @param candidate Address of the candidate
+  error SameCandidate(address candidate);
+
   /// Do some preparement before new round.
   /// @param round The new round tag
   function prepare(uint256 round) external;
@@ -27,5 +35,6 @@ interface IAgent {
   /// Claim reward for delegator
   /// @param delegator the delegator address
   /// @return reward Amount claimed
-  function claimReward(address delegator) external returns (uint256);
+  /// @return rewardUnclaimed Amount unclaimed
+  function claimReward(address delegator) external returns (uint256 reward, uint256 rewardUnclaimed);
 }

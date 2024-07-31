@@ -31,8 +31,8 @@ interface IBitcoinStake {
 
   /// Start new round, this is called by the CandidateHub contract
   /// @param validators List of elected validators in this round
-  /// @param roundTag The new round tag
-  function setNewRound(address[] calldata validators, uint256 roundTag) external;
+  /// @param round The new round tag
+  function setNewRound(address[] calldata validators, uint256 round) external;
 
   /// Receive round rewards from BitcoinAgent. It is triggered at the beginning of turn round
   /// @param validators List of validator operator addresses
@@ -42,5 +42,6 @@ interface IBitcoinStake {
   /// Claim reward for delegator
   /// @param delegator the delegator address
   /// @return reward Amount claimed
-  function claimReward(address delegator) external returns (uint256 reward);
+  /// @return rewardUnclaimed Amount unclaimed
+  function claimReward(address delegator) external returns (uint256 reward, uint256 rewardUnclaimed);
 }

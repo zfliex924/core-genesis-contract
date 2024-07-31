@@ -8,12 +8,12 @@ import "./lib/Memory.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 
-/// This contract manages user delegate BTC.
-/// Including both BTC independent delegate and LST delegate.
+/// This contract handles BTC staking. 
+/// It interacts with BitcoinStake.sol and BitcoinLSTStake.sol for non-custodial BTC staking and LST BTC staking correspondingly. 
 contract BitcoinAgent is IAgent, System, IParamSubscriber {
 
-  // Key: candidate
-  // value: btc amount;
+  // key: candidate
+  // value: staked BTC amount
   mapping (address => StakeAmount) public candidateMap;
 
   struct StakeAmount {
@@ -28,52 +28,49 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
     alreadyInit = true;
   }
 
+  function initHardforkRound(address[] memory candidates, uint256[] memory amounts) external onlyStakeHub {
+    uint256 s = candidates.length;
+    for (uint256 i = 0; i < s; ++i) {
+      candidateMap[candidates[i]].stakeAmount = amounts[i];
+    }
+  }
+
   /*********************** IAgent implementations ***************************/
-  /// Do some preparement before new round.
+  /// Prepare for the new round.
   /// @param round The new round tag
   function prepare(uint256 round) external override {
     IBitcoinStake(BTC_STAKE_ADDR).prepare(round);
     IBitcoinStake(BTCLST_STAKE_ADDR).prepare(round);
   }
 
-  /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round
-  /// @param validatorList List of validator operator addresses
+  /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round.
+  /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
-  function distributeReward(address[] calldata validatorList, uint256[] calldata rewardList, uint256 /*roundTag*/) external override onlyStakeHub {
-    uint256 validatorSize = validatorList.length;
-    require(validatorSize == rewardList.length, "the length of validatorList and rewardList should be equal");
+  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 /*round*/) external override onlyStakeHub {
+    uint256 validatorSize = validators.length;
+    require(validatorSize == rewardList.length, "the length of validators and rewardList should be equal");
 
     uint256[] memory rewards = new uint256[](validatorSize);
-    uint256 avgReward;
-    uint256 rewardValue;
     StakeAmount memory sa;
     for (uint256 i = 0; i < validatorSize; ++i) {
       if (rewardList[i] == 0) {
         continue;
       }
-      sa = candidateMap[validatorList[i]];
-      avgReward = rewardList[i] * SatoshiPlusHelper.BTC_DECIMAL / (sa.lstStakeAmount + sa.stakeAmount);
-      rewards[i] = avgReward * sa.lstStakeAmount / SatoshiPlusHelper.BTC_DECIMAL;
-      rewardValue += rewards[i];
+      sa = candidateMap[validators[i]];
+      rewards[i] = rewardList[i] * sa.lstStakeAmount / (sa.lstStakeAmount + sa.stakeAmount);
     }
-    IBitcoinStake(BTCLST_STAKE_ADDR).distributeReward(validatorList, rewards);
-    rewardValue = 0;
+    IBitcoinStake(BTCLST_STAKE_ADDR).distributeReward(validators, rewards);
     for (uint256 i = 0; i < validatorSize; ++i) {
-      if (rewardList[i] == 0) {
-        continue;
-      }
       rewards[i] = rewardList[i] - rewards[i];
-      rewardValue += rewards[i];
     }
-    IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validatorList, rewards);
+    IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validators, rewards);
   }
 
-  /// Get stake amount
+  /// Get staked BTC amount
   /// @param candidates List of candidate operator addresses
-  ///
-  /// @return amounts List of amounts of all special candidates in this round
-  /// @return totalAmount The sum of all amounts of valid/invalid candidates.
-  function getStakeAmounts(address[] calldata candidates, uint256 /*roundTag*/) external override returns (uint256[] memory amounts, uint256 totalAmount) {
+  /// @return amounts List of staked BTC amounts of all candidates in this round
+  /// @return totalAmount Total BTC staked on all candidates in this round
+  function getStakeAmounts(address[] calldata candidates, uint256 /*round*/) external override returns (uint256[] memory amounts, uint256 totalAmount) {
     uint256 candidateSize = candidates.length;
     uint256[] memory lstAmounts = IBitcoinStake(BTCLST_STAKE_ADDR).getStakeAmounts(candidates);
     amounts = IBitcoinStake(BTC_STAKE_ADDR).getStakeAmounts(candidates);
@@ -86,7 +83,6 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
     }
   }
 
-
   /// Start new round, this is called by the StakeHub contract
   /// @param validators List of elected validators in this round
   /// @param round The new round tag
@@ -98,14 +94,11 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// Claim reward for delegator
   /// @param delegator the delegator address
   /// @return reward Amount claimed
-  function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward) {
-    reward = IBitcoinStake(BTC_STAKE_ADDR).claimReward(delegator);
-    reward += IBitcoinStake(BTCLST_STAKE_ADDR).claimReward(delegator);
-    return reward;
-  }
-
-  function updateStakeAmount(address candidate, uint256 stakeAmount) external onlyBtcStake {
-    candidateMap[candidate].stakeAmount = stakeAmount;
+  /// @return rewardUnclaimed Amount unclaimed after applying grading
+  function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward, uint256 rewardUnclaimed) {
+    (uint256 btcReward, uint256 btcRewardUnclaimed) = IBitcoinStake(BTC_STAKE_ADDR).claimReward(delegator);
+    (uint256 btclstReward, uint256 btclstRewardUnclaimed) = IBitcoinStake(BTCLST_STAKE_ADDR).claimReward(delegator);
+    return (btcReward + btclstReward, btcRewardUnclaimed + btclstRewardUnclaimed);
   }
 
   /*********************** Governance ********************************/

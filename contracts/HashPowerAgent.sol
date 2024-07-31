@@ -6,11 +6,11 @@ import "./interface/IParamSubscriber.sol";
 import "./interface/ILightClient.sol";
 import "./System.sol";
 
-/// This contract manages Bitcoin miners delegate hash power.
+/// This contract handles Bitcoin hash power staking (measured in BTC blocks).
 contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
   // This field is used to store hash power reward of delegators
-  // when turn round
+  // it is updated on turnround
   // key: delegator address
   // value: amount of CORE tokens claimable
   mapping(address => uint256) public rewardMap;
@@ -19,15 +19,16 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   event paramChange(string key, bytes value);
   event claimedReward(address indexed delegator, uint256 amount);
 
+  /*********************** Init ********************************/
   function init() external onlyNotInit {
     alreadyInit = true;
   }
 
-  /*********************** Interface implementations ***************************/
-  /// Do some preparement before new round.
+  /*********************** IAgent implementations ***************************/
+  /// Prepare for the new round
   /// @param round The new round tag
   function prepare(uint256 round) external override {
-    // Nothing
+    // Nothing to prepare
   }
 
   /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round
@@ -58,11 +59,11 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
     }
   }
 
-  /// Get stake amount
+  /// Get staked BTC hash value
   /// @param candidates List of candidate operator addresses
   /// @param roundTag The new round tag
-  /// @return amounts List of amounts of all special candidates in this round
-  /// @return totalAmount The sum of all amounts of valid/invalid candidates.
+  /// @return amounts List of staked BTC hash values on all candidates in the round
+  /// @return totalAmount Total staked BTC hash values on all candidates in the round
   function getStakeAmounts(address[] calldata candidates, uint256 roundTag) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
     // fetch hash power delegated on list of candidates
     // which is used to calculate hybrid score for validators in the new round
@@ -73,18 +74,19 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /// @param validators List of elected validators in this round
   /// @param round The new round tag
   function setNewRound(address[] calldata validators, uint256 round) external override onlyStakeHub {
-    // nothing.
+
   }
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
   /// @return reward Amount claimed
-  function claimReward(address delegator) external override onlyStakeHub returns (uint256) {
+  /// @return rewardUnclaimed Amount unclaimed
+  function claimReward(address delegator) external override onlyStakeHub returns (uint256, uint256) {
     uint256 rewardSum = rewardMap[delegator];
     if (rewardSum != 0) {
       rewardMap[delegator] = 0;
     }
-    return rewardSum;
+    return (rewardSum, 0);
   }
 
   /*********************** Governance ********************************/
