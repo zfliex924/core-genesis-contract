@@ -7,7 +7,6 @@ import "./interface/ICandidateHub.sol";
 import "./interface/ILightClient.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/IStakeHub.sol";
-import "./interface/IValidatorSet.sol";
 import "./lib/BytesLib.sol";
 import "./lib/Memory.sol";
 import "./lib/BitcoinHelper.sol";
@@ -48,8 +47,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   uint32 public constant WTYPE_P2TAPROOT = 16;
 
   uint64 public constant INIT_UTXO_FEE = 1e4;
-
-  uint256 public constant TLP_BASE = 1e4;
 
   // This field records each btc staking tx, and it will never be cleared.
   // key: bitcoin tx id
@@ -103,10 +100,10 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   // Time grading applied to BTC stakers
   // There is no timelock set in the BTC lst stake transaction, as a result a same rate is set to apply to all
   // TODO these values should be saved for each round; otherwise make sure to clear up unclaimed rewards in each round
-  uint256 public tlpRate;
+  uint256 public percentage;
 
   // whether the time grading is enabled
-  bool public isActive;
+  uint256 public lpActive;
 
   struct BtcTx {
     uint64 amount;
@@ -134,7 +131,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
 
   /*********************** events **************************/
   event paramChange(string key, bytes value);
-  event delegated(bytes32 indexed txid, address indexed delegator, uint64 amount);
+  event delegated(bytes32 indexed txid, address indexed delegator, uint64 amount, uint256 fee);
   event redeemed(address indexed delegator, uint64 amount, uint64 utxoFee, bytes pkscript);
   event undelegated(bytes32 indexed txid, uint32 outputIndex, address indexed delegator, uint64 amount, bytes pkscript);
   event addedWallet(bytes32 indexed _hash, uint64 _type);
@@ -152,7 +149,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     initRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
     roundTag = initRound;
     btcConfirmBlock = SatoshiPlusHelper.INIT_BTC_CONFIRM_BLOCK;
-    tlpRate = TLP_BASE;
+    percentage = SatoshiPlusHelper.DENOMINATOR / 2;
+    lpActive = 1;
     alreadyInit = true;
   }
 
@@ -161,9 +159,9 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// Bitcoin LST delegate, it is called by relayer
   ///
   /// User workflow to delegate BTC to Core blockchain
-  ///  1. A user creates a bitcoin transaction.
-  ///  2. Relayer commits BTC tx to Core chain.
-  ///  3. Contract mints btc lst token.
+  ///  1. A user creates a bitcoin transaction by minting lstBTC
+  ///  2. Relayer transmits BTC tx to Core chain by calling this method
+  ///  3. lstBTC token contract is called in this method
   ///
   /// @param btcTx the BTC transaction data
   /// @param blockHeight block height of the transaction
@@ -174,7 +172,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     bytes32 txid = btcTx.calculateTxId();
     BtcTx storage bt = btcTxMap[txid];
     require(bt.amount == 0, "btc tx is already delegated.");
-    (bool txChecked, ) = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
+    bool txChecked = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
     require(txChecked, "btc tx isn't confirmed");
     checkWallet(script);
 
@@ -193,10 +191,10 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
         fee *= SatoshiPlusHelper.CORE_DECIMAL;
         IStakeHub(STAKE_HUB_ADDR).addNotePayable(delegator, msg.sender, fee);
       }
+      emit delegated(txid, delegator, btcAmount, fee);
     }
 
     IBitcoinLSTToken(lstToken).mint(delegator, btcAmount);
-    emit delegated(txid, delegator, btcAmount);
 
     _afterMint(delegator, btcAmount);
 
@@ -212,7 +210,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param index index of the tx in Merkle tree
   function undelegate(bytes calldata btcTx, uint32 blockHeight, bytes32[] memory nodes, uint256 index) external override nonReentrant {
     bytes32 txid = btcTx.calculateTxId();
-    (bool txChecked, ) = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
+    bool txChecked = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
     require(txChecked, "btc tx not confirmed");
     (,, bytes29 voutView,) = btcTx.extractTx();
 
@@ -224,6 +222,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     bytes32 hash;
     uint32 addrType;
 
+    // TODO gas concerns on double loop, considering use a map instead for redeemRequests
     for (uint32 i = 0; i < _numberOfOutputs; ++i) {
       (_amount, _pkScript) = voutView.parseOutputValueAndScript(i);
       (hash, addrType) = extractPkScriptAddr(_pkScript.clone());
@@ -271,7 +270,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     amounts = new uint256[](length);
     uint256 sustainValidatorCount;
     for (uint256 i = 0; i < length; i++) {
-      if (IValidatorSet(VALIDATOR_CONTRACT_ADDR).isValidator(candidates[i])) {
+      if (ICandidateHub(CANDIDATE_HUB_ADDR).isValidator(candidates[i])) {
         amounts[i] = 1;
         sustainValidatorCount++;
       }
@@ -305,8 +304,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward, uint256 rewardUnclaimed) {
     reward = _updateUserRewards(delegator, true);
     // apply time grading
-    if (isActive) {
-      uint256 rewardClaimed = reward * tlpRate / TLP_BASE;
+    if (lpActive == 1) {
+      uint256 rewardClaimed = reward * percentage / SatoshiPlusHelper.DENOMINATOR;
       rewardUnclaimed = reward - rewardClaimed;
       reward = rewardClaimed;
     }
@@ -327,15 +326,16 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     UserStakeInfo storage user = userStakeInfo[msg.sender];
     uint64 balance = user.realtimeAmount;
     // check there is enough balance.
-    require(amount + utxoFee <= balance, "Not enough btc token");
+    require(amount <= balance, "Not enough btc token");
     if (amount == 0) {
-      require (balance >= 2 * utxoFee, "The redeem amount is too small.");
-      amount = balance - utxoFee;
+      amount = balance;
     }
+    require (amount >= utxoFee * 2, "The redeem amount is too small");
+    uint64 burnAmount = amount;
+    amount -= utxoFee;
 
     redeemRequests.push(Redeem(hash, addrType, msg.sender, amount));
 
-    uint64 burnAmount = amount + utxoFee;
     IBitcoinLSTToken(lstToken).burn(msg.sender, uint256(burnAmount));
     emit redeemed(msg.sender, amount, utxoFee, pkscript);
 
@@ -370,20 +370,25 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       address newLstTokenAddr = value.toAddress(0);
       require(newLstTokenAddr != address(0), "token address is empty");
       lstToken = newLstTokenAddr;
-    } else if (Memory.compareStrings(key, "tlpRate")) {
-      uint256 newtlpRate = value.toUint256(0);
-      if (newtlpRate > TLP_BASE) {
-        revert OutOfBounds(key, newtlpRate, 0, TLP_BASE);
-      }
-      tlpRate = newtlpRate;
-    } else if (Memory.compareStrings(key, "isActive")) {
-      uint256 newIsActive = value.toUint256(0);
-      if (newIsActive > 1) {
-        revert OutOfBounds(key, newIsActive, 0, 1);
-      }
-      isActive = newIsActive == 1;
     } else {
-      require(false, "unknown param");
+      if (value.length != 32) {
+        revert MismatchParamLength(key);
+      }
+      if (Memory.compareStrings(key, "percentage")) {
+        uint256 newPercentage = value.toUint256(0);
+        if (newPercentage == 0 || newPercentage > SatoshiPlusHelper.DENOMINATOR) {
+          revert OutOfBounds(key, newPercentage, 1, SatoshiPlusHelper.DENOMINATOR);
+        }
+        percentage = newPercentage;
+      } else if (Memory.compareStrings(key, "lpActive")) {
+        uint256 newLpActive = value.toUint256(0);
+        if (newLpActive > 1) {
+          revert OutOfBounds(key, newLpActive, 0, 1);
+        }
+        lpActive = newLpActive;
+      } else {
+        require(false, "unknown param");
+      }
     }
     emit paramChange(key, value);
   }
@@ -506,6 +511,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     if (changeRound != roundTag) {
       user.changeRound = roundTag;
     }
+    // make sure the caller to send the rewards out
+    // otherwise the rewards will be gone
     if (claim) {
       if (rewardMap[userAddress] != 0) {
         reward += rewardMap[userAddress];
@@ -561,6 +568,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
 
     // Finds total number of outputs
     uint _numberOfOutputs = uint256(_voutView.indexCompactInt(0));
+    bool opreturn;
 
     for (uint index = 0; index < _numberOfOutputs; index++) {
       _outputView = _voutView.indexVout(index);
@@ -578,9 +586,11 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
         }
       } else {
         (delegator, fee) = parsePayloadAndCheckProtocol(_arbitraryData);
+        opreturn = true;
       }
     }
     require(btcAmount != 0, "staked value is zero");
+    require(opreturn, "no opreturn");
   }
 
   /// parse the payload and do sanity check for SAT+ bytes

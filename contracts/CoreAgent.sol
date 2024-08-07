@@ -87,7 +87,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     alreadyInit = true;
   }
 
-  function initHardforkRound(address[] memory candidates, uint256[] memory amounts, uint256[] memory realtimeAmounts) external onlyPledgeAgent {
+  function _initializeFromPledgeAgent(address[] memory candidates, uint256[] memory amounts, uint256[] memory realtimeAmounts) external onlyPledgeAgent {
     uint256 s = candidates.length;
     for (uint256 i = 0; i < s; ++i) {
       Candidate storage c = candidateMap[candidates[i]];
@@ -448,7 +448,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     return reward;
   }
 
-  function calculateReward(address delegator, bool clearCache) internal returns (uint256 reward) {
+  function calculateReward(address delegator, bool clearRewardMap) internal returns (uint256 reward) {
     address[] storage candidates = delegatorMap[delegator].candidates;
     uint256 candidateSize = candidates.length;
     address candidate;
@@ -464,9 +464,11 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     }
 
     reward = rewardMap[delegator];
-    if (clearCache) {
-      rewardMap[delegator] = 0;
-    } else if (reward != 0) {
+    if (clearRewardMap) {
+      if (reward != 0) {
+        rewardMap[delegator] = 0;
+      }
+    } else if (rewardSum != 0) {
       rewardMap[delegator] = reward + rewardSum;
     }
     return reward + rewardSum;

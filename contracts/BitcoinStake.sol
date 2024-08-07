@@ -63,10 +63,10 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
 
   // Time grading applied to BTC stakers
   // TODO these values should be saved for each round; otherwise make sure to clear up unclaimed rewards in each round
-  TLP[] public tlpRates;
+  LockPercentage[] public lps;
 
   // whether the time grading is enabled
-  bool public isActive;
+  uint256 public lpActive;
 
   struct BtcTx {
     uint64 amount;
@@ -97,9 +97,9 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     mapping(address => uint256) amountMap;
   }
 
-  struct TLP {
-    uint256 tl;
-    uint256 tp;
+  struct LockPercentage {
+    uint64 lockDuration; // In second
+    uint32 percentage; // [0 ~ DENOMINATOR]
   }
 
   struct Reward {
@@ -109,8 +109,8 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
 
   /*********************** events **************************/
   event paramChange(string key, bytes value);
-  event delegatedBtc(bytes32 indexed txid, address indexed candidate, address indexed delegator, bytes script, uint256 amount);
-  event undelegatedBtc(bytes32 indexed outpointHash, uint32 indexed outpointIndex, bytes32 usedTxid);
+  event delegated(bytes32 indexed txid, address indexed candidate, address indexed delegator, bytes script, uint32 outputIndex, uint64 amount, uint256 fee);
+  event undelegated(bytes32 indexed outpointHash, uint32 indexed outpointIndex, bytes32 usedTxid);
   event migrated(bytes32 indexed txid);
   event transferredBtc(
     bytes32 indexed txid,
@@ -134,9 +134,11 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   function init() external onlyNotInit {
     roundTag = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
     btcConfirmBlock = SatoshiPlusHelper.INIT_BTC_CONFIRM_BLOCK;
+    lpActive = 1;
+    alreadyInit = true;
   }
 
-  function initHardforkRound(address[] memory candidates, uint256[] memory amounts, uint256[] memory realtimeAmounts) external onlyPledgeAgent {
+  function _initializeFromPledgeAgent(address[] memory candidates, uint256[] memory amounts, uint256[] memory realtimeAmounts) external onlyPledgeAgent {
     uint256 s = candidates.length;
     for (uint256 i = 0; i < s; ++i) {
       Candidate storage c = candidateMap[candidates[i]];
@@ -170,7 +172,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     BtcTx storage bt = btcTxMap[txid];
     uint32 lockTime = parseLockTime(script);
     {
-      (bool txChecked, uint64 blockTimestamp) = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
+      (bool txChecked, uint64 blockTimestamp) = ILightClient(LIGHT_CLIENT_ADDR).checkTxProofAndGetTime(txid, blockHeight, btcConfirmBlock, nodes, index);
       require(txChecked, "btc tx isn't confirmed");
       // compatible for migrated data.
       if (bt.amount > 0 && bt.blockTimestamp == 0) {
@@ -201,6 +203,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
         fee *= SatoshiPlusHelper.CORE_DECIMAL;
         IStakeHub(STAKE_HUB_ADDR).addNotePayable(delegator, msg.sender, fee);
       }
+      emit delegated(txid, candidate, delegator, script, outputIndex, btcAmount, fee);
     }
 
     delegatorMap[delegator].txids.push(txid);
@@ -210,8 +213,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     dr.candidate = candidate;
     dr.round = roundTag;
 
-    addExpire(dr, lockTime, btcAmount);
-    emit delegatedBtc(txid, candidate, delegator, script, btcAmount);    
+    addExpire(dr, lockTime, btcAmount);   
   }
 
   /// Bitcoin undelegate, it is called by relayer
@@ -222,7 +224,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// @param index index of the tx in Merkle tree
   function undelegate(bytes calldata btcTx, uint32 blockHeight, bytes32[] memory nodes, uint256 index) external override nonReentrant {
     bytes32 txid = btcTx.calculateTxId();
-    (bool txChecked, ) = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
+    bool txChecked = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
     require(txChecked, "btc tx isn't confirmed");
     (,bytes29 _vinView, ,) = btcTx.extractTx();
 
@@ -239,7 +241,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       if (bt.amount != 0 && bt.outputIndex == _outpointIndex) {
         bt.usedHeight = blockHeight;
         ++count;
-        emit undelegatedBtc(_outpointHash, _outpointIndex, txid);
+        emit undelegated(_outpointHash, _outpointIndex, txid);
         // TODO
         // In a future version with fixed | flexible term.
         // It should clear receiptMap, delegatorMap, and update other fields
@@ -375,7 +377,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
 
     // Set candidate to targetCandidate
     dr.candidate = targetCandidate;
-    dr.round = roundTag + 1;
+    dr.round = roundTag;
     addExpire(dr, bt.lockTime, amount);
 
     Candidate storage tc = candidateMap[targetCandidate];
@@ -399,13 +401,13 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// Migration
   /// Fetch a list of BTC stake transaction data from `PledgeAgent.sol`
   /// @param txids list of BTC stake transactions
-  function migrateDelegateInfo(bytes32[] calldata txids) external{
+  function moveData(bytes32[] calldata txids) external{
     uint256 txLength = txids.length;
     bytes32 txid;
     for (uint256 i = 0; i < txLength; i++) {
       txid = txids[i];
-      (bool success, bytes memory data) = PLEDGE_AGENT_ADDR.call(abi.encodeWithSignature("cleanDelegateInfo(bytes32)", txid));
-      require(success, "call PLEDGE_AGENT_ADDR.cleanDelegateInfo() failed.");
+      (bool success, bytes memory data) = PLEDGE_AGENT_ADDR.call(abi.encodeWithSignature("moveBtcData(bytes32)", txid));
+      require(success, "call PLEDGE_AGENT_ADDR.moveBtcData() failed.");
       (address candidate, address delegator, uint256 amount, uint256 round, uint256 lockTime) = abi.decode(data, (address,address,uint256,uint256,uint256));
       BtcTx storage bt = btcTxMap[txid];
       if (bt.amount != 0) {
@@ -436,44 +438,53 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
   function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
-    if (value.length != 32) {
-      revert MismatchParamLength(key);
-    }
     // TODO more details on how the grading binary array is designed and parsed
-    if(Memory.compareStrings(key, "tlpRates")) {
-      uint256 i;
-      uint256 lastLength = tlpRates.length;
+    if (Memory.compareStrings(key, "lps")) {
+      uint256 lastLength = lps.length;
       uint256 currentLength = value.indexUint(0, 1);
 
-      require(((currentLength << 2) + 1) == value.length, "invalid param length");
-
-      for (i = currentLength; i < lastLength; i++) {
-        tlpRates.pop();
+      if(((currentLength << 2) | 1) == value.length) {
+        revert MismatchParamLength(key);
       }
 
-      for (i = 0; i < currentLength; i++) {
-        uint256 startIndex = (i << 2) + 1;
-        uint256 tl = value.indexUint(startIndex, 2);
-        require(tl <= SatoshiPlusHelper.DENOMINATOR, "invalid param tl");
-        uint256 tp =  value.indexUint(startIndex + 2, 2);
-        require(tp <= SatoshiPlusHelper.DENOMINATOR, "invalid param tl");
-        TLP memory lp = TLP({
-          tl: tl,
-          tp: tp
-        });
+      for (uint256 i = currentLength; i < lastLength; i++) {
+        lps.pop();
+      }
+      uint256 lockDuration;
+      uint256 percentage;
+      for (uint256 i = 0; i < currentLength; i++) {
+        uint256 startIndex = (i << 2) | 1;
+        lockDuration = value.indexUint(startIndex, 2);
+        // limit lockDuration 4000 rounds.
+        if (lockDuration > 4000) {
+          revert OutOfBounds('lockDuration', percentage, 0, 4000);
+        }
+        percentage = value.indexUint(startIndex + 2, 2);
+        if (percentage == 0 || percentage > SatoshiPlusHelper.DENOMINATOR) {
+          revert OutOfBounds('percentage', percentage, 1, SatoshiPlusHelper.DENOMINATOR);
+        }
 
+        lockDuration *= SatoshiPlusHelper.ROUND_INTERVAL;
         if (i >= lastLength) {
-          tlpRates.push(lp);
+          lps.push(LockPercentage(uint64(lockDuration), uint32(percentage)));
         } else {
-          tlpRates[i] = lp;
+          lps[i] = LockPercentage(uint64(lockDuration), uint32(percentage));
         }
       }
-    } else if (Memory.compareStrings(key, "isActive")) {
-      uint256 newIsActive = value.toUint256(0);
-      if (newIsActive > 1) {
-        revert OutOfBounds(key, newIsActive, 0, 1);
+      // check lockDuration & percentage in order.
+      for (uint256 i = 1; i < currentLength; i++) {
+        require(lps[i-1].lockDuration < lps[i].lockDuration, "lockDuration disorder");
+        require(lps[i-1].percentage < lps[i].percentage, "percentage disorder");
       }
-      isActive = newIsActive == 1;
+    } else if (Memory.compareStrings(key, "lpActive")) {
+      if (value.length != 32) {
+        revert MismatchParamLength(key);
+      }
+      uint256 newLpActive = value.toUint256(0);
+      if (newLpActive > 1) {
+        revert OutOfBounds(key, newLpActive, 0, 1);
+      }
+      lpActive = newLpActive;
     } else {
       require(false, "unknown param");
     }
@@ -629,23 +640,22 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     BtcTx storage bt = btcTxMap[txid];
     DepositReceipt storage dr = receiptMap[txid];
     uint256 drRound = dr.round;
-    require(dr.round != 0, "invalid deposit receipt");
+    require(drRound != 0, "invalid deposit receipt");
     uint256 lastRound = roundTag - 1;
     uint256 unlockRound1 = bt.lockTime / SatoshiPlusHelper.ROUND_INTERVAL - 1;
     if (drRound < lastRound && drRound < unlockRound1) {
       uint256 minRound = lastRound < unlockRound1 ? lastRound : unlockRound1;
       // full reward
       reward = (getRoundAccuredReward(dr.candidate, minRound) - getRoundAccuredReward(dr.candidate, drRound)) * bt.amount / SatoshiPlusHelper.BTC_DECIMAL;
-      
+
       // apply time grading to BTC rewards
-      // TODO make 86400 and 30 const variables
       uint256 rewardUnclaimed = 0;
-      if (isActive && tlpRates.length != 0) {
-        uint256 delegateMonth = (bt.lockTime - bt.blockTimestamp) / 86400 / 30;
-        uint256 p =  SatoshiPlusHelper.DENOMINATOR;
-        for (uint256 j = tlpRates.length; j != 0; j--) {
-          if (delegateMonth >= tlpRates[j - 1].tl) {
-            p = tlpRates[j - 1].tp;
+      if (lpActive == 1 && lps.length != 0) {
+        uint64 lockDuration = bt.lockTime - bt.blockTimestamp;
+        uint256 p = lps[0].percentage;
+        for (uint256 j = lps.length - 1; j > 1; j--) {
+          if (lockDuration >= lps[j].lockDuration) {
+            p = lps[j].percentage;
             break;
           }
         }

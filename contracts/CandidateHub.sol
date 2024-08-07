@@ -83,6 +83,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   event deductedMargin(address indexed operateAddr, uint256 margin, uint256 totalMargin);
   event statusChanged(address indexed operateAddr, uint256 oldStatus, uint256 newStatus);
   event paramChange(string key, bytes value);
+  event turnedRound(uint256 round);
 
   /*********************** init **************************/
   function init() external onlyNotInit {
@@ -96,15 +97,27 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   
   /********************* ICandidateHub interface ****************************/
   /// Whether users can delegate on a validator candidate
-  /// @param agent The operator address of the validator candidate
+  /// @param candidate The operator address of the validator candidate
   /// @return true/false
-  function canDelegate(address agent) external override view returns(bool) {
-    uint256 index = operateMap[agent];
+  function canDelegate(address candidate) external override view returns(bool) {
+    uint256 index = operateMap[candidate];
     if (index == 0) {
       return false;
     }
     uint256 status = candidateSet[index - 1].status;
     return status == (status & ACTIVE_STATUS);
+  }
+
+  /// Whether the candidate is a validator
+  /// @param candidate The operator address of the validator candidate
+  /// @return true/false
+  function isValidator(address candidate) external override view returns(bool) {
+    uint256 index = operateMap[candidate];
+    if (index == 0) {
+      return false;
+    }
+    uint256 status = candidateSet[index - 1].status;
+    return SET_VALIDATOR == (status & SET_VALIDATOR);  
   }
 
   /// Whether the input address is operator address of a validator candidate 
@@ -234,6 +247,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     for (uint256 i = 0; i < candidateSize; i++) {
       changeStatus(candidateSet[i], statusList[i]);
     }
+    emit turnedRound(roundTag);
   }
 
   /****************** register/unregister ***************************/
