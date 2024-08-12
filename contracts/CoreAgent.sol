@@ -63,7 +63,6 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   }
 
   /*********************** events **************************/
-  event paramChange(string key, bytes value);
   event delegatedCoin(address indexed candidate, address indexed delegator, uint256 amount, uint256 realtimeAmount);
   event undelegatedCoin(address indexed candidate, address indexed delegator, uint256 amount);
   event transferredCoin(
@@ -492,7 +491,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
       }
       requiredCoinDeposit = newRequiredCoinDeposit;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
   }

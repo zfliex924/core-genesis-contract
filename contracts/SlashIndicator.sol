@@ -54,8 +54,6 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
   /*********************** events **************************/
   event validatorSlashed(address indexed validator);
   event indicatorCleaned();
-  event paramChange(string key, bytes value);
-
   
   function init() external onlyNotInit{
     misdemeanorThreshold = MISDEMEANOR_THRESHOLD;
@@ -208,7 +206,7 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
       }
       felonyRound = newFelonyRound;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
     emit paramChange(key,value);
   }

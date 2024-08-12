@@ -62,7 +62,6 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   event validatorDeposit(address indexed validator, uint256 amount);
   event validatorMisdemeanor(address indexed validator, uint256 amount);
   event validatorFelony(address indexed validator, uint256 amount);
-  event paramChange(string key, bytes value);
   event received(address indexed from, uint256 amount);
 
   /*********************** init **************************/
@@ -318,7 +317,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       }
       blockRewardIncentivePercent = newBlockRewardIncentivePercent;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
   }

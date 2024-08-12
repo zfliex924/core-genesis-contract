@@ -86,7 +86,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   /*********************** events **************************/
   event StoreHeaderFailed(bytes32 indexed blockHash, int256 indexed returnCode);
   event StoreHeader(bytes32 indexed blockHash, address candidate, address indexed rewardAddr, uint32 indexed height, bytes32 bindingHash);
-  event paramChange(string key, bytes value);
 
   /*********************** init **************************/
   /// Initialize 
@@ -635,7 +634,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
       storeBlockGasPrice = newStoreBlockGasPrice;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
   }

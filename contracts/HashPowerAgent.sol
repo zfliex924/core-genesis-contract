@@ -16,7 +16,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   mapping(address => uint256) public rewardMap;
 
   /*********************** events **************************/
-  event paramChange(string key, bytes value);
   event claimedReward(address indexed delegator, uint256 amount);
 
   /*********************** Init ********************************/
@@ -94,7 +93,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
   function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
-    require(false, "unknown param");
-    emit paramChange(key, value);
+    revert UnsupportedGovParam(key);
   }
 }

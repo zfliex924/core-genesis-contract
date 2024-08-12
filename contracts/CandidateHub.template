@@ -85,7 +85,6 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   event addedMargin(address indexed operateAddr, uint256 margin, uint256 totalMargin);
   event deductedMargin(address indexed operateAddr, uint256 margin, uint256 totalMargin);
   event statusChanged(address indexed operateAddr, uint256 oldStatus, uint256 newStatus);
-  event paramChange(string key, bytes value);
   event turnedRound(uint256 round);
 
   /*********************** init **************************/
@@ -487,7 +486,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       }
       maxCommissionChange = newMaxCommissionChange;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
   }

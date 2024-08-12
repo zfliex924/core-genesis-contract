@@ -107,7 +107,6 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   }
 
   /*********************** events **************************/
-  event paramChange(string key, bytes value);
   event delegated(bytes32 indexed txid, address indexed candidate, address indexed delegator, bytes script, uint32 outputIndex, uint64 amount, uint256 fee);
   event undelegated(bytes32 indexed outpointHash, uint32 indexed outpointIndex, bytes32 usedTxid);
   event migrated(bytes32 indexed txid);
@@ -485,7 +484,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       }
       gradeActive = newActive;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
 
     emit paramChange(key, value);
