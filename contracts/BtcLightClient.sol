@@ -86,7 +86,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   /*********************** events **************************/
   event StoreHeaderFailed(bytes32 indexed blockHash, int256 indexed returnCode);
   event StoreHeader(bytes32 indexed blockHash, address candidate, address indexed rewardAddr, uint32 indexed height, bytes32 bindingHash);
-  event paramChange(string key, bytes value);
 
   /*********************** init **************************/
   /// Initialize 
@@ -323,6 +322,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
 
   function checkTxProofAndGetTime(bytes32 txid, uint32 blockHeight, uint32 confirmBlock, bytes32[] calldata nodes, uint256 index) external view override returns (bool, uint64) {
     bool r = checkTxProof(txid, blockHeight, confirmBlock, nodes, index);
+    
     if (r) {
       bytes32 blockHash = height2HashMap[blockHeight];
       uint64 timestamp = getTimestamp(blockHash);
@@ -633,7 +633,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
       storeBlockGasPrice = newStoreBlockGasPrice;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
   }

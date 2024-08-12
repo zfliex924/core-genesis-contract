@@ -101,7 +101,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   /*********************** events **************************/
   event roundReward(string indexed name, uint256 round, address[] validator, uint256[] amount, uint256 bonus);
-  event paramChange(string key, bytes value);
   event claimedReward(address indexed delegator, uint256 amount);
   event claimedRelayerReward(address indexed relayer, uint256 amount);
 
@@ -411,7 +410,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         }
         assets[2].factor = newValue * BTC_UNIT_CONVERSION;
       } else if (!updateHardcap(key, newValue) && !updateBonusRate(key, newValue)) {
-        require(false, "unknown param");
+        revert UnsupportedGovParam(key);
       }
     }
   

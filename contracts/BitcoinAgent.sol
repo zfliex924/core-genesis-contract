@@ -2,14 +2,15 @@
 pragma solidity 0.8.4;
 
 import "./interface/IAgent.sol";
-import "./interface/IParamSubscriber.sol";
 import "./interface/IBitcoinStake.sol";
+import "./interface/IParamSubscriber.sol";
 import "./lib/Memory.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 
 /// This contract handles BTC staking. 
-/// It interacts with BitcoinStake.sol and BitcoinLSTStake.sol for non-custodial BTC staking and LST BTC staking correspondingly. 
+/// It interacts with BitcoinStake.sol and BitcoinLSTStake.sol for
+/// non-custodial BTC staking and LST BTC staking correspondingly. 
 contract BitcoinAgent is IAgent, System, IParamSubscriber {
 
   // key: candidate
@@ -27,9 +28,6 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
     require(msg.sender == PLEDGE_AGENT_ADDR, "the sender must be pledge agent contract");
     _;
   }
-
-  /*********************** events **************************/
-  event paramChange(string key, bytes value);
 
   function init() external onlyNotInit {
     alreadyInit = true;
@@ -114,7 +112,6 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
   function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
-    require(false, "unknown param");
-    emit paramChange(key, value);
+    revert UnsupportedGovParam(key);
   }
 }

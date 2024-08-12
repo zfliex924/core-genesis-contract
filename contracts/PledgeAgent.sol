@@ -161,7 +161,6 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   }
 
   /*********************** events **************************/
-  event paramChange(string key, bytes value);
   event claimedReward(address indexed delegator, address indexed operator, uint256 amount, bool success);
   event transferredBtcFee(bytes32 indexed txid, address payable feeReceiver, uint256 fee);
   event failedTransferBtcFee(bytes32 indexed txid, address payable feeReceiver, uint256 fee);
@@ -623,7 +622,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
       }
       delegateBtcGasPrice = newDelegateBtcGasPrice;
     } else {
-      require(false, "unknown param");
+      revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
   }

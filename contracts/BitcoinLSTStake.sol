@@ -130,7 +130,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   }
 
   /*********************** events **************************/
-  event paramChange(string key, bytes value);
   event delegated(bytes32 indexed txid, address indexed delegator, uint64 amount, uint256 fee);
   event redeemed(address indexed delegator, uint64 amount, uint64 utxoFee, bytes pkscript);
   event undelegated(bytes32 indexed txid, uint32 outputIndex, address indexed delegator, uint64 amount, bytes pkscript);
@@ -393,7 +392,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
         }
         gradeActive = newActive;
       } else {
-        require(false, "unknown param");
+        revert UnsupportedGovParam(key);
       }
     }
     emit paramChange(key, value);
