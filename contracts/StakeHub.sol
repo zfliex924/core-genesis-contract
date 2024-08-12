@@ -24,9 +24,9 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   uint256 public constant BTC_UNIT_CONVERSION = 1e10;
   uint256 public constant INIT_BTC_FACTOR = 1e4;
 
-  uint256 public constant MASK_STAKE_CORE_MASK = 1;
-  uint256 public constant MASK_STAKE_HASH_MASK = 2;
-  uint256 public constant MASK_STAKE_BTC_MASK = 4;
+  uint256 public constant MASK_STAKE_CORE = 1;
+  uint256 public constant MASK_STAKE_HASH = 2;
+  uint256 public constant MASK_STAKE_BTC = 4;
 
   // Supported asset types
   //  - CORE
@@ -67,7 +67,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   DualStakingGrade[] public grades;
 
   // whether the CORE grading is enabled
-  uint256 public activeFlag;
+  uint256 public gradeActive;
 
   // accumulated unclaimed rewards each round, will be redistributed at the beginning of the next round
   uint256 public unclaimedReward;
@@ -120,14 +120,15 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     operators[BTC_AGENT_ADDR] = true;
     operators[BTC_STAKE_ADDR] = true;
     operators[BTCLST_STAKE_ADDR] = true;
-
-    activeFlag = 4; // Default active btc grade.
+    // Default active btc grade.
+    gradeActive = MASK_STAKE_BTC;
 
     alreadyInit = true;
   }
 
   /*********************** Interface implementations ***************************/
-  /// Receive round rewards from ValidatorSet, which is triggered at the beginning of turn round
+  /// Receive staking rewards from ValidatorSet, which is triggered at the
+  /// beginning of turn round
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
   function addRoundReward(
@@ -147,7 +148,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
       --i;
       AssetState memory cs = stateMap[assets[i].agent];
       totalReward = 0;
-
       for (uint256 j = 0; j < validatorSize; ++j) {
         address validator = validators[j];
         // only reach here if running a new chain from genesis
@@ -165,7 +165,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         burnReward += (r - rewards[j]);
         totalReward += rewards[j];
       }
-      uint assetBonus = unclaimedReward * assets[i].bonusRate / SatoshiPlusHelper.DENOMINATOR;
+      uint assetBonus = totalReward == 0 ? 0 : unclaimedReward * assets[i].bonusRate / SatoshiPlusHelper.DENOMINATOR;
       emit roundReward(assets[i].name, roundTag, validators, rewards, assetBonus);
       if (assetBonus != 0) {
         // redistribute unclaimed rewards
@@ -175,7 +175,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
             continue;
           }
           uint256 bonus = rewards[j] * assetBonus / totalReward;
-          //emit roundReward(assets[i].name, validators[j], rewards[j], bonus);
           rewards[j] += bonus;
           usedBonus += bonus;
         }
@@ -300,7 +299,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
       (rewards[i], unclaimedRewards[i]) = IAgent(assets[i].agent).claimReward(delegator);
       uint256 mask = (1 << i);
       // apply CORE grading to rewards
-      if ((activeFlag & mask) == mask && gradeLength != 0 && rewards[i] != 0) {
+      if ((gradeActive & mask) == mask && gradeLength != 0 && rewards[i] != 0) {
         uint256 rewardRate = rewards[0] * SatoshiPlusHelper.DENOMINATOR / rewards[i];
         uint256 p = grades[0].percentage;
         for (uint256 j = gradeLength - 1; j != 0; j--) {
@@ -396,11 +395,11 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         revert MismatchParamLength(key);
       }
       uint256 newValue = value.toUint256(0);
-      if (Memory.compareStrings(key, "activeFlag")) {
+      if (Memory.compareStrings(key, "gradeActive")) {
         if (newValue > 7) {
           revert OutOfBounds(key, newValue, 0, 7);
         }
-        activeFlag = newValue;
+        gradeActive = newValue;
       } else if (Memory.compareStrings(key, "hashFactor")) {
         if (newValue == 0 || newValue > 1e8) {
           revert OutOfBounds(key, newValue, 1, 1e8);
@@ -474,10 +473,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     (bool success, bytes memory data) = PLEDGE_AGENT_ADDR.call(abi.encodeWithSignature("getStakeInfo(address[])", validators));
     require (success, "call PLEDGE_AGENT_ADDR.getStakeInfo() failed");
     (uint256[] memory cores, uint256[] memory hashs, uint256[] memory btcs) = abi.decode(data, (uint256[], uint256[], uint256[]));
-
-    // TODO should be moved to PledgeAgent.moveCandidateData()
-    (success,) = assets[2].agent.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[])", validators, btcs));
-    require (success, "call BTC_AGENT_ADDR._initializeFromPledgeAgent() failed");
 
     // initialize hybrid score based on data migrated from PledgeAgent.getStakeInfo()
     uint256 validatorSize = validators.length;

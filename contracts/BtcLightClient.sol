@@ -154,9 +154,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     uint32 adjustment = blockHeight / DIFFICULTY_ADJUSTMENT_INTERVAL;
     // save & update rewards
     blockChain[blockHash] = encode(headerBytes, rewardAddr, scoreBlock, blockHeight, adjustment, candidateAddr);
-    if (blockHeight % DIFFICULTY_ADJUSTMENT_INTERVAL == 0) {
-      adjustmentHashes[adjustment] = blockHash;
-    }
     submitters[blockHash] = payable(msg.sender);
 
     collectedRewardForHeaderRelayer += rewardForSyncHeader;
@@ -180,6 +177,11 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       if (blockHeight > getHeight(heaviestBlock)) {
         addMinerPower(blockHash);
       }
+
+      if (blockHeight % DIFFICULTY_ADJUSTMENT_INTERVAL == 0) {
+        adjustmentHashes[adjustment] = blockHash;
+      }
+
       heaviestBlock = blockHash;
       highScore = scoreBlock;
       height2HashMap[blockHeight] = blockHash;
@@ -394,12 +396,13 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
 
     // Check proof of work matches claimed amount
     // we do not do other validation (eg timestamp) to save gas
-    if (blockHash == 0 || uint256(blockHash) >= target) {
+    if (blockHash == 0 || uint256(blockHash) > target) {
       return (blockHeight, scorePrevBlock, 0);
     }
     
     uint32 prevBits = getBits(hashPrevBlock);
-    if (blockHeight % DIFFICULTY_ADJUSTMENT_INTERVAL != 0) {// since blockHeight is 1 more than blockNumber; OR clause is special case for 1st header
+    if (blockHeight % DIFFICULTY_ADJUSTMENT_INTERVAL != 0) {
+      // since blockHeight is 1 more than blockNumber; OR clause is special case for 1st header
       /* we need to check prevBits isn't 0 otherwise the 1st header
        * will always be rejected (since prevBits doesn't exist for the initial parent)
        * This allows blocks with arbitrary difficulty from being added to
