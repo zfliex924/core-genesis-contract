@@ -174,6 +174,18 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     // equality allows block with same score to become an (alternate) Tip, so
     // that when an (existing) Tip becomes stale, the chain can continue with
     // the alternate Tip
+    if (scoreBlock >= highScore) {
+      uint32 prevHeight = blockHeight - 1;
+      bytes32 prevHash = getPrevHash(blockHash);
+      while(height2HashMap[prevHeight] != prevHash && prevHeight + CONFIRM_BLOCK >= blockHeight) {
+        height2HashMap[prevHeight] = prevHash;
+        if (prevHeight % DIFFICULTY_ADJUSTMENT_INTERVAL == 0) {
+          adjustmentHashes[adjustment] = prevHash;
+        }
+        --prevHeight;
+        prevHash = getPrevHash(prevHash);
+      }
+
       if (blockHeight > getHeight(heaviestBlock)) {
         addMinerPower(blockHash);
       }
@@ -185,6 +197,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       heaviestBlock = blockHash;
       highScore = scoreBlock;
       height2HashMap[blockHeight] = blockHash;
+    }
+    
     emit StoreHeader(blockHash, candidateAddr, rewardAddr, blockHeight, bindingHash);
   }
 
@@ -309,6 +323,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
 
   function checkTxProofAndGetTime(bytes32 txid, uint32 blockHeight, uint32 confirmBlock, bytes32[] calldata nodes, uint256 index) external view override returns (bool, uint64) {
     bool r = checkTxProof(txid, blockHeight, confirmBlock, nodes, index);
+    
     if (r) {
       bytes32 blockHash = height2HashMap[blockHeight];
       uint64 timestamp = getTimestamp(blockHash);
