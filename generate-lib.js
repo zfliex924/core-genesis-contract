@@ -20,7 +20,7 @@ program.option(
 program.option("--mock <mock>",
     "if use mock",
     false);
-program.option("-c, --chainid <chainid>", "chain id", "1116")
+program.option("-c, --chainid <chainid>", "chain id", "1112")
 program.option("-d, --coreDecimal <coreDecimal>", "coreDecimal id", "1e18")
 program.option("-s, --coreStakeDecimal <coreDecimal>", "coreDecimal id", "1e24")
 
