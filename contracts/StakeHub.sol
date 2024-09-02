@@ -244,7 +244,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// @return debtAmount system debt paid
   function claimReward() external returns (uint256[] memory rewards, uint256 debtAmount) {
     address delegator = msg.sender;
-    (rewards, debtAmount) = calculateReward(delegator);
+    (rewards, debtAmount,) = calculateReward(delegator);
 
     uint256 reward = 0;
     for (uint256 i = 0; i < rewards.length; i++) {
@@ -261,9 +261,10 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// @param delegator delegator address
   /// @param rewards rewards on each type of staked assets
   /// @param debtAmount system debt paid
-  function calculateReward(address delegator) public returns (uint256[] memory rewards, uint256 debtAmount) {
+  function calculateReward(address delegator) public returns (uint256[] memory rewards, uint256 debtAmount, int256[] memory bonuses) {
     uint256 assetSize = assets.length;
     rewards = new uint256[](assetSize);
+    bonuses = new int256[](assetSize);
     uint256[] memory unclaimedRewards = new uint256[](assetSize);
     uint256 gradeLength = grades.length;
     uint256 totalReward;
@@ -283,8 +284,10 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         }
         uint256 pReward = rewards[i] * p / SatoshiPlusHelper.DENOMINATOR;
         if (p < SatoshiPlusHelper.DENOMINATOR) {
-          unclaimedRewards[i] += (rewards[i] - pReward);
+          uint256 unclaimedReward = rewards[i] - pReward;
+          unclaimedRewards[i] += unclaimedReward;
           rewards[i] = pReward;
+          bonuses[i] = -int256(unclaimedReward);
         } else if (p > SatoshiPlusHelper.DENOMINATOR) {
           uint256 bonus = pReward - rewards[i];
           uint256 assetBonus = assets[i].bonusAmount;
@@ -295,6 +298,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
             assets[i].bonusAmount -= bonus;
           }
           rewards[i] += bonus;
+          bonuses[i] = int256(bonus);
         } 
       }
       totalReward += rewards[i];
