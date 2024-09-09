@@ -102,6 +102,9 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   // Depreated in V-1.0.12
   uint256 public delegateBtcGasPrice;
 
+  // reentrant lock
+  bool private reentrantLocked;
+
   // HARDFORK V-1.0.7
   struct BtcReceipt {
     address agent;
@@ -177,13 +180,19 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     alreadyInit = true;
   }
 
+  modifier noReentrant() {
+    require(!reentrantLocked, "PledgeAgent reentrant call.");
+    reentrantLocked = true;
+    _;
+    reentrantLocked = false;
+  }
+
   /*********************** External methods ***************************/
   /// Delegate coin to a validator
   /// @param agent The operator address of validator
   /// HARDFORK V-1.0.12 Deprecated, the method is kept here for backward compatibility
-  function delegateCoin(address agent) external payable override {
-    // This require can avoid reentrant risk.
-    require(_moveCOREData(agent, msg.sender), 'No old data.');
+  function delegateCoin(address agent) external payable override noReentrant{
+    _moveCOREData(agent, msg.sender);
     distributeReward(msg.sender);
 
     (bool success, ) = CORE_AGENT_ADDR.call {value: msg.value} (abi.encodeWithSignature("proxyDelegate(address,address)", agent, msg.sender));
@@ -201,8 +210,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param agent The operator address of validator
   /// @param amount The amount of CORE to undelegate
   /// HARDFORK V-1.0.12 Deprecated, the method is kept here for backward compatibility
-  function undelegateCoin(address agent, uint256 amount) public override {
-    require(_moveCOREData(agent, msg.sender), 'No old data.');
+  function undelegateCoin(address agent, uint256 amount) public override noReentrant{
+    _moveCOREData(agent, msg.sender);
     distributeReward(msg.sender);
 
     (bool success, ) = CORE_AGENT_ADDR.call(abi.encodeWithSignature("proxyUnDelegate(address,address,uint256)", agent, msg.sender, amount));
@@ -222,8 +231,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param targetAgent The validator to transfer coin stake to
   /// @param amount The amount of CORE to transfer
   // HARDFORK V-1.0.12 Deprecated, the method is kept here for backward compatibility
-  function transferCoin(address sourceAgent, address targetAgent, uint256 amount) public override {
-    require(_moveCOREData(sourceAgent, msg.sender), 'No old data.');
+  function transferCoin(address sourceAgent, address targetAgent, uint256 amount) public override noReentrant{
+    _moveCOREData(sourceAgent, msg.sender);
     _moveCOREData(targetAgent, msg.sender);
     distributeReward(msg.sender);
 
