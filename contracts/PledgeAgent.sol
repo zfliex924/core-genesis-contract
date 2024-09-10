@@ -415,7 +415,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     (success,) = BTC_STAKE_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[],uint256[])", targetCandidates, amounts, realAmounts));
     require (success, "call BTC_STAKE_ADDR._initializeFromPledgeAgent() failed");
 
-    (success,) = BTC_AGENT_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[])", candidates, amounts));
+    (success,) = BTC_AGENT_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[])", targetCandidates, amounts));
     require (success, "call BTC_AGENT_ADDR._initializeFromPledgeAgent() failed");
   }
 
