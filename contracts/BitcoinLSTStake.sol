@@ -178,6 +178,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     checkWallet(script);
 
     (,bytes29 vinView, bytes29 voutView,) = btcTx.extractTx();
+    bool fromWallet;
     {
       uint32 _numberOfInputs = uint32(vinView.indexCompactInt(0));
       bytes32 _outpointHash;
@@ -185,7 +186,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       for (uint32 i = 0; i < _numberOfInputs; ++i) {
         (_outpointHash, _outpointIndex) = vinView.extractOutpoint(i);
         if (btcTxMap[_outpointHash].amount != 0 && btcTxMap[_outpointHash].outputIndex == _outpointIndex) {
-          require(false, "should not delegate from whitelisted multisig wallets");
+          fromWallet = true;
+          break;
         }
       }
     }
@@ -199,18 +201,21 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       require(btcAmount >= utxoFee * 2, "btc amount is too small");
       bt.amount = btcAmount;
       bt.outputIndex = outputIndex;
-      if (fee != 0) {
-        fee *= SatoshiPlusHelper.CORE_DECIMAL;
-        IStakeHub(STAKE_HUB_ADDR).addNotePayable(delegator, msg.sender, fee);
+      if (delegator != address(0)) {
+        require(!fromWallet, "should not delegate from whitelisted multisig wallets");
+        if (fee != 0) {
+          fee *= SatoshiPlusHelper.CORE_DECIMAL;
+          IStakeHub(STAKE_HUB_ADDR).addNotePayable(delegator, msg.sender, fee);
+        }
       }
       emit delegated(txid, delegator, btcAmount, fee);
     }
 
-    IBitcoinLSTToken(BTCLST_TOKEN_ADDR).mint(delegator, btcAmount);
-
-    _afterMint(delegator, btcAmount);
-
-    realtimeAmount += btcAmount;
+    if (delegator != address(0)) {
+      IBitcoinLSTToken(BTCLST_TOKEN_ADDR).mint(delegator, btcAmount);
+      _afterMint(delegator, btcAmount);
+      realtimeAmount += btcAmount;
+    }
   }
 
   /// Bitcoin LST undelegate, it is called by relayer
@@ -389,41 +394,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
 
     _afterBurn(msg.sender, burnAmount);
     realtimeAmount -= burnAmount;
-  }
-
-  /// We use `btcTxMap` to check whether an undelegate transaction is valid
-  /// This map is updated in delegate method whenever users mint
-  /// However it is possible someone sends BTC to the whitelisted multisig directly and pollutes the map (intentionally or not)
-  /// This method is added to handle such cases, it is also called by relayers
-  /// 
-  /// @param btcTx the BTC transaction data
-  /// @param blockHeight block height of the transaction
-  /// @param nodes part of the Merkle tree from the tx to the root in LE form (called Merkle proof)
-  /// @param index index of the tx in Merkle tree
-  /// @param script it is a redeem script of any wallet address.
-  function handleUnexpectedDeposit(bytes calldata btcTx, uint32 blockHeight, bytes32[] memory nodes, uint256 index, bytes memory script) external {
-    bytes32 txid = btcTx.calculateTxId();
-    bool txChecked = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
-    require(txChecked, "btc tx isn't confirmed");
-    checkWallet(script);
-
-    (,, bytes29 _voutView,) = btcTx.extractTx();
-    bytes29 _outputView;
-    bytes29 _scriptPubkeyView;
-    // Finds total number of outputs
-    uint _numberOfOutputs = uint256(_voutView.indexCompactInt(0));
-    for (uint i = 0; i < _numberOfOutputs; i++) {
-      _outputView = _voutView.indexVout(i);
-      _scriptPubkeyView = _outputView.scriptPubkey();
-      // Output is not an arbitrary data
-      if (keccak256(_scriptPubkeyView.clone()) == keccak256(script)) {
-        uint64 btcAmount = _outputView.value();
-        if (btcAmount != 0) {
-          btcTxMap[txid].amount = btcAmount;
-          btcTxMap[txid].outputIndex = uint32(i);
-        }
-      }
-    }
   }
 
   /// This method should be called whenever lst token transfer happens
@@ -695,7 +665,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
 
     // Finds total number of outputs
     uint _numberOfOutputs = uint256(_voutView.indexCompactInt(0));
-    bool opreturn;
 
     for (uint index = 0; index < _numberOfOutputs; index++) {
       _outputView = _voutView.indexVout(index);
@@ -712,11 +681,9 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
         }
       } else {
         (delegator, fee) = parsePayloadAndCheckProtocol(_arbitraryData);
-        opreturn = true;
       }
     }
     require(btcAmount != 0, "staked value is zero");
-    require(opreturn, "no opreturn");
   }
 
   /// parse the payload and do sanity check for SAT+ bytes
