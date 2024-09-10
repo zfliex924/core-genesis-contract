@@ -250,7 +250,12 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     }
     uint256 rewardSum = rewardMap[msg.sender];
     distributeReward(msg.sender);
-    return (rewardSum, true);
+
+    (bool success, bytes memory data) = STAKE_HUB_ADDR.call(abi.encodeWithSignature("proxyClaimReward(address)", msg.sender));
+    require (success, "call STAKE_HUB_ADDR.proxyClaimReward() failed");
+    uint256 proxyRewardSum =  abi.decode(data, (uint256));
+
+    return (rewardSum + proxyRewardSum, true);
   }
 
   /// calculate reward for delegator
@@ -365,29 +370,49 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param candidates list of validator candidate addresses
   function moveCandidateData(address[] memory candidates) external {
     uint256 l = candidates.length;
-    uint256[] memory amounts = new uint256[](l);
-    uint256[] memory realAmounts = new uint256[](l);
+
+    uint256 count;
+    for (uint256 i = 0; i < l; ++i) {
+      Agent storage agent = agentsMap[candidates[i]];
+      if (!agent.moved && (agent.totalDeposit != 0 || agent.coin != 0 || agent.totalBtc != 0 || agent.btc != 0)) {
+        count++;
+      }
+    }
+    if (count == 0) {
+      return;
+    }
+    uint256[] memory amounts = new uint256[](count);
+    uint256[] memory realAmounts = new uint256[](count);
+    address[] memory targetCandidates = new address[](count);
+    uint j;
 
     // move CORE stake data to CoreAgent
     for (uint256 i = 0; i < l; ++i) {
       Agent storage agent = agentsMap[candidates[i]];
-      require(!agent.moved && (agent.totalDeposit != 0 || agent.coin != 0), "candidate has been moved");
-      amounts[i] = agent.coin;
-      realAmounts[i] = agent.totalDeposit;
-      agent.coin = 0;
-      agent.moved = true;
+      if (!agent.moved && (agent.totalDeposit != 0 || agent.coin != 0 || agent.totalBtc != 0 || agent.btc != 0)) {
+        amounts[j] = agent.coin;
+        realAmounts[j] = agent.totalDeposit;
+        agent.coin = 0;
+        targetCandidates[j] = candidates[i];
+        j++;
+      }
     }
-    (bool success,) = CORE_AGENT_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[],uint256[])", candidates, amounts, realAmounts));
+    (bool success,) = CORE_AGENT_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[],uint256[])", targetCandidates, amounts, realAmounts));
     require (success, "call CORE_AGENT_ADDR._initializeFromPledgeAgent() failed");
 
     // move BTC stake data to BitcoinStake
+    j = 0;
     for (uint256 i = 0; i < l; ++i) {
       Agent storage agent = agentsMap[candidates[i]];
-      amounts[i] = agent.btc;
-      realAmounts[i] = agent.totalBtc;
-      agent.btc = 0;
+      if (!agent.moved && (agent.totalDeposit != 0 || agent.coin != 0 || agent.totalBtc != 0 || agent.btc != 0)) {
+        amounts[i] = agent.btc;
+        realAmounts[i] = agent.totalBtc;
+        agent.moved = true;
+        agent.btc = 0;
+        j++;
+      }
     }
-    (success,) = BTC_STAKE_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[],uint256[])", candidates, amounts, realAmounts));
+    (success,) = BTC_STAKE_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[],uint256[])", targetCandidates, amounts, realAmounts));
     require (success, "call BTC_STAKE_ADDR._initializeFromPledgeAgent() failed");
 
     (success,) = BTC_AGENT_ADDR.call(abi.encodeWithSignature("_initializeFromPledgeAgent(address[],uint256[])", candidates, amounts));

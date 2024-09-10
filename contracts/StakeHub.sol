@@ -257,6 +257,22 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     }
   }
 
+  /// Claim reward for PledgeAgent
+  /// @param delegator delegator address
+  /// @return reward Amounts claimed
+  function proxyClaimReward(address delegator) external returns (uint256 reward) {
+    (uint256[] memory rewards, uint256 debtAmount,) = calculateReward(delegator);
+
+    for (uint256 i = 0; i < rewards.length; i++) {
+      reward += rewards[i];
+    }
+    reward -= debtAmount;
+    if (reward != 0) {
+      Address.sendValue(payable(delegator), reward);
+      emit claimedReward(delegator, reward);
+    }
+  }
+
   /// Calculate reward for delegator
   /// @param delegator delegator address
   /// @param rewards rewards on each type of staked assets
