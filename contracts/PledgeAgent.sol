@@ -250,7 +250,12 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     }
     uint256 rewardSum = rewardMap[msg.sender];
     distributeReward(msg.sender);
-    return (rewardSum, true);
+
+    (bool success, bytes memory data) = STAKE_HUB_ADDR.call(abi.encodeWithSignature("proxyClaimReward(address)", msg.sender));
+    require (success, "call STAKE_HUB_ADDR.proxyClaimReward() failed");
+    uint256 proxyRewardSum =  abi.decode(data, (uint256));
+
+    return (rewardSum + proxyRewardSum, true);
   }
 
   /// calculate reward for delegator
