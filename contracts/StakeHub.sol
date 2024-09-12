@@ -100,6 +100,11 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   event claimedReward(address indexed delegator, uint256 amount);
   event claimedRelayerReward(address indexed relayer, uint256 amount);
 
+  modifier onlyPledgeAgent() {
+    require(msg.sender == PLEDGE_AGENT_ADDR, "the sender must be pledge agent contract");
+    _;
+  }
+
   function init() external onlyNotInit {
     // initialize list of supported assets
     assets.push(Asset("CORE", CORE_AGENT_ADDR, 6000, 0, 0));
@@ -260,7 +265,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// Claim reward for PledgeAgent
   /// @param delegator delegator address
   /// @return reward Amounts claimed
-  function proxyClaimReward(address delegator) external returns (uint256 reward) {
+  function proxyClaimReward(address delegator) external onlyPledgeAgent returns (uint256 reward) {
     (uint256[] memory rewards, uint256 debtAmount,) = calculateReward(delegator);
 
     for (uint256 i = 0; i < rewards.length; i++) {

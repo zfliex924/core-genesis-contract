@@ -178,43 +178,29 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     checkWallet(script);
 
     (,bytes29 vinView, bytes29 voutView,) = btcTx.extractTx();
-    bool fromWallet;
-    {
-      uint32 _numberOfInputs = uint32(vinView.indexCompactInt(0));
-      bytes32 _outpointHash;
-      uint32 _outpointIndex;
-      for (uint32 i = 0; i < _numberOfInputs; ++i) {
-        (_outpointHash, _outpointIndex) = vinView.extractOutpoint(i);
-        if (btcTxMap[_outpointHash].amount != 0 && btcTxMap[_outpointHash].outputIndex == _outpointIndex) {
-          fromWallet = true;
-          break;
-        }
-      }
-    }
+    bool fromWallet = parseVin(vinView);
+    require(!fromWallet, "should not delegate from whitelisted multisig wallets");
     address delegator;
-    uint64 btcAmount;
     {
+      uint64 btcAmount;
       uint32 outputIndex;
       uint256 fee;
       (btcAmount, outputIndex, delegator, fee) = parseVout(voutView, script);
       require(IRelayerHub(RELAYER_HUB_ADDR).isRelayer(msg.sender) || msg.sender == delegator, "only delegator or relayer can submit the BTC transaction");
-      require(btcAmount >= utxoFee * 2, "btc amount is too small");
       bt.amount = btcAmount;
       bt.outputIndex = outputIndex;
       if (delegator != address(0)) {
-        require(!fromWallet, "should not delegate from whitelisted multisig wallets");
+        require(btcAmount >= utxoFee * 2, "btc amount is too small");
         if (fee != 0) {
           fee *= SatoshiPlusHelper.CORE_DECIMAL;
           IStakeHub(STAKE_HUB_ADDR).addNotePayable(delegator, msg.sender, fee);
         }
+
+        IBitcoinLSTToken(BTCLST_TOKEN_ADDR).mint(delegator, btcAmount);
+        _afterMint(delegator, btcAmount);
+        realtimeAmount += btcAmount;
       }
       emit delegated(txid, delegator, btcAmount, fee);
-    }
-
-    if (delegator != address(0)) {
-      IBitcoinLSTToken(BTCLST_TOKEN_ADDR).mint(delegator, btcAmount);
-      _afterMint(delegator, btcAmount);
-      realtimeAmount += btcAmount;
     }
   }
 
@@ -235,20 +221,10 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     /// make sure the transaction is from whitelisted multisig wallets
     /// by checking that at least one of the UTXOs spent in the transaction are from them
     /// as all UTXOs of those multisig wallet are kept in `btcTxMap`
-    (,bytes29 _vinView, bytes29 voutView,) = btcTx.extractTx();
+    (,bytes29 vinView, bytes29 voutView,) = btcTx.extractTx();
     {
-      uint32 _numberOfInputs = uint32(_vinView.indexCompactInt(0));
-      bool found;
-      bytes32 _outpointHash;
-      uint32 _outpointIndex;
-      for (uint32 i = 0; i < _numberOfInputs; ++i) {
-        (_outpointHash, _outpointIndex) = _vinView.extractOutpoint(i);
-        if (btcTxMap[_outpointHash].amount != 0 && btcTxMap[_outpointHash].outputIndex == _outpointIndex) {
-          found = true;
-          break;
-        }
-      }
-      require(found, "input must from stake wallet.");
+      bool fromWallet = parseVin(vinView);
+      require(fromWallet, "input must from stake wallet.");
     }
 
     // Finds total number of outputs
@@ -643,6 +619,23 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     require(to != address(0), "invalid receiver");
     _updateUserRewards(to, false);
     userStakeInfo[to].realtimeAmount += value;
+  }
+
+  /// Parses the target input
+  ///
+  /// @return fromWallet whether the tx is from wallet.
+  function parseVin(bytes29 _vinView) internal view returns (bool fromWallet) {
+    _vinView.assertType(uint40(BitcoinHelper.BTCTypes.Vin));
+    uint32 _numberOfInputs = uint32(_vinView.indexCompactInt(0));
+    bytes32 _outpointHash;
+    uint32 _outpointIndex;
+    for (uint32 i = 0; i < _numberOfInputs; ++i) {
+      (_outpointHash, _outpointIndex) = _vinView.extractOutpoint(i);
+      if (btcTxMap[_outpointHash].amount != 0 && btcTxMap[_outpointHash].outputIndex == _outpointIndex) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Parses the target output and the op_return of a transaction

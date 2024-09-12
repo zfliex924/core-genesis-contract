@@ -243,7 +243,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// Claim rewards for delegator
   /// @param agentList The list of validators to claim rewards on, it can be empty
   /// @return (Amount claimed, Are all rewards claimed)
-  function claimReward(address[] calldata agentList) external override returns (uint256, bool) {
+  function claimReward(address[] calldata agentList) external override noReentrant returns (uint256, bool) {
     uint256 agentSize = agentList.length;
     for (uint256 i = 0; i < agentSize; ++i) {
       _moveCOREData(agentList[i], msg.sender);
@@ -405,8 +405,8 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     for (uint256 i = 0; i < l; ++i) {
       Agent storage agent = agentsMap[candidates[i]];
       if (!agent.moved && (agent.totalDeposit != 0 || agent.coin != 0 || agent.totalBtc != 0 || agent.btc != 0)) {
-        amounts[i] = agent.btc;
-        realAmounts[i] = agent.totalBtc;
+        amounts[j] = agent.btc;
+        realAmounts[j] = agent.totalBtc;
         agent.moved = true;
         agent.btc = 0;
         j++;
