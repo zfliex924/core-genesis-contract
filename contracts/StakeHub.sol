@@ -75,6 +75,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     uint32 hardcap;
     uint32 bonusRate;
     uint256 bonusAmount;
+    uint256 weight;
   }
 
   struct AssetState {
@@ -91,7 +92,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   }
 
   struct DualStakingGrade {
-    uint32 rewardRate;
+    uint32 stakeRate;
     uint32 percentage; // [0 ~ DENOMINATOR]
   }
 
@@ -107,9 +108,9 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   function init() external onlyNotInit {
     // initialize list of supported assets
-    assets.push(Asset("CORE", CORE_AGENT_ADDR, 6000, 0, 0));
-    assets.push(Asset("HASHPOWER", HASH_AGENT_ADDR, 2000, 0, 0));
-    assets.push(Asset("BTC", BTC_AGENT_ADDR, 4000, uint32(SatoshiPlusHelper.DENOMINATOR), 0));
+    assets.push(Asset("CORE", CORE_AGENT_ADDR, 6000, 0, 0, 1e22));
+    assets.push(Asset("HASHPOWER", HASH_AGENT_ADDR, 2000, 0, 0, 1e2));
+    assets.push(Asset("BTC", BTC_AGENT_ADDR, 4000, uint32(SatoshiPlusHelper.DENOMINATOR), 0, 1e12));
 
     _initializeFromPledgeAgent();
 
@@ -287,28 +288,28 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     rewards = new uint256[](assetSize);
     bonuses = new int256[](assetSize);
     uint256[] memory unclaimedRewards = new uint256[](assetSize);
+    uint256[] memory accStakedAmounts = new uint256[](assetSize);
     uint256 gradeLength = grades.length;
     uint256 totalReward;
-    uint256 totalUnclaimedReward;
     for (uint256 i = 0; i < assetSize; ++i) {
-      (rewards[i], unclaimedRewards[i]) = IAgent(assets[i].agent).claimReward(delegator);
+      (rewards[i], unclaimedRewards[i], accStakedAmounts[i]) = IAgent(assets[i].agent).claimReward(delegator);
       uint256 mask = (1 << i);
       // apply CORE grading to rewards
-      if ((gradeActive & mask) == mask && gradeLength != 0 && rewards[i] != 0) {
-        uint256 rewardRate = rewards[0] * SatoshiPlusHelper.DENOMINATOR / rewards[i];
+      if ((gradeActive & mask) == mask && gradeLength != 0 && accStakedAmounts[i] != 0) {
+        uint256 stakeRate = (accStakedAmounts[0] * assets[i].weight) / (accStakedAmounts[i] * assets[0].weight);
         uint256 p = grades[0].percentage;
         for (uint256 j = gradeLength - 1; j != 0; j--) {
-          if (rewardRate >= grades[j].rewardRate) {
+          if (stakeRate >= grades[j].stakeRate) {
             p = grades[j].percentage;
             break;
           }
         }
         uint256 pReward = rewards[i] * p / SatoshiPlusHelper.DENOMINATOR;
         if (p < SatoshiPlusHelper.DENOMINATOR) {
-          uint256 unclaimedReward = rewards[i] - pReward;
-          unclaimedRewards[i] += unclaimedReward;
+          uint256 t = rewards[i] - pReward;
+          unclaimedRewards[i] += t;
           rewards[i] = pReward;
-          bonuses[i] = -int256(unclaimedReward);
+          bonuses[i] = -int256(t);
         } else if (p > SatoshiPlusHelper.DENOMINATOR) {
           uint256 bonus = pReward - rewards[i];
           uint256 assetBonus = assets[i].bonusAmount;
@@ -320,10 +321,10 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
           }
           rewards[i] += bonus;
           bonuses[i] = int256(bonus);
-        } 
+        }
       }
       totalReward += rewards[i];
-      totalUnclaimedReward += unclaimedRewards[i];
+      unclaimedReward += unclaimedRewards[i];
     }
 
     // pay system debts from staking rewards
@@ -346,8 +347,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         }
       }
     }
-
-    unclaimedReward += totalUnclaimedReward;
   }
 
   /// Claim reward for relayer
@@ -368,7 +367,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// @param value the new value set to the parameter
   function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
     if (Memory.compareStrings(key, "grades")) {
-      // TODO more details on how the grading binary array is designed and parsed
       uint256 lastLength = grades.length;
 
       RLPDecode.RLPItem[] memory items = value.toRLPItem().toList();
@@ -381,14 +379,14 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         grades.pop();
       }
 
-      uint256 rewardRate;
+      uint256 stakeRate;
       uint256 percentage;
       for (uint256 i = 0; i < currentLength; i++) {
         RLPDecode.RLPItem[] memory itemArray = items[i].toList();
-        rewardRate = RLPDecode.toUint(itemArray[0]);
+        stakeRate = RLPDecode.toUint(itemArray[0]);
         percentage = RLPDecode.toUint(itemArray[1]);
-        if (rewardRate > SatoshiPlusHelper.DENOMINATOR * 100) {
-          revert OutOfBounds('rewardRate', rewardRate, 0, SatoshiPlusHelper.DENOMINATOR * 100);
+        if (stakeRate > 1e8) {
+          revert OutOfBounds('stakeRate', stakeRate, 0, 1e8);
         }
         if (i + 1 == currentLength) {
           if (percentage < SatoshiPlusHelper.DENOMINATOR || percentage > SatoshiPlusHelper.DENOMINATOR * 10) {
@@ -398,17 +396,17 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
           revert OutOfBounds('percentage', percentage, 1, SatoshiPlusHelper.DENOMINATOR);
         }
         if (i >= lastLength) {
-          grades.push(DualStakingGrade(uint32(rewardRate), uint32(percentage)));
+          grades.push(DualStakingGrade(uint32(stakeRate), uint32(percentage)));
         } else {
-          grades[i] = DualStakingGrade(uint32(rewardRate), uint32(percentage));
+          grades[i] = DualStakingGrade(uint32(stakeRate), uint32(percentage));
         }
       }
-      // check rewardRate & percentage in order.
+      // check stakeRate & percentage in order.
       for (uint256 i = 1; i < currentLength; i++) {
-        require(grades[i-1].rewardRate < grades[i].rewardRate, "rewardRate disorder");
+        require(grades[i-1].stakeRate < grades[i].stakeRate, "stakeRate disorder");
         require(grades[i-1].percentage < grades[i].percentage, "percentage disorder");
       }
-      require(grades[0].rewardRate == 0, "lowest rewardRate must be zero");
+      require(grades[0].stakeRate == 0, "lowest stakeRate must be zero");
     } else {
       if (value.length != 32) {
         revert MismatchParamLength(key);
@@ -466,6 +464,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     }
     return false;
   }
+
   /*********************** External methods ********************************/
   function getCandidateScores(address candidate) external view returns (uint256[] memory) {
     return candidateScoresMap[candidate];

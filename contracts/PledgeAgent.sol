@@ -5,7 +5,6 @@ import "./interface/IPledgeAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/ISystemReward.sol";
-import "./interface/ILightClient.sol";
 import "./lib/Address.sol";
 import "./lib/BitcoinHelper.sol";
 import "./lib/BytesToTypes.sol";

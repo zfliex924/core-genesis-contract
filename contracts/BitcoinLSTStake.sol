@@ -73,7 +73,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   // This field is used to store lst reward of delegators
   // key: delegator address
   // value: amount of CORE tokens claimable
-  mapping(address => uint256) public rewardMap;
+  mapping(address => Reward) public rewardMap;
 
   // the current round, it is updated in setNewRound.
   uint256 public roundTag;
@@ -129,6 +129,11 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     uint64 stakedAmount; // staked BTC amount when the last round snapshot is taken
   }
 
+  struct Reward {
+    uint256 reward;
+    uint256 accStakedAmount;
+  }
+
   /*********************** events **************************/
   event delegated(bytes32 indexed txid, address indexed delegator, uint64 amount, uint256 fee);
   event redeemed(address indexed delegator, uint64 amount, uint64 utxoFee, bytes pkscript);
@@ -150,7 +155,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     roundTag = initRound;
     btcConfirmBlock = SatoshiPlusHelper.INIT_BTC_CONFIRM_BLOCK;
     percentage = SatoshiPlusHelper.DENOMINATOR / 2;
-    gradeActive = 1;
     alreadyInit = true;
   }
 
@@ -323,8 +327,8 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param delegator the delegator address
   /// @return reward Amount claimed
   /// @return rewardUnclaimed Amount unclaimed
-  function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward, uint256 rewardUnclaimed) {
-    reward = _updateUserRewards(delegator, true);
+  function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward, uint256 rewardUnclaimed, uint256 accStakedAmount) {
+    (reward, accStakedAmount) = _updateUserRewards(delegator, true);
     // apply time grading
     if (gradeActive == 1) {
       uint256 rewardClaimed = reward * percentage / SatoshiPlusHelper.DENOMINATOR;
@@ -332,7 +336,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       reward = rewardClaimed;
     }
     
-    return (reward, rewardUnclaimed);
+    return (reward, rewardUnclaimed, accStakedAmount);
   }
 
   /*********************** External implementations ***************************/
@@ -567,17 +571,18 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param userAddress the user address to update
   /// @param claim whether the return amount of reward will be claimed
   /// @return reward amount of user reward updated/claimed
-  function _updateUserRewards(address userAddress, bool claim) internal returns (uint256 reward) {
+  function _updateUserRewards(address userAddress, bool claim) internal returns (uint256 reward, uint256 accStakedAmount) {
     UserStakeInfo storage user = userStakeInfo[userAddress];
     uint256 changeRound = user.changeRound;
     if (changeRound != 0 && changeRound < roundTag) {
       uint256 lastRoundTag = roundTag - 1;
       uint256 lastRoundReward = getRoundRewardPerBTC(lastRoundTag);
       reward = uint256(user.stakedAmount) * (lastRoundReward - getRoundRewardPerBTC(changeRound - 1)) / SatoshiPlusHelper.BTC_DECIMAL;
-
+      accStakedAmount = user.stakedAmount * (lastRoundTag - changeRound + 1);
       if (user.realtimeAmount != user.stakedAmount) {
         if (changeRound < lastRoundTag) {
           reward += (user.realtimeAmount - user.stakedAmount) * (lastRoundReward - getRoundRewardPerBTC(changeRound)) / SatoshiPlusHelper.BTC_DECIMAL;
+          accStakedAmount += (user.realtimeAmount - user.stakedAmount) * (lastRoundTag - changeRound);
         }
         user.stakedAmount = user.realtimeAmount;
       }
@@ -588,12 +593,14 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     // make sure the caller to send the rewards out
     // otherwise the rewards will be gone
     if (claim) {
-      if (rewardMap[userAddress] != 0) {
-        reward += rewardMap[userAddress];
-        rewardMap[userAddress] = 0;
+      if (rewardMap[userAddress].reward != 0) {
+        reward += rewardMap[userAddress].reward;
+        accStakedAmount += rewardMap[userAddress].accStakedAmount;
+        delete rewardMap[userAddress];
       }
     } else {
-      rewardMap[userAddress] += reward;
+      rewardMap[userAddress].reward += reward;
+      rewardMap[userAddress].accStakedAmount += accStakedAmount;
     }
   }
 
