@@ -327,6 +327,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param delegator the delegator address
   /// @return reward Amount claimed
   /// @return rewardUnclaimed Amount unclaimed
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward, uint256 rewardUnclaimed, uint256 accStakedAmount) {
     (reward, accStakedAmount) = _updateUserRewards(delegator, true);
     // apply time grading
@@ -571,6 +572,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param userAddress the user address to update
   /// @param claim whether the return amount of reward will be claimed
   /// @return reward amount of user reward updated/claimed
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function _updateUserRewards(address userAddress, bool claim) internal returns (uint256 reward, uint256 accStakedAmount) {
     UserStakeInfo storage user = userStakeInfo[userAddress];
     uint256 changeRound = user.changeRound;

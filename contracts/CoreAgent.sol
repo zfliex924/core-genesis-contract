@@ -215,6 +215,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   /// @param delegator the delegator address
   /// @return reward Amount claimed
   /// @return rewardUnclaimed Amount unclaimed
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward, uint256 rewardUnclaimed, uint256 accStakedAmount) {
     address[] storage candidates = delegatorMap[delegator].candidates;
     uint256 candidateSize = candidates.length;
@@ -394,6 +395,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   /// @param candidate the validator candidate to collect rewards
   /// @param cd the structure stores user CORE stake information
   /// @return reward The amount of CORE collected
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function collectRewardFromCandidate(address candidate, CoinDelegator storage cd) internal returns (uint256 reward, uint256 accStakedAmount) {
     uint256 stakedAmount = cd.stakedAmount;
     uint256 realtimeAmount = cd.realtimeAmount;
@@ -420,6 +422,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   /// @param changeRound the last round when the delegator acted
   /// @return reward the amount of rewards collected
   /// @return changed whether the changedRound value should be updated
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function collectReward(address candidate, uint256 stakedAmount, uint256 realtimeAmount, uint256 transferredAmount, uint256 changeRound) internal returns (uint256 reward, bool changed, uint256 accStakedAmount) {
     require(changeRound != 0, "invalid delegator");
     uint256 lastRoundTag = roundTag - 1;
@@ -511,16 +514,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     }
     return reward;
   }
-
-  /// calculate and collect reward for a delegator and either
-  /// update the corresponding record in rewardMap or clear rewardMap & return the value
-  /// @param delegator the delegator address
-  /// @param clearRewardMap clear or update rewardMap
-  /// @return reward the amount of rewards
-  function calculateRewardInternal(address delegator, bool clearRewardMap) internal returns (uint256 reward, uint256 accStakedAmount) {
-
-  }
-
+  
   /*********************** Governance ********************************/
   /// Update parameters through governance vote
   /// @param key The name of the parameter

@@ -102,6 +102,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// @param delegator the delegator address
   /// @return reward Amount claimed
   /// @return rewardUnclaimed Amount unclaimed after applying grading
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward, uint256 rewardUnclaimed, uint256 accStakedAmount) {
     (uint256 btcReward, uint256 btcRewardUnclaimed, uint256 btcAccStakedAmount) = IBitcoinStake(BTC_STAKE_ADDR).claimReward(delegator);
     (uint256 btclstReward, uint256 btclstRewardUnclaimed, uint256 btclstAccStakedAmount) = IBitcoinStake(BTCLST_STAKE_ADDR).claimReward(delegator);

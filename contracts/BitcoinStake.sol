@@ -293,6 +293,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// @param delegator the delegator address
   /// @return reward Amount claimed
   /// @return rewardUnclaimed Amount unclaimed
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward, uint256 rewardUnclaimed, uint256 accStakedAmount) {
     bool expired;
     bytes32[] storage txids = delegatorMap[delegator].txids;
@@ -623,6 +624,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// @param txid the BTC stake transaction id
   /// @return reward reward of the BTC stake transaction
   /// @return expired whether the stake is expired
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
   function collectReward(bytes32 txid) internal returns (uint256 reward, bool expired, uint256 accStakedAmount) {
     BtcTx storage bt = btcTxMap[txid];
     DepositReceipt storage dr = receiptMap[txid];
