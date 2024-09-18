@@ -13,10 +13,15 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   // it is updated on turnround
   // key: delegator address
   // value: amount of CORE tokens claimable
-  mapping(address => uint256) public rewardMap;
+  mapping(address => Reward) public rewardMap;
 
   /*********************** events **************************/
   event claimedReward(address indexed delegator, uint256 amount);
+
+  struct Reward {
+    uint256 reward;
+    uint256 accStakedAmount;
+  }
 
   /*********************** Init ********************************/
   function init() external onlyNotInit {
@@ -52,7 +57,8 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
       if (minerSize != 0) {
         avgReward = rewardList[i] / minerSize;
         for (uint256 j = 0; j < minerSize; ++j) {
-          rewardMap[miners[j]] += avgReward;
+          rewardMap[miners[j]].reward += avgReward;
+          rewardMap[miners[j]].accStakedAmount += 1;
         }
       }
     }
@@ -80,12 +86,13 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /// @param delegator the delegator address
   /// @return reward Amount claimed
   /// @return rewardUnclaimed Amount unclaimed
-  function claimReward(address delegator) external override onlyStakeHub returns (uint256, uint256) {
-    uint256 rewardSum = rewardMap[delegator];
-    if (rewardSum != 0) {
-      rewardMap[delegator] = 0;
+  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
+  function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward, uint256 /*rewardUnclaimed*/, uint256 accStakedAmount) {
+    reward = rewardMap[delegator].reward;
+    if (reward != 0) {
+      accStakedAmount = rewardMap[delegator].accStakedAmount;
+      delete rewardMap[delegator];
     }
-    return (rewardSum, 0);
   }
 
   /*********************** Governance ********************************/
