@@ -295,8 +295,10 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
       uint256 claimAmount = totalFloatReward.toUint256() * 10;
       ISystemReward(SYSTEM_REWARD_ADDR).claimRewards(payable(STAKE_HUB_ADDR), claimAmount);
       surplus += claimAmount;
-    }
-    surplus -= totalFloatReward.toUint256();
+      surplus -= totalFloatReward.toUint256();
+    } else {
+      surplus += (-totalFloatReward).toUint256();
+    }   
   }
 
   /// Claim reward for relayer

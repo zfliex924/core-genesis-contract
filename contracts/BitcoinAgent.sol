@@ -37,9 +37,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   // conversion rate between CORE and the asset
   uint256 public assetWeight;
 
-  // Time grading applied to BTC LST stakers
-  // There is no timelock set in the BTC lst stake transaction,
-  // as a result a same rate is set to apply to all
+  // the same grade percentage applies to all LST stakes
   uint256 public lstGradePercentage;
 
   struct StakeAmount {
@@ -151,7 +149,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
 
     (uint256 btclstReward, , uint256 btclstAccStakedAmount) = IBitcoinStake(BTCLST_STAKE_ADDR).claimReward(delegator);
     if (lstGradePercentage != SatoshiPlusHelper.DENOMINATOR) {
-      uint256 pLstReward = reward * lstGradePercentage / SatoshiPlusHelper.DENOMINATOR;
+      uint256 pLstReward = btclstReward * lstGradePercentage / SatoshiPlusHelper.DENOMINATOR;
       floatReward += (pLstReward.toInt256() - btclstReward.toInt256());
       btclstReward = pLstReward;
     }
