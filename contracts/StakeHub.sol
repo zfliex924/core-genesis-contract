@@ -297,7 +297,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
       surplus += claimAmount;
       surplus -= totalFloatReward.toUint256();
     } else {
-      surplus -= (-totalFloatReward).toUint256();
+      surplus += (-totalFloatReward).toUint256();
     }   
   }
 
