@@ -37,9 +37,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   // conversion rate between CORE and the asset
   uint256 public assetWeight;
 
-  // Time grading applied to BTC LST stakers
-  // There is no timelock set in the BTC lst stake transaction,
-  // as a result a same rate is set to apply to all
+  // the same grade percentage applies to all LST stakes
   uint256 public lstGradePercentage;
 
   struct StakeAmount {
