@@ -325,7 +325,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
 
   /// Prepare for the new round
   /// @param round The new round tag
-  function prepare(uint256 round) external override onlyBtcAgent {
+  function prepare(uint256 round) external override onlyStakeHub {
     // the expired BTC staking values will be removed
     address candidate;
     for (uint256 r = roundTag + 1; r <= round; ++r) {
