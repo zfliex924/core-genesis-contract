@@ -101,12 +101,6 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   }
 
   /*********************** IAgent implementations ***************************/
-  /// Prepare for the new round
-  /// @param round The new round tag
-  function prepare(uint256 round) external override {
-    // Nothing to prepare
-  }
-
   /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round.
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
@@ -211,12 +205,13 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     emit transferredCoin(sourceCandidate, targetCandidate, msg.sender, amount, newDeposit);
   }
 
+
   /// Claim reward for delegator
   /// @param delegator the delegator address
   /// @return reward Amount claimed
-  /// @return rewardUnclaimed Amount unclaimed
-  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
-  function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward, uint256 rewardUnclaimed, uint256 accStakedAmount) {
+  /// @return floatReward floating reward amount
+  /// @return accStakedAmount accumulated stake amount (multipled by rounds), used for grading calculation
+  function claimReward(address delegator, uint256 /*coreAmount*/) external override onlyStakeHub returns (uint256 reward, int256 floatReward, uint256 accStakedAmount) {
     address[] storage candidates = delegatorMap[delegator].candidates;
     uint256 candidateSize = candidates.length;
     address candidate;

@@ -29,12 +29,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   }
 
   /*********************** IAgent implementations ***************************/
-  /// Prepare for the new round
-  /// @param round The new round tag
-  function prepare(uint256 round) external override {
-    // Nothing to prepare
-  }
-
   /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
@@ -85,21 +79,22 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /// Claim reward for delegator
   /// @param delegator the delegator address
   /// @return reward Amount claimed
-  /// @return rewardUnclaimed Amount unclaimed
-  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
-  function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward, uint256 /*rewardUnclaimed*/, uint256 accStakedAmount) {
+  /// @return floatReward floating reward amount
+  /// @return accStakedAmount accumulated stake amount (multipled by rounds), used for grading calculation
+  function claimReward(address delegator, uint256 /*coreAmount*/) external override onlyStakeHub returns (uint256 reward, int256 floatReward, uint256 accStakedAmount) {
     reward = rewardMap[delegator].reward;
     if (reward != 0) {
       accStakedAmount = rewardMap[delegator].accStakedAmount;
       delete rewardMap[delegator];
     }
+    return (reward, 0, accStakedAmount);
   }
 
   /*********************** Governance ********************************/
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov view {
     revert UnsupportedGovParam(key);
   }
 }

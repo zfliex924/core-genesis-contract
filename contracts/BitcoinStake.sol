@@ -238,11 +238,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       if (bt.amount != 0 && bt.outputIndex == _outpointIndex) {
         bt.usedHeight = blockHeight;
         ++count;
-        emit undelegated(_outpointHash, _outpointIndex, txid);
-        // TODO
-        // In a future version with fixed | flexible term.
-        // It should clear receiptMap, delegatorMap, and update other fields
-      }
+        emit undelegated(_outpointHash, _outpointIndex, txid);      }
     }
     require(count != 0, "no btc tx undelegated.");
   }
