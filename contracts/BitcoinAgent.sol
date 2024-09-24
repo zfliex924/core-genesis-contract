@@ -151,7 +151,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
 
     (uint256 btclstReward, , uint256 btclstAccStakedAmount) = IBitcoinStake(BTCLST_STAKE_ADDR).claimReward(delegator);
     if (lstGradePercentage != SatoshiPlusHelper.DENOMINATOR) {
-      uint256 pLstReward = reward * lstGradePercentage / SatoshiPlusHelper.DENOMINATOR;
+      uint256 pLstReward = btclstReward * lstGradePercentage / SatoshiPlusHelper.DENOMINATOR;
       floatReward += (pLstReward.toInt256() - btclstReward.toInt256());
       btclstReward = pLstReward;
     }
