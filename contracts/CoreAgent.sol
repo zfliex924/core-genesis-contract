@@ -290,7 +290,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
       amount = candidateMap[candidate].cDelegatorMap[delegator].stakedAmount;
     }
     _undelegateCoin(candidate, delegator, amount, false);
-    Address.sendValue(payable(delegator), amount);
+    Address.sendValue(payable(PLEDGE_AGENT_ADDR), amount);
     emit undelegatedCoin(candidate, delegator, amount);
   }
 
@@ -404,7 +404,6 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
       cd.changeRound = roundTag;
     }
   }
-
 
   /// collect rewards on a candidate with full parameters
   /// @param candidate the candidate to collect reward from
