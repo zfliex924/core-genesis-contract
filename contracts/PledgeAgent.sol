@@ -216,6 +216,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
 
     (bool success, ) = CORE_AGENT_ADDR.call(abi.encodeWithSignature("proxyUnDelegate(address,address,uint256)", agent, msg.sender, amount));
     require (success, "call CORE_AGENT_ADDR.proxyUnDelegate() failed");
+    Address.sendValue(payable(msg.sender), amount);
   }
 
   /// Transfer coin stake to a new validator
