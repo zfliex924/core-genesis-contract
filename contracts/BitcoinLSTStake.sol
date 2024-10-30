@@ -6,7 +6,6 @@ import "./interface/IBitcoinStake.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/ILightClient.sol";
 import "./interface/IParamSubscriber.sol";
-import "./interface/IStakeHub.sol";
 import "./lib/BytesLib.sol";
 import "./lib/Memory.sol";
 import "./lib/BitcoinHelper.sol";
@@ -66,7 +65,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
 
   // key: roundtag
   // value: reward per BTC accumulated
-  mapping(uint256 => uint256) public accuredRewardPerBTCMap;
+  mapping(uint256 => uint256) public accruedRewardPerBTCMap;
 
   // the number of blocks to mark a BTC staking transaction as confirmed
   uint32 public btcConfirmBlock;
@@ -91,9 +90,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
 
   // a list of lst redeem/burn request whose BTC payout transaction are in pending status
   Redeem[] public redeemRequests;
-
-  // limit of burn btc amount
-  uint256 public burnBTCLimit;
 
   // key: keccak256 of pkscript.
   // value: index+1 of redeemRequests.
@@ -138,6 +134,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   event undelegatedOverflow(bytes32 indexed txid, uint32 outputIndex, uint64 expectAmount, uint64 actualAmount, bytes pkscript);
   event addedWallet(bytes32 indexed _hash, uint64 _type);
   event removedWallet(bytes32 indexed _hash, uint64 _type);
+  event rewardUpdated(uint256 round, uint256 value);
 
   modifier onlyBtcLSTToken() {
     require(msg.sender == BTCLST_TOKEN_ADDR, 'only btc lst token can call this function');
@@ -152,7 +149,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
     roundTag = initRound;
     btcConfirmBlock = SatoshiPlusHelper.INIT_BTC_CONFIRM_BLOCK;
     alreadyInit = true;
-    burnBTCLimit = 10 * SatoshiPlusHelper.BTC_DECIMAL;
   }
 
   /*********************** Interface implementations ***************************/
@@ -272,10 +268,11 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       reward += rewardList[i];
     }
     if (stakedAmount == 0) {
-      accuredRewardPerBTCMap[roundTag] = accuredRewardPerBTCMap[roundTag-1];
+      accruedRewardPerBTCMap[roundTag] = _getRoundRewardPerBTC(roundTag-1);
     } else {
-      accuredRewardPerBTCMap[roundTag] = accuredRewardPerBTCMap[roundTag-1] + reward * SatoshiPlusHelper.BTC_DECIMAL / stakedAmount;
+      accruedRewardPerBTCMap[roundTag] = _getRoundRewardPerBTC(roundTag-1) + reward * SatoshiPlusHelper.BTC_DECIMAL / stakedAmount;
     }
+    emit rewardUpdated(roundTag, accruedRewardPerBTCMap[roundTag]);
   }
 
   /// Get staked BTC amount.
@@ -319,7 +316,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param delegator the delegator address
   /// @return reward Amount claimed
   /// @return rewardUnclaimed Amount unclaimed
-  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
+  /// @return accStakedAmount accumulated stake amount (multiplied by days), used for grading calculation
   function claimReward(address delegator) external override onlyBtcAgent returns (uint256 reward, uint256 rewardUnclaimed, uint256 accStakedAmount) {
     if (paused()) {
       return (0, 0, 0);
@@ -360,8 +357,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       redeemRequests[index1 - 1].amount += amount;
       totalAmount = redeemRequests[index1 - 1].amount;
     }
-
-    require(totalAmount <= burnBTCLimit, "The cumulative burn amount has reached the upper limit");
     
     IBitcoinLSTToken(BTCLST_TOKEN_ADDR).burn(msg.sender, uint256(burnAmount));
     emit redeemed(msg.sender, amount, utxoFee, pkscript);
@@ -375,6 +370,9 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param to ERC20 standard to address
   /// @param value the amount of tokens to transfer
   function onTokenTransfer(address from, address to, uint256 value) external whenNotPaused onlyBtcLSTToken {
+    if (from == to) {
+      return;
+    }
     uint64 amount = uint64(value);
     require(uint256(amount) == value, 'btc amount limit uint64');
     _afterBurn(from, amount);
@@ -408,12 +406,6 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       } else {
         _unpause();
       }
-    } else if (Memory.compareStrings(key, "burnBTCLimit")) {
-      if (value.length != 32) {
-        revert MismatchParamLength(key);
-      }
-      uint256 newBurnBTCLimit = value.toUint256(0);
-      burnBTCLimit = newBurnBTCLimit;
     } else if (Memory.compareStrings(key, "utxoFee")) {
       if (value.length != 8) {
         revert MismatchParamLength(key);
@@ -574,7 +566,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       return 0;
     }
     for (;round != initRound; --round) {
-      reward = accuredRewardPerBTCMap[round];
+      reward = accruedRewardPerBTCMap[round];
       if (reward != 0) {
         return reward;
       }
@@ -586,7 +578,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
   /// @param userAddress the user address to update
   /// @param claim whether the return amount of reward will be claimed
   /// @return reward amount of user reward updated/claimed
-  /// @return accStakedAmount accumulated stake amount (multipled by days), used for grading calculation
+  /// @return accStakedAmount accumulated stake amount (multiplied by days), used for grading calculation
   function _updateUserRewards(address userAddress, bool claim) internal returns (uint256 reward, uint256 accStakedAmount) {
     UserStakeInfo storage user = userStakeInfo[userAddress];
     uint256 changeRound = user.changeRound;
@@ -687,7 +679,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       _scriptPubkeyWithLength = _outputView.scriptPubkeyWithLength();
       _arbitraryData = _scriptPubkeyWithLength.opReturnPayload();
 
-      // Checks whether the output is an arbitarary data or not
+      // Checks whether the output is an arbitrary data or not
       if(_arbitraryData == TypedMemView.NULL) {
         // Output is not an arbitrary data
         if (keccak256(_scriptPubkeyView.clone()) == keccak256(_lockingScript)) {

@@ -57,6 +57,9 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
     _;
   }
 
+  event claimedBtcReward(address indexed delegator, uint256 amount, uint256 unclaimedAmount, int256 floatReward, uint256 accStakedAmount, uint256 dualStakingRate);
+  event claimedBtcLstReward(address indexed delegator, uint256 amount, uint256 unclaimedAmount, int256 floatReward, uint256 accStakedAmount, uint256 percent);
+
   function init() external onlyNotInit {
     assetWeight = DEFAULT_CORE_BTC_CONVERSION;
     lstGradePercentage = SatoshiPlusHelper.DENOMINATOR;
@@ -100,11 +103,10 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// @param candidates List of candidate operator addresses
   /// @return amounts List of staked BTC amounts of all candidates in this round
   /// @return totalAmount Total BTC staked on all candidates in this round
-  function getStakeAmounts(address[] calldata candidates, uint256 /*round*/) external override returns (uint256[] memory amounts, uint256 totalAmount) {
+  function getStakeAmounts(address[] calldata candidates, uint256 /*round*/) external override onlyStakeHub returns (uint256[] memory amounts, uint256 totalAmount) {
     uint256 candidateSize = candidates.length;
     uint256[] memory lstAmounts = IBitcoinStake(BTCLST_STAKE_ADDR).getStakeAmounts(candidates);
     amounts = IBitcoinStake(BTC_STAKE_ADDR).getStakeAmounts(candidates);
-
     for (uint256 i = 0; i < candidateSize; ++i) {
       candidateMap[candidates[i]].lstStakeAmount = lstAmounts[i];
       candidateMap[candidates[i]].stakeAmount = amounts[i];
@@ -126,13 +128,14 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// @param coreAmount the accumurated amount of staked CORE.
   /// @return reward Amount claimed
   /// @return floatReward floating reward amount
-  /// @return accStakedAmount accumulated stake amount (multipled by rounds), used for grading calculation
+  /// @return accStakedAmount accumulated stake amount (multiplied by rounds), used for grading calculation
   function claimReward(address delegator, uint256 coreAmount) external override onlyStakeHub returns (uint256 reward, int256 floatReward, uint256 accStakedAmount) {
     (uint256 btcReward, uint256 btcRewardUnclaimed, uint256 btcAccStakedAmount) = IBitcoinStake(BTC_STAKE_ADDR).claimReward(delegator);
     uint256 gradeLength = grades.length;
+    uint256 p = SatoshiPlusHelper.DENOMINATOR;
     if (gradeActive && gradeLength != 0 && btcAccStakedAmount != 0) {
       uint256 stakeRate = coreAmount / btcAccStakedAmount / assetWeight;
-      uint256 p = grades[0].percentage;
+      p = grades[0].percentage;
       for (uint256 j = gradeLength - 1; j != 0; j--) {
         if (stakeRate >= grades[j].stakeRate) {
           p = grades[j].percentage;
@@ -143,16 +146,21 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
       floatReward = pReward.toInt256() - btcReward.toInt256();
       btcReward = pReward;
     }
+    emit claimedBtcReward(delegator, btcReward, btcRewardUnclaimed, floatReward, btcAccStakedAmount, p);
     if (btcRewardUnclaimed != 0) {
       floatReward -= btcRewardUnclaimed.toInt256();
     }
 
     (uint256 btclstReward, , uint256 btclstAccStakedAmount) = IBitcoinStake(BTCLST_STAKE_ADDR).claimReward(delegator);
+    int256 lstFloatReward;
     if (lstGradePercentage != SatoshiPlusHelper.DENOMINATOR) {
       uint256 pLstReward = btclstReward * lstGradePercentage / SatoshiPlusHelper.DENOMINATOR;
-      floatReward += (pLstReward.toInt256() - btclstReward.toInt256());
+      lstFloatReward = (pLstReward.toInt256() - btclstReward.toInt256());
       btclstReward = pLstReward;
     }
+    floatReward += lstFloatReward;
+
+    emit claimedBtcLstReward(delegator, btclstReward, 0, lstFloatReward, btclstAccStakedAmount, lstGradePercentage);
     return (btcReward + btclstReward, floatReward, btcAccStakedAmount + btclstAccStakedAmount);
   }
 

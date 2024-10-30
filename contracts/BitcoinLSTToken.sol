@@ -3,7 +3,6 @@ pragma solidity 0.8.4;
 
 import './interface/IBitcoinLSTToken.sol';
 import "./interface/IParamSubscriber.sol";
-import "./lib/Memory.sol";
 import "./System.sol";
 
 contract BitcoinLSTToken is IBitcoinLSTToken, System, IParamSubscriber {
@@ -46,7 +45,7 @@ contract BitcoinLSTToken is IBitcoinLSTToken, System, IParamSubscriber {
     return _allowances[owner][spender];
   }
 
-  /// @dev See {IERC20-approve}.
+  /// @dev Deprecated See {IERC20-approve}.
   /// NOTE: If `amount` is the maximum `uint256`, the allowance is not updated on
   /// `transferFrom`. This is semantically equivalent to an infinite approval.
   ///
