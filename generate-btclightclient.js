@@ -23,11 +23,11 @@ program.option("--rewardForValidatorSetChange <rewardForValidatorSetChange>",
 
 program.option("--initConsensusStateBytes <initConsensusStateBytes>",
     "init consensusState bytes, hex encoding, no prefix with 0x",
-    "00403333fcae238fa38a9b89809ff88c95ac032afa0fb545ddf7be719100000000000000602b39068f01972dee8daf592945e2b265ec72c36776e16cc40cec83e45a927dc9a30467ffff001a911408c9");
+    "000000206e7ae63b3f1c7668e3cd8e84a98d6d939c3259e2da741d68458b9e0d00000000a22458dad6a58c984f08061fa98caabe293448fd38210a81549ccbb295de650db1fa2167ffff001d90679cc1");
     
 program.option("--initChainHeight <initChainHeight>",
     "init btc chain height",
-    3081263);
+    3196081);
 
 program.option("--mock <mock>",
     "if use mock",
