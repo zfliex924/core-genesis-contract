@@ -19,6 +19,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   bool public constant POW_ALLOW_MIN_DIFFICULTY_BLOCKS = true;
   uint256 public constant POW_TARGET_SPACING = 600;
   uint256 public constant POW_LIMIT = 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+  bool public constant ENFORCE_BIP94 = true;
 
   int256 public constant ERR_DIFFICULTY = 10010; // difficulty didn't match current difficulty
   int256 public constant ERR_RETARGET = 10020;  // difficulty didn't match retarget
@@ -34,8 +35,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   int64 public constant TARGET_TIMESPAN_MUL_4 = TARGET_TIMESPAN * 4;
   int256 public constant UNROUNDED_MAX_TARGET = 2**224 - 1; // different from (2**16-1)*2**208 http://bitcoin.stackexchange.com/questions/13803/how-exactly-was-the-original-coefficient-for-difficulty-determined
 
-  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00c06125b955dbe506163eb531337338977990294ceed6a687d9e3365f6d2801000000009a8eaf7144975fe0eb160f344ebb619195738de9d7d55365abb8ac6c831e1cfa401f2b67c0ff3f1c7a7d8183";
-  uint32 public constant INIT_CHAIN_HEIGHT = 3348576;
+  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"0000c0202c25970c5d4c832660f189c3e8b2f82f469e8d44084acebaf17e1c000000000093f6302671afde251bf8d1f93b7734c4651daba81def9c54efe4efe53394907123203667bf1516190b216793";
+  uint32 public constant INIT_CHAIN_HEIGHT = 54432;
 
   uint256 public highScore;
   bytes32 public heaviestBlock;
@@ -432,7 +433,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       return (blockHeight, scoreBlock, ERR_PROOF_OF_WORK);
     }
     blockHeight = 1 + getHeight(hashPrevBlock);
-    uint32 prevBits = getBits(hashPrevBlock);
     uint32 expectBits;
     if (blockHeight % DIFFICULTY_ADJUSTMENT_INTERVAL != 0) {
       // since blockHeight is 1 more than blockNumber; OR clause is special case for 1st header
@@ -457,21 +457,28 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
         return (blockHeight, scoreBlock, ERR_DIFFICULTY);
       }
     } else {
-      uint256 prevTarget = targetFromBits(prevBits);
-      uint64 prevTime = getTimestamp(hashPrevBlock);
-
+      uint256 prevTarget;
+      
       // (blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL) is same as [getHeight(hashPrevBlock) - (DIFFICULTY_ADJUSTMENT_INTERVAL - 1)]
       bytes32 startBlock = getAdjustmentHash(hashPrevBlock);
       uint64 startTime = getTimestamp(startBlock);
 
       // compute new bits
-      int64 actualTimespan = int64(prevTime) - int64(startTime);
+      int64 actualTimespan = int64(getTimestamp(hashPrevBlock)) - int64(startTime);
       if (actualTimespan < TARGET_TIMESPAN_DIV_4) {
           actualTimespan = TARGET_TIMESPAN_DIV_4;
       }
       if (actualTimespan > TARGET_TIMESPAN_MUL_4) {
           actualTimespan = TARGET_TIMESPAN_MUL_4;
       }
+
+      if (ENFORCE_BIP94) {
+        bytes32 lastAdjustmentHash = adjustmentHashes[blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL];
+        prevTarget = targetFromBits(getBits(lastAdjustmentHash));
+      } else {
+        prevTarget = targetFromBits(getBits(hashPrevBlock));
+      }
+
       uint256 newTarget;
       assembly{
         newTarget := div(mul(actualTimespan, prevTarget), TARGET_TIMESPAN)
@@ -486,7 +493,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     uint256 blockDifficulty = 0x00000000FFFF0000000000000000000000000000000000000000000000000000 / target;
     scoreBlock = scorePrevBlock + blockDifficulty;
     return (blockHeight, scoreBlock, 0);
-  } 
+  }
 
   // reverse 32 bytes given by value
   function flip32Bytes(bytes32 input) internal pure returns (bytes32 v) {

@@ -19,6 +19,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   bool public constant POW_ALLOW_MIN_DIFFICULTY_BLOCKS = true;
   uint256 public constant POW_TARGET_SPACING = 600;
   uint256 public constant POW_LIMIT = 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+  bool public constant ENFORCE_BIP94 = true;
 
   int256 public constant ERR_DIFFICULTY = 10010; // difficulty didn't match current difficulty
   int256 public constant ERR_RETARGET = 10020;  // difficulty didn't match retarget
@@ -440,7 +441,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       return (blockHeight, scoreBlock, ERR_PROOF_OF_WORK);
     }
     blockHeight = 1 + getHeight(hashPrevBlock);
-    uint32 prevBits = getBits(hashPrevBlock);
     uint32 expectBits;
     if (blockHeight % DIFFICULTY_ADJUSTMENT_INTERVAL != 0) {
       // since blockHeight is 1 more than blockNumber; OR clause is special case for 1st header
@@ -465,21 +465,28 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
         return (blockHeight, scoreBlock, ERR_DIFFICULTY);
       }
     } else {
-      uint256 prevTarget = targetFromBits(prevBits);
-      uint64 prevTime = getTimestamp(hashPrevBlock);
+      uint256 prevTarget;
 
       // (blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL) is same as [getHeight(hashPrevBlock) - (DIFFICULTY_ADJUSTMENT_INTERVAL - 1)]
       bytes32 startBlock = getAdjustmentHash(hashPrevBlock);
       uint64 startTime = getTimestamp(startBlock);
 
       // compute new bits
-      int64 actualTimespan = int64(prevTime) - int64(startTime);
+      int64 actualTimespan = int64(getTimestamp(hashPrevBlock)) - int64(startTime);
       if (actualTimespan < TARGET_TIMESPAN_DIV_4) {
           actualTimespan = TARGET_TIMESPAN_DIV_4;
       }
       if (actualTimespan > TARGET_TIMESPAN_MUL_4) {
           actualTimespan = TARGET_TIMESPAN_MUL_4;
       }
+
+      if (ENFORCE_BIP94) {
+        bytes32 lastAdjustmentHash = adjustmentHashes[blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL];
+        prevTarget = targetFromBits(getBits(lastAdjustmentHash));
+      } else {
+        prevTarget = targetFromBits(getBits(hashPrevBlock));
+      }
+
       uint256 newTarget;
       assembly{
         newTarget := div(mul(actualTimespan, prevTarget), TARGET_TIMESPAN)
@@ -494,7 +501,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     uint256 blockDifficulty = 0x00000000FFFF0000000000000000000000000000000000000000000000000000 / target;
     scoreBlock = scorePrevBlock + blockDifficulty;
     return (blockHeight, scoreBlock, 0);
-  } 
+  }
 
   // reverse 32 bytes given by value
   function flip32Bytes(bytes32 input) internal pure returns (bytes32 v) {
