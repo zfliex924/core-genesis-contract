@@ -19,7 +19,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   bool public constant POW_ALLOW_MIN_DIFFICULTY_BLOCKS = true;
   uint256 public constant POW_TARGET_SPACING = 600;
   uint256 public constant POW_LIMIT = 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
-  bool public constant ENFORCE_BIP94 = true;
+  bool public constant ENFORCE_BIP94 = false;
 
   int256 public constant ERR_DIFFICULTY = 10010; // difficulty didn't match current difficulty
   int256 public constant ERR_RETARGET = 10020;  // difficulty didn't match retarget
@@ -35,8 +35,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   int64 public constant TARGET_TIMESPAN_MUL_4 = TARGET_TIMESPAN * 4;
   int256 public constant UNROUNDED_MAX_TARGET = 2**224 - 1; // different from (2**16-1)*2**208 http://bitcoin.stackexchange.com/questions/13803/how-exactly-was-the-original-coefficient-for-difficulty-determined
 
-  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"0000c0202c25970c5d4c832660f189c3e8b2f82f469e8d44084acebaf17e1c000000000093f6302671afde251bf8d1f93b7734c4651daba81def9c54efe4efe53394907123203667bf1516190b216793";
-  uint32 public constant INIT_CHAIN_HEIGHT = 54432;
+  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00a01930c6af129a74fb22e54ba040c6eb72499bef2b7b5cb00ea01a2003000000000000f5a5200660f9e830ef19ab9367b592fa649d4af56bc61c736f556f042c17c98fb4756967ffff001a2df4d80d";
+  uint32 public constant INIT_CHAIN_HEIGHT = 3578400;
 
   uint256 public highScore;
   bytes32 public heaviestBlock;
@@ -91,6 +91,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   /*********************** events **************************/
   event StoreHeaderFailed(bytes32 indexed blockHash, int256 indexed returnCode);
   event StoreHeader(bytes32 indexed blockHash, address candidate, address indexed rewardAddr, uint32 indexed height, bytes32 bindingHash);
+  event AddMinerPower(bytes32 indexed blockHash, address indexed candidate, address indexed miner);
 
   /*********************** init **************************/
   /// Initialize 
@@ -244,6 +245,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
       r.powerMap[candidate].miners.push(miner);
       r.powerMap[candidate].btcBlocks.push(blockHash);
+      emit AddMinerPower(blockHash, candidate, miner);
     }
   }
 
@@ -458,7 +460,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
     } else {
       uint256 prevTarget;
-      
+
       // (blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL) is same as [getHeight(hashPrevBlock) - (DIFFICULTY_ADJUSTMENT_INTERVAL - 1)]
       bytes32 startBlock = getAdjustmentHash(hashPrevBlock);
       uint64 startTime = getTimestamp(startBlock);

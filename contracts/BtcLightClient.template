@@ -19,7 +19,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   bool public constant POW_ALLOW_MIN_DIFFICULTY_BLOCKS = true;
   uint256 public constant POW_TARGET_SPACING = 600;
   uint256 public constant POW_LIMIT = 0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
-  bool public constant ENFORCE_BIP94 = true;
+  bool public constant ENFORCE_BIP94 = false;
 
   int256 public constant ERR_DIFFICULTY = 10010; // difficulty didn't match current difficulty
   int256 public constant ERR_RETARGET = 10020;  // difficulty didn't match retarget
@@ -91,6 +91,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   /*********************** events **************************/
   event StoreHeaderFailed(bytes32 indexed blockHash, int256 indexed returnCode);
   event StoreHeader(bytes32 indexed blockHash, address candidate, address indexed rewardAddr, uint32 indexed height, bytes32 bindingHash);
+  event AddMinerPower(bytes32 indexed blockHash, address indexed candidate, address indexed miner);
 
   /*********************** init **************************/
   /// Initialize 
@@ -244,6 +245,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
       r.powerMap[candidate].miners.push(miner);
       r.powerMap[candidate].btcBlocks.push(blockHash);
+      emit AddMinerPower(blockHash, candidate, miner);
     }
   }
 
