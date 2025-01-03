@@ -21,6 +21,7 @@
     "shanghaiTime": 0,
     "keplerTime": 0,
     "demeterTime": 0,
+    "cancunTime": 0,
     "satoshi": {
       "period": 3,
       "epoch": 20,
