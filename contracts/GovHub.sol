@@ -239,7 +239,9 @@ contract GovHub is System, IParamSubscriber {
   function getState(uint256 proposalId) public view returns (ProposalState) {
     require(proposalCount >= proposalId && proposalId != 0, "state: invalid proposal id");
     Proposal storage proposal = proposals[proposalId];
-    if (proposal.canceled) {
+    if (proposal.executed) {
+      return ProposalState.Executed;
+    } else if (proposal.canceled) {
       return ProposalState.Canceled;
     } else if (block.number <= proposal.startBlock) {
       return ProposalState.Pending;
@@ -247,9 +249,7 @@ contract GovHub is System, IParamSubscriber {
       return ProposalState.Active;
     } else if (proposal.forVotes <= proposal.againstVotes || proposal.forVotes <= proposal.totalVotes / 2) {
       return ProposalState.Defeated;
-    } else if (proposal.executed) {
-      return ProposalState.Executed;
-    } else if (block.number > proposal.endBlock + (executingPeriod == 0 ? EXECUTING_PERIOD : executingPeriod)) {
+    } else if (block.number > proposal.endBlock + executingPeriod) {
       return ProposalState.Expired;
     } else {
       return ProposalState.Succeeded;
