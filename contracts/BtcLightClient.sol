@@ -35,8 +35,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   int64 public constant TARGET_TIMESPAN_MUL_4 = TARGET_TIMESPAN * 4;
   int256 public constant UNROUNDED_MAX_TARGET = 2**224 - 1; // different from (2**16-1)*2**208 http://bitcoin.stackexchange.com/questions/13803/how-exactly-was-the-original-coefficient-for-difficulty-determined
 
-  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00404b2878f7adc4720f60656d31fd5111fa1b526026bf1084d496c90300000000000000552135cb71df767cb6425e703e8223dce06e4f8b60fece9aef7ad54e5e2361fa37ba7d679a0a011953099de5";
-  uint32 public constant INIT_CHAIN_HEIGHT = 3612672;
+  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00805629400be5c2b190764772a2d65184b55687f8ef12c1ea5173230000000000000000833444ba5744737d9318db1cca7c49307a2f43a10048dbed4a31f472387eaee7300ea467c0ff3f1990e40d40";
+  uint32 public constant INIT_CHAIN_HEIGHT = 3771936;
 
   uint256 public highScore;
   bytes32 public heaviestBlock;
@@ -110,6 +110,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     adjustmentHashes[adjustment] = blockHash;
     bytes memory nodeBytes = encode(initBytes, rewardAddr, scoreBlock, INIT_CHAIN_HEIGHT, adjustment, candidateAddr);
     blockChain[blockHash] = nodeBytes;
+    height2HashMap[INIT_CHAIN_HEIGHT] = blockHash;
     rewardForSyncHeader = INIT_REWARD_FOR_SYNC_HEADER;
     callerCompensationMolecule=CALLER_COMPENSATION_MOLECULE;
     roundSize = ROUND_SIZE;
@@ -131,6 +132,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     adjustmentHashes[adjustment] = blockHash;
     bytes memory nodeBytes = encode(initBytes, rewardAddr, scoreBlock, height, adjustment, candidateAddr);
     blockChain[blockHash] = nodeBytes;
+    height2HashMap[height] = blockHash;
   }
 
   /// Store a BTC block in Core blockchain
@@ -462,7 +464,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       uint256 prevTarget;
 
       // (blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL) is same as [getHeight(hashPrevBlock) - (DIFFICULTY_ADJUSTMENT_INTERVAL - 1)]
-      bytes32 startBlock = getAdjustmentHash(hashPrevBlock);
+      bytes32 startBlock = height2HashMap[blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL];
       uint64 startTime = getTimestamp(startBlock);
 
       // compute new bits
@@ -475,8 +477,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       }
 
       if (ENFORCE_BIP94) {
-        bytes32 lastAdjustmentHash = adjustmentHashes[blockHeight - DIFFICULTY_ADJUSTMENT_INTERVAL];
-        prevTarget = targetFromBits(getBits(lastAdjustmentHash));
+        prevTarget = targetFromBits(getBits(startBlock));
       } else {
         prevTarget = targetFromBits(getBits(hashPrevBlock));
       }
@@ -485,6 +486,10 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       assembly{
         newTarget := div(mul(actualTimespan, prevTarget), TARGET_TIMESPAN)
       }
+
+      if (newTarget > POW_LIMIT)
+        newTarget = POW_LIMIT;
+
       uint32 newBits = toCompactBits(newTarget);
       if (bits != newBits && newBits != 0) { // newBits != 0 to allow first header
         return (blockHeight, scoreBlock, ERR_RETARGET);
