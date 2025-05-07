@@ -588,7 +588,7 @@ contract BitcoinLSTStake is IBitcoinStake, System, IParamSubscriber, ReentrancyG
       reward = uint256(user.stakedAmount) * (lastRoundReward - _getRoundRewardPerBTC(changeRound - 1)) / SatoshiPlusHelper.BTC_DECIMAL;
       accStakedAmount = user.stakedAmount * (lastRoundTag - changeRound + 1);
       if (user.realtimeAmount != user.stakedAmount) {
-        if (changeRound < lastRoundTag) {
+        if (changeRound < lastRoundTag) { 
           reward += (user.realtimeAmount - user.stakedAmount) * (lastRoundReward - _getRoundRewardPerBTC(changeRound)) / SatoshiPlusHelper.BTC_DECIMAL;
           accStakedAmount += (user.realtimeAmount - user.stakedAmount) * (lastRoundTag - changeRound);
         }
