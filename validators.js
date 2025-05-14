@@ -25,12 +25,12 @@ const validators = [
     "feeAddr": "0xDA37ccECBB2D7C83aE27eE2BeBFE8EBCe162c600",
   },
   {
-   "consensusAddr": "0x0BF80E376f6B9D4C8377d7B45FA2622748f27027",
-   "feeAddr": "0x0BF80E376f6B9D4C8377d7B45FA2622748f27027",
+   "consensusAddr": "0x37d129288af5A561472D09F1174f4f86CF13E92F",
+   "feeAddr": "0x37d129288af5A561472D09F1174f4f86CF13E92F",
  },
  {
-   "consensusAddr": "0x4e8baa8f9af84936d1272b52c6086ac1f2dfcb3e",
-   "feeAddr": "0x4e8baa8f9af84936d1272b52c6086ac1f2dfcb3e",
+   "consensusAddr": "0x8073CF54f45fe63F7F3Cd64c22447aaA528B198E",
+   "feeAddr": "0x8073CF54f45fe63F7F3Cd64c22447aaA528B198E",
  }
 ];
 
