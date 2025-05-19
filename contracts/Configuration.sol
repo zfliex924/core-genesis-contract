@@ -65,6 +65,7 @@ contract Configuration is System {
     error InvalidIssuer(address issuer);
     error ZeroEvents();
     error TooManyEvents();
+    error TooManyFunctionSigs();
     error TooManyRewardAddresses();
     error InvalidGasValue(uint gas);
     error IssuerNotFound(address issuer);
@@ -157,7 +158,6 @@ contract Configuration is System {
             address contractAddr = items[0].toAddress();
             bool isActive = items[1].toBoolean();
             _setConfigStatus(contractAddr, isActive);
-            emit ConstantUpdated();
         } else if (Memory.compareStrings(key, "updatedMaximumRewardAddress")) {
             if (value.length != 32) {
                 revert MismatchParamLength(key);
@@ -246,7 +246,7 @@ contract Configuration is System {
         }
 
         if (functions.length > MAX_FUNCTIONS) {
-            revert TooManyEvents();
+            revert TooManyFunctionSigs();
         }
 
         // Validate reward percentages for all events
@@ -309,12 +309,16 @@ contract Configuration is System {
             revert AddressNotFound(contractAddr);
         }
 
-        if (events.length > MAX_EVENTS && events.length != 0) {
+        if (events.length > MAX_EVENTS) {
             revert TooManyEvents();
         }
 
+        if (events.length == 0) {
+            revert ZeroEvents();
+        }
+
         if (functions.length > MAX_FUNCTIONS) {
-            revert TooManyEvents();
+            revert TooManyFunctionSigs();
         }
 
         // Validate reward percentages for all events
