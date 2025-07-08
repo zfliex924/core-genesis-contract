@@ -24,6 +24,7 @@
     "athenaTime": 0,
     "cancunTime": 0,
     "theseusTime": 0,
+    "theseusFixTime": 0,
     "satoshi": {
       "period": {{initCycle.blockPeriod}},
       "epoch": {{initCycle.epochLength}},
