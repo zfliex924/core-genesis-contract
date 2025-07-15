@@ -40,6 +40,17 @@ contract CandidateHubMock is CandidateHub {
         roundTag = value;
     }
 
+    function setDues(uint value) external {
+        dues = value;
+    }
+
+    function mockRegister(uint256 value) external {
+        for (uint256 i = 0; i < value; i++) {
+            candidateSet.push();
+        }
+    }
+
+
     function setValidatorCount(uint256 value) external {
         validatorCount = value;
     }
@@ -105,12 +116,16 @@ contract CandidateHubMock is CandidateHub {
         return candidateSet[operateMap[k] - 1];
     }
 
-    function getScoreMock(address[] memory candidates, uint256 round) external returns (uint256[] memory scores) {
-        scores = IStakeHub(STAKE_HUB_ADDR).getHybridScore(
+    function getConsensusMap(address consensusAddr) public view returns (uint256) {
+        return consensusMap[consensusAddr];
+    }
+
+    function getScoreMock(address[] memory candidates, uint256 round) external returns (uint256[] memory hybridScores) {
+        hybridScores = IStakeHub(STAKE_HUB_ADDR).getHybridScore(
             candidates,
             round
         );
-        return scores;
+        return hybridScores;
     }
 
     function getScores() external view returns (uint256[] memory) {
@@ -121,7 +136,7 @@ contract CandidateHubMock is CandidateHub {
         address[] memory candidateList,
         uint256[] memory scoreList,
         uint256 count
-    ) public pure returns (address[] memory validatorList) {
+    ) public view returns (address[] memory validatorList) {
         return getValidators(candidateList, scoreList, count);
     }
 
@@ -133,26 +148,30 @@ contract CandidateHubMock is CandidateHub {
         address operateAddr,
         address consensusAddr,
         address payable feeAddr,
-        uint32 commissionThousandths
+        uint32 commissionThousandths,
+        bytes calldata voteAddr
     ) external payable onlyInit {
         uint256 status = SET_CANDIDATE;
         candidateSet.push(
-            Candidate(
-                operateAddr,
-                consensusAddr,
-                feeAddr,
-                commissionThousandths,
-                msg.value,
-                status,
-                roundTag,
-                commissionThousandths
-            )
+            Candidate({
+                operateAddr: operateAddr,
+                consensusAddr: consensusAddr,
+                feeAddr: feeAddr,
+                commissionThousandths: commissionThousandths,
+                margin: msg.value,
+                status: status,
+                commissionLastChangeRound: roundTag,
+                commissionLastRoundValue: commissionThousandths,
+                voteAddr: voteAddr,
+                agent: address(0),
+                description: Description("", "", "", "")
+            })
         );
         uint256 index = candidateSet.length;
         operateMap[operateAddr] = index;
         consensusMap[consensusAddr] = index;
 
-        emit registered(operateAddr, consensusAddr, feeAddr, commissionThousandths, msg.value);
+        emit registered(operateAddr, consensusAddr, feeAddr, commissionThousandths, msg.value, voteAddr);
     }
     /********************* External methods  ****************************/
 
@@ -168,6 +187,54 @@ contract CandidateHubMock is CandidateHub {
             super.nextRound();
         }
     }
+    function getValidatorsOld(address[] memory candidateList, uint256[] memory scoreList, uint256 count) internal pure returns (address[] memory validatorList){
+        uint256 candidateSize = candidateList.length;
+        // quicksort by scores O(nlogk)
+        uint256 l = 0;
+        uint256 r = 0;
+        if (count < candidateSize) {
+        r = candidateSize - 1;
+        } else {
+        count = candidateSize;
+        }
+        while (l < r) {
+        // partition
+        uint256 ll = l;
+        uint256 rr = r;
+        address back = candidateList[ll];
+        uint256 p = scoreList[ll];
+        while (ll < rr) {
+            while (ll < rr && scoreList[rr] < p) {
+            rr = rr - 1;
+            }
+            candidateList[ll] = candidateList[rr];
+            scoreList[ll] = scoreList[rr];
+            while (ll < rr && scoreList[ll] >= p) {
+            ll = ll + 1;
+            }
+            candidateList[rr] = candidateList[ll];
+            scoreList[rr] = scoreList[ll];
+        }
+        candidateList[ll] = back;
+        scoreList[ll] = p;
+        uint256 mid = ll;
+        // sub sort
+        if (mid < count) {
+            l = mid + 1;
+        } else if (mid > count) {
+            r = mid - 1;
+        } else {
+            break;
+        }
+        }
+        uint256 d = candidateSize - count;
+        if (d != 0) {
+        assembly {
+            mstore(candidateList, sub(mload(candidateList), d))
+        }
+        }
+        return candidateList;
+  }
     /// The `turn round` workflowf
     /// @dev this method is called by Golang consensus engine at the end of a round
     function turnRoundOld() external onlyCoinbase onlyInit onlyZeroGasPrice {
@@ -222,9 +289,9 @@ contract CandidateHubMock is CandidateHub {
 
         // calculate the hybrid score for all valid candidates and 
         // choose top ones to form the validator set of the new round
-        (uint256[] memory scores) =
-                                IPledgeAgentMock(PLEDGE_AGENT_ADDR).getHybridScoreOld(candidates, powers, roundTag);
-        address[] memory validatorList = getValidators(candidates, scores, validatorCount);
+        uint256[] memory hybridScores;
+        (hybridScores) = IPledgeAgentMock(PLEDGE_AGENT_ADDR).getHybridScoreOld(candidates, powers, roundTag);
+        address[] memory validatorList = getValidatorsOld(candidates, hybridScores, validatorCount);
 
         // prepare arguments, and notify ValidatorSet contract
         uint256 totalCount = validatorList.length;
@@ -237,7 +304,7 @@ contract CandidateHubMock is CandidateHub {
             Candidate storage c = candidateSet[index - 1];
             consensusAddrList[i] = c.consensusAddr;
             feeAddrList[i] = c.feeAddr;
-            if (scores[i] == 0) {
+            if (hybridScores[i] == 0) {
                 commissionThousandthsList[i] = 1000;
             } else {
                 commissionThousandthsList[i] = c.commissionThousandths;
@@ -245,7 +312,7 @@ contract CandidateHubMock is CandidateHub {
             statusList[index - 1] |= SET_VALIDATOR;
         }
 
-        IValidatorSet(VALIDATOR_CONTRACT_ADDR).updateValidatorSet(validatorList, consensusAddrList, feeAddrList, commissionThousandthsList);
+        IValidatorSetMock(VALIDATOR_CONTRACT_ADDR).updateValidatorSetOld(validatorList, consensusAddrList, feeAddrList, commissionThousandthsList);
 
         // clean slash contract
         ISlashIndicator(SLASH_CONTRACT_ADDR).clean();

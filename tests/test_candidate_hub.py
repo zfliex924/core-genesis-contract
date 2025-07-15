@@ -6,8 +6,10 @@ from eth_account import Account
 from brownie import accounts, UnRegisterReentry
 from brownie.test import given, strategy
 from brownie.network.transaction import Status, TransactionReceipt
+from tests.delegate import delegate_btc_success, delegate_coin_success
+from .constant import Utils
 from .utils import random_address, expect_event, padding_left, update_system_contract_address
-from .common import register_candidate, turn_round, get_candidate
+from .common import *
 
 
 @pytest.fixture(scope="module")
@@ -25,11 +27,21 @@ def set_inactive_status(candidate_hub):
     return candidate_hub.SET_INACTIVE()
 
 
+@pytest.fixture()
+def set_candidate():
+    operators = []
+    consensuses = []
+    for operator in accounts[5:8]:
+        operators.append(operator)
+        consensuses.append(register_candidate(operator=operator))
+    return operators, consensuses
+
+
 def test_register(candidate_hub, required_margin):
     consensus_address = random_address()
     commission = 10
     tx: TransactionReceipt = candidate_hub.register(
-        consensus_address, accounts[0], commission,
+        consensus_address, accounts[0], commission, random_vote_address(),
         {'from': accounts[0], 'value': required_margin}
     )
     assert tx.status == Status.Confirmed
@@ -38,6 +50,236 @@ def test_register(candidate_hub, required_margin):
 def test_register_multiple_times():
     for idx in range(10):
         register_candidate(operator=accounts[idx])
+
+
+def test_canDelegate_true(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    for operator in operators:
+        assert candidate_hub.canDelegate(operator) is True
+    turn_round()
+
+
+def test_canDelegate_false(candidate_hub):
+    operators = []
+    for operator in accounts[5:8]:
+        operators.append(operator)
+    for operator in operators:
+        assert candidate_hub.canDelegate(operator) is False
+    turn_round()
+
+
+@pytest.mark.parametrize("validator_state", [['minor', True], ['major', False]])
+def test_slash_candelegate(candidate_hub, validator_state, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    tx0 = None
+    if validator_state[0] == 'minor':
+        slash_threshold = slash_indicator.misdemeanorThreshold()
+        event_name = 'validatorMisdemeanor'
+    else:
+        slash_threshold = slash_indicator.felonyThreshold()
+        event_name = 'validatorFelony'
+    for count in range(slash_threshold):
+        tx0 = slash_indicator.slash(consensuses[0])
+    assert event_name in tx0.events
+    assert candidate_hub.canDelegate(operators[0]) is validator_state[1]
+    turn_round()
+
+
+def test_cancel_registration_false(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    candidate_hub.unregister({'from': operators[0]})
+    assert candidate_hub.canDelegate(operators[0]) is False
+    turn_round()
+
+
+def test_validator_not_exist_false(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    assert candidate_hub.canDelegate(consensuses[0]) is False
+    turn_round()
+
+
+def test_is_validator_true(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    assert candidate_hub.isValidator(operators[0]) is True
+    turn_round()
+
+
+def test_is_validator_false(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    assert candidate_hub.isValidator(consensuses[0]) is False
+    turn_round()
+
+
+@pytest.mark.parametrize("validator_state", ['minor', 'major'])
+def test_slash_is_validator(candidate_hub, validator_state, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    if validator_state == 'minor':
+        slash_threshold = slash_indicator.misdemeanorThreshold()
+    else:
+        slash_threshold = slash_indicator.felonyThreshold()
+    for count in range(slash_threshold):
+        slash_indicator.slash(consensuses[0])
+    assert candidate_hub.isValidator(operators[0]) is True
+    turn_round()
+
+
+def test_isValidator_canceled(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    candidate_hub.unregister({'from': operators[0]})
+    assert candidate_hub.isValidator(operators[0]) is False
+    turn_round()
+
+
+def test_isValidator_not_exist(candidate_hub):
+    turn_round()
+    assert candidate_hub.isValidator(accounts[0]) is False
+
+
+def test_isCandidateByOperate_true(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    assert candidate_hub.isCandidateByOperate(operators[0])
+
+
+def test_isCandidateByOperate_fasle(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    assert candidate_hub.isCandidateByOperate(consensuses[0]) is False
+
+
+def test_isCandidateByOperate_zeroAddress(candidate_hub, set_candidate):
+    zero_address = "0x0000000000000000000000000000000000000000"
+    assert candidate_hub.isCandidateByOperate(zero_address) is False
+
+
+def test_only_validator_can_call(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    with brownie.reverts("the msg sender must be validatorSet contract"):
+        candidate_hub.jailValidator(consensuses[0], 2, 1e5)
+
+
+def test_jail_nonexistent_address(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    update_system_contract_address(candidate_hub, validator_set=accounts[0])
+    tx = candidate_hub.jailValidator(consensuses[0], 2, 1e5)
+    assert len(tx.events) == 0
+
+
+def test_jail_insufficient_deposit(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    update_system_contract_address(candidate_hub, validator_set=accounts[0])
+    new_dues = 1e10
+    candidate_hub.setDues(new_dues)
+    tx = candidate_hub.jailValidator(operators[0], 2, 1e5)
+    assert 'unregistered' in tx.events
+
+
+def test_jail_already_jailed(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    update_system_contract_address(candidate_hub, validator_set=accounts[0])
+    round = 2
+    candidate_hub.jailValidator(operators[0], round, 1e5)
+    assert candidate_hub.jailMap(operators[0]) == get_current_round() + round
+    candidate_hub.jailValidator(operators[0], round, 1e5)
+    assert candidate_hub.jailMap(operators[0]) == get_current_round() + round * 2
+
+
+def test_jail_first_time(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    update_system_contract_address(candidate_hub, validator_set=accounts[0])
+    round = 2
+    tx = candidate_hub.jailValidator(operators[0], round, 1e5)
+    assert 'statusChanged' in tx.events
+    assert candidate_hub.jailMap(operators[0]) == get_current_round() + round
+
+
+def test_getRoundTag_success(candidate_hub):
+    init_round = 7
+    round_tag = candidate_hub.getRoundTag()
+    assert round_tag == init_round
+
+
+def test_turnRound_after_new_validator(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    for operator in accounts[10:12]:
+        operators.append(operator)
+        consensuses.append(register_candidate(operator=operator))
+    tx = turn_round(consensuses, round_count=2)
+    round_tag = 10
+    assert tx.events['turnedRound']['round'] == round_tag
+
+
+def test_turnRound_after_slash(candidate_hub, set_candidate, slash_indicator):
+    operators, consensuses = set_candidate
+    turn_round()
+    for index, slash in enumerate([slash_indicator.misdemeanorThreshold(), slash_indicator.felonyThreshold()]):
+        for i in range(slash):
+            slash_indicator.slash(consensuses[index])
+    tx = turn_round(consensuses)
+    round_tag = 9
+    assert tx.events['turnedRound']['round'] == round_tag
+
+
+def test_turnRound_after_validator_cancel(candidate_hub, set_candidate, slash_indicator):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    candidate_hub.unregister({'from': operators[0]})
+    tx = turn_round(consensuses)
+    assert tx.events['turnedRound']['round'] == get_current_round()
+
+
+def test_turnRound_no_staked_validators(candidate_hub, set_candidate, slash_indicator):
+    operators, consensuses = set_candidate
+    turn_round()
+    tx = turn_round(consensuses)
+    assert tx.events['turnedRound']['round'] == get_current_round()
+
+
+def test_turnRound_burn_validator_rewards(candidate_hub, set_candidate, slash_indicator):
+    operators, consensuses = set_candidate
+    turn_round()
+    tx = turn_round(consensuses)
+    assert 'receiveDeposit' in tx.events
+
+
+def test_turnRound_update_validator_info(candidate_hub, set_candidate, slash_indicator):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    candidate_hub.unregister({'from': operators[0]})
+    tx = turn_round(consensuses)
+    assert 'validatorSetUpdated' in tx.events
+
+
+def test_turnround_update_voteaddrlist_success(candidate_hub, validator_set, slash_indicator):
+    operators = []
+    consensuses = []
+    init_vote_address = 0x99a1dbde53606922478636c65b06f9683e10bde7f6cbee8f0ebbb803d0beef91fa47f2727ef8533cb5166e54a52d08b8
+    vote_address_list = [random_vote_address() for _ in range(3)]
+    for index, operator in enumerate(accounts[5:8]):
+        operators.append(operator)
+        consensuses.append(register_candidate(operator=operator, vote_address=vote_address_list[index]))
+    assert validator_set.getValidatorsAndVoteAddresses()[1] == [Web3.to_hex(init_vote_address)] * 5
+    tx = turn_round()
+    assert 'validatorSetUpdated' in tx.events
+    assert validator_set.getValidatorsAndVoteAddresses()[0] == consensuses
+    assert validator_set.getValidatorsAndVoteAddresses()[1] == vote_address_list
+    turn_round(consensuses)
+    assert validator_set.currentValidatorSet(0) == [operators[0], consensuses[0], operators[0], 1000, 0,
+                                                    vote_address_list[0], 0]
 
 
 @pytest.mark.parametrize("times", [
@@ -49,24 +291,25 @@ def test_register_multiple_times():
 def test_duplicate_operator(candidate_hub, required_margin, times):
     for _ in range(times):
         candidate_hub.register(
-            random_address(), accounts[0], 1,
+            random_address(), accounts[0], 1, random_vote_address(),
             {'from': accounts[0], 'value': required_margin}
         )
 
 
 def test_duplicate_consensus_address(candidate_hub, required_margin):
     consensus_address = random_address()
-    candidate_hub.register(consensus_address, accounts[0], 1, {'from': accounts[0], 'value': required_margin})
+    candidate_hub.register(consensus_address, accounts[0], 1, random_vote_address(),
+                           {'from': accounts[0], 'value': required_margin})
     with brownie.reverts("consensus already exists"):
         candidate_hub.register(
-            consensus_address, accounts[1], 1, {'from': accounts[1], 'value': required_margin}
+            consensus_address, accounts[1], 1, random_vote_address(), {'from': accounts[1], 'value': required_margin}
         )
 
 
 @given(commission=strategy('uint32', max_value=1000, exclude=(0, 1000)))
 def test_register_commission(candidate_hub, required_margin, commission):
     candidate_hub.register(
-        random_address(), accounts[0], commission,
+        random_address(), accounts[0], commission, random_vote_address(),
         {'from': accounts[0], 'value': required_margin}
     )
 
@@ -92,15 +335,446 @@ def test_register_invalid_commission(candidate_hub, required_margin, commission)
 ])
 def test_register_margin(candidate_hub, margin):
     candidate_hub.register(
-        random_address(), accounts[0], 1,
+        random_address(), accounts[0], 1, random_vote_address(),
         {'from': accounts[0], 'value': margin}
     )
+
+
+def test_register_zero_consensus_address(candidate_hub, required_margin):
+    zero_address = "0x0000000000000000000000000000000000000000"
+    with brownie.reverts("consensus address should not be zero"):
+        candidate_hub.register(
+            zero_address, accounts[0], 1, random_vote_address(),
+            {'from': accounts[0], 'value': required_margin}
+        )
+
+
+def test_register_zero_fee_address(candidate_hub, required_margin):
+    zero_address = "0x0000000000000000000000000000000000000000"
+    with brownie.reverts("fee address should not be zero"):
+        candidate_hub.register(
+            random_address(), zero_address, 1, random_vote_address(),
+            {'from': accounts[0], 'value': required_margin}
+        )
+
+
+def test_register_exceeds_validator_limit(candidate_hub, required_margin):
+    zero_address = "0x0000000000000000000000000000000000000000"
+    with brownie.reverts("fee address should not be zero"):
+        candidate_hub.register(
+            random_address(), zero_address, 1, random_vote_address(),
+            {'from': accounts[0], 'value': required_margin}
+        )
+
+
+def test_register_requires_init_first(candidate_hub, required_margin):
+    candidate_hub.setAlreadyInit(False)
+    with brownie.reverts("the contract not init yet"):
+        candidate_hub.register(
+            random_address(), accounts[0], 1, random_vote_address(),
+            {'from': accounts[0], 'value': required_margin}
+        )
+
+
+def test_register_zero_payment_amount(candidate_hub, required_margin):
+    with brownie.reverts("deposit is not enough"):
+        candidate_hub.register(
+            random_address(), accounts[0], 1, random_vote_address(),
+            {'from': accounts[0], 'value': 0}
+        )
+
+
+def test_reregister_after_cancel(candidate_hub, required_margin):
+    candidate_hub.register(
+        random_address(), accounts[0], 1, random_vote_address(),
+        {'from': accounts[0], 'value': required_margin}
+    )
+    candidate_hub.refuseDelegate({'from': accounts[0]})
+    turn_round()
+    candidate_hub.unregister({'from': accounts[0]})
+    tx = candidate_hub.register(
+        random_address(), accounts[0], 1, random_vote_address(),
+        {'from': accounts[0], 'value': required_margin}
+    )
+    assert 'registered' in tx.events
+
+
+@pytest.mark.parametrize("candidate_size", [
+    999, 1000, 1001, 1002
+])
+def test_candidate_size_exceeds_total_limit(candidate_hub, required_margin, candidate_size):
+    operator = accounts[0]
+    candidate_hub.mockRegister(candidate_size)
+    if candidate_size <= 1000:
+        tx = candidate_hub.register(
+            random_address(), accounts[1], 1, random_vote_address(),
+            {'from': operator, 'value': required_margin}
+        )
+        assert 'registered' in tx.events
+    else:
+        with brownie.reverts("maximum candidate size reached"):
+            candidate_hub.register(
+                random_address(), accounts[1], 1, random_vote_address(),
+                {'from': operator, 'value': required_margin}
+            )
+
+
+def test_vote_addr_invalid_length(candidate_hub, required_margin):
+    operator = accounts[0]
+    with brownie.reverts("vote address length should be 48"):
+        candidate_hub.register(
+            random_address(), accounts[1], 1, accounts[0].address,
+            {'from': operator, 'value': required_margin}
+        )
+
+
+def test_duplicate_vote_addr(candidate_hub, required_margin):
+    operator = accounts[0]
+    vote_address = random_vote_address()
+    candidate_hub.register(
+        random_address(), accounts[1], 1, vote_address,
+        {'from': operator, 'value': required_margin}
+    )
+    with brownie.reverts("vote address already exists"):
+        candidate_hub.register(
+            random_address(), accounts[0], 1, vote_address,
+            {'from': accounts[2], 'value': required_margin}
+        )
+
+
+def test_vote_addr_list_contains_duplicates(candidate_hub, required_margin, validator_set, set_candidate):
+    turn_round()
+    vote_address = validator_set.getValidatorsAndVoteAddresses()[1][0]
+    with brownie.reverts("vote address already exists"):
+        candidate_hub.register(
+            random_address(), accounts[0], 1, vote_address,
+            {'from': accounts[1], 'value': required_margin}
+        )
+
+
+def test_registration_index_correct_after_success(candidate_hub, required_margin):
+    vote_address = random_vote_address()
+    consensus_addr = random_address()
+    commission_thousandths = 100
+    tx = candidate_hub.register(
+        consensus_addr, accounts[0], commission_thousandths, vote_address,
+        {'from': accounts[1], 'value': required_margin}
+    )
+    expect_event(tx, "registered", {
+        'operateAddr': accounts[1],
+        'consensusAddr': consensus_addr,
+        'feeAddress': accounts[0],
+        'commissionThousandths': commission_thousandths,
+        'margin': required_margin,
+        'voteAddr': vote_address
+    })
+    commission_last_round = 100
+    status = 1
+    assert candidate_hub.candidateSet(0) == (
+        accounts[1],
+        consensus_addr,
+        accounts[0],
+        commission_thousandths,
+        required_margin,
+        status,
+        get_current_round(),
+        commission_last_round,
+        vote_address,
+        ZERO_ADDRESS,
+        ("", "", "", "")
+    )
+    assert candidate_hub.operateMap(accounts[1]) == 1
+    assert candidate_hub.getConsensusMap(consensus_addr) == 1
+    consensus = register_candidate(operator=accounts[2])
+    assert candidate_hub.operateMap(accounts[2]) == 2
+    assert candidate_hub.getConsensusMap(consensus) == 2
+    assert candidate_hub.candidateSet(1)['operateAddr'] == accounts[2]
+
+
+def test_only_gov_can_call(candidate_hub, required_margin):
+    value = padding_left(Web3.to_hex(candidate_hub.dues() + 10), 64)
+    with brownie.reverts("the msg sender must be governance contract"):
+        candidate_hub.updateParam("requiredMargin", value)
+
+
+def test_param_length_error(candidate_hub, required_margin):
+    value = padding_left(Web3.to_hex(candidate_hub.dues() + 10), 65)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts("MismatchParamLength: requiredMargin"):
+        candidate_hub.updateParam("requiredMargin", value)
+
+
+@pytest.mark.parametrize("newRequiredMargin", [1, 1000, 102220])
+def test_update_required_margin_success(candidate_hub, required_margin, newRequiredMargin):
+    dues = candidate_hub.dues()
+    value = padding_left(Web3.to_hex(dues + newRequiredMargin), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    candidate_hub.updateParam("requiredMargin", value)
+    assert candidate_hub.requiredMargin() == dues + newRequiredMargin
+
+
+def test_update_required_margin_zero_success(candidate_hub, required_margin):
+    value = padding_left(Web3.to_hex(0), 64)
+    uint256_max = 2 ** 256 - 1
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"OutOfBounds: requiredMargin, 0, 10001, {uint256_max}"):
+        candidate_hub.updateParam("requiredMargin", value)
+
+
+@pytest.mark.parametrize("newRequiredMargin", [1, 10, 5000])
+def test_required_margin_cannot_less_than_dues(candidate_hub, required_margin, newRequiredMargin):
+    dues = candidate_hub.dues()
+    value = padding_left(Web3.to_hex(dues - newRequiredMargin), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    uint256_max = 2 ** 256 - 1
+    with brownie.reverts(f"OutOfBounds: requiredMargin, {dues - newRequiredMargin}, 10001, {uint256_max}"):
+        candidate_hub.updateParam("requiredMargin", value)
+
+
+@pytest.mark.parametrize("new_dues", [1, 1000, 8000])
+def test_update_dues_success(candidate_hub, required_margin, new_dues):
+    value = padding_left(Web3.to_hex(required_margin - new_dues), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    candidate_hub.updateParam("dues", value)
+    assert candidate_hub.dues() == required_margin - new_dues
+
+
+def test_dues_zero(candidate_hub, required_margin):
+    value = padding_left(Web3.to_hex(0), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"OutOfBounds: dues, 0, 1, {required_margin - 1}"):
+        candidate_hub.updateParam("dues", value)
+
+
+def test_dues_cannot_greater_than_required_margin(candidate_hub, required_margin):
+    value = padding_left(Web3.to_hex(required_margin + 1), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"OutOfBounds: dues, {required_margin + 1}, 1, {required_margin - 1}"):
+        candidate_hub.updateParam("dues", value)
+
+
+@pytest.mark.parametrize("validator_count", [6, 25, 41])
+def test_govern_validator_count_success(candidate_hub, required_margin, validator_count):
+    value = padding_left(Web3.to_hex(validator_count), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    candidate_hub.updateParam("validatorCount", value)
+    assert candidate_hub.validatorCount() == validator_count
+
+
+@pytest.mark.parametrize("validator_count", [0, 4, 5, 42, 43, 100])
+def test_validator_count_out_of_range(candidate_hub, required_margin, validator_count):
+    value = padding_left(Web3.to_hex(validator_count), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"OutOfBounds: validatorCount, {validator_count}, 6, 41"):
+        candidate_hub.updateParam("validatorCount", value)
+
+
+@pytest.mark.parametrize("maxCommissionChange", [1, 500, 1000])
+def test_govern_max_commission_change_success(candidate_hub, required_margin, maxCommissionChange):
+    value = padding_left(Web3.to_hex(maxCommissionChange), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    candidate_hub.updateParam("maxCommissionChange", value)
+    assert candidate_hub.maxCommissionChange() == maxCommissionChange
+
+
+def test_max_commission_change_zero(candidate_hub, required_margin):
+    value = padding_left(Web3.to_hex(0), 64)
+    uint256_max = 2 ** 256 - 1
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"OutOfBounds: maxCommissionChange, 0, 1, {uint256_max}"):
+        candidate_hub.updateParam("maxCommissionChange", value)
+
+
+def test_governance_param_error(candidate_hub, required_margin):
+    value = padding_left(Web3.to_hex(required_margin), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"UnsupportedGovParam: error_key"):
+        candidate_hub.updateParam("error_key", value)
+
+
+def test_refuse_delegate_success(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    assert candidate_hub.canDelegate(operators[0]) is False
+    turn_round()
+
+
+def test_refuse_delegate_nonexistent_validator(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    with brownie.reverts(f"candidate does not exist"):
+        candidate_hub.refuseDelegate({'from': consensuses[0]})
+
+
+def test_refuse_delegate_zero_address(candidate_hub, set_candidate):
+    zero_address = "0x0000000000000000000000000000000000000000"
+    turn_round()
+    with brownie.reverts(f"candidate does not exist"):
+        candidate_hub.refuseDelegate({'from': zero_address})
+
+
+def test_refuse_delegate_canceled_validator(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    candidate_hub.unregister({'from': operators[0]})
+    with brownie.reverts(f"candidate does not exist"):
+        candidate_hub.refuseDelegate({'from': operators[0]})
+
+
+def test_refuse_delegate_slashed_validator(candidate_hub, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    for index, slash in enumerate([slash_indicator.misdemeanorThreshold(), slash_indicator.felonyThreshold()]):
+        for i in range(slash):
+            slash_indicator.slash(consensuses[index])
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    candidate_hub.refuseDelegate({'from': operators[1]})
+    turn_round(consensuses)
+
+
+def test_refuse_delegate_repeated(candidate_hub, slash_indicator, set_candidate):
+    validator_state = 17
+    operators, consensuses = set_candidate
+    turn_round()
+    tx = candidate_hub.refuseDelegate({'from': operators[0]})
+    assert tx.events['statusChanged']['oldStatus'] == validator_state
+    assert tx.events['statusChanged']['newStatus'] == validator_state + 2
+    tx = candidate_hub.refuseDelegate({'from': operators[0]})
+    assert 'statusChanged' not in tx.events
+    turn_round(consensuses)
+
+
+def test_accept_delegate_success(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    assert candidate_hub.canDelegate(operators[0]) is False
+    turn_round()
+    candidate_hub.acceptDelegate({'from': operators[0]})
+    assert candidate_hub.canDelegate(operators[0])
+
+
+def test_accept_delegate_nonexistent_validator(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    with brownie.reverts(f"candidate does not exist"):
+        candidate_hub.acceptDelegate({'from': consensuses[0]})
+
+
+def test_accept_delegate_zero_address(candidate_hub, set_candidate):
+    zero_address = "0x0000000000000000000000000000000000000000"
+    turn_round()
+    with brownie.reverts(f"candidate does not exist"):
+        candidate_hub.acceptDelegate({'from': zero_address})
+
+
+def test_accept_delegate_canceled_validator(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    turn_round()
+    candidate_hub.unregister({'from': operators[0]})
+    with brownie.reverts(f"candidate does not exist"):
+        candidate_hub.acceptDelegate({'from': operators[0]})
+
+
+def test_accept_delegate_slashed_validator(candidate_hub, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    for index, slash in enumerate([slash_indicator.misdemeanorThreshold(), slash_indicator.felonyThreshold()]):
+        for i in range(slash):
+            slash_indicator.slash(consensuses[index])
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    candidate_hub.acceptDelegate({'from': operators[0]})
+    candidate_hub.refuseDelegate({'from': operators[1]})
+    candidate_hub.acceptDelegate({'from': operators[1]})
+    turn_round(consensuses)
+    assert candidate_hub.canDelegate(operators[0])
+    assert candidate_hub.canDelegate(operators[1]) is False
+
+
+def test_accept_delegate_repeated(candidate_hub, slash_indicator, set_candidate):
+    validator_state = 19
+    operators, consensuses = set_candidate
+    turn_round()
+    candidate_hub.refuseDelegate({'from': operators[0]})
+    tx = candidate_hub.acceptDelegate({'from': operators[0]})
+    assert tx.events['statusChanged']['oldStatus'] == validator_state
+    assert tx.events['statusChanged']['newStatus'] == validator_state - 2
+    tx = candidate_hub.acceptDelegate({'from': operators[0]})
+    assert 'statusChanged' not in tx.events
+    turn_round(consensuses)
+
+
+def test_add_margin_insufficient_funds(candidate_hub, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    for index, slash in enumerate([slash_indicator.felonyThreshold()]):
+        for i in range(slash):
+            slash_indicator.slash(consensuses[0])
+    turn_round(consensuses)
+    assert candidate_hub.canDelegate(operators[0]) is False
+    candidate_hub.addMargin({'from': operators[0], 'value': 100})
+    assert candidate_hub.canDelegate(operators[0]) is False
+
+
+def test_get_candidates_success(candidate_hub, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    for index, slash in enumerate([slash_indicator.felonyThreshold()]):
+        for i in range(slash):
+            slash_indicator.slash(consensuses[0])
+    turn_round(consensuses)
+    candidate_hub.refuseDelegate({'from': operators[1]})
+    turn_round(consensuses)
+    candidate_hub.unregister({'from': operators[1]})
+    assert operators[0] in candidate_hub.getCandidates()
+    assert operators[2] in candidate_hub.getCandidates()
+
+
+def test_is_candidate_by_consensus_success(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    assert candidate_hub.isCandidateByConsensus(consensuses[0])
+
+
+def test_query_consensus_by_non_validator(candidate_hub, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    assert candidate_hub.isCandidateByConsensus(operators[0]) is False
+
+
+def test_is_jailed_success(candidate_hub, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    for index, slash in enumerate([slash_indicator.felonyThreshold()]):
+        for i in range(slash):
+            slash_indicator.slash(consensuses[0])
+    turn_round(consensuses)
+    assert candidate_hub.isJailed(operators[0])
+
+
+def test_query_jail_round_by_non_validator(candidate_hub, slash_indicator, set_candidate):
+    operators, consensuses = set_candidate
+    turn_round()
+    for index, slash in enumerate([slash_indicator.felonyThreshold()]):
+        for i in range(slash):
+            slash_indicator.slash(consensuses[0])
+    turn_round(consensuses)
+    assert candidate_hub.isJailed(operators[1]) is False
 
 
 def test_is_candidate_by_operate(candidate_hub, required_margin):
     operator = accounts[0]
     candidate_hub.register(
-        random_address(), accounts[0], 1,
+        random_address(), accounts[0], 1, random_vote_address(),
         {'from': operator, 'value': required_margin}
     )
     assert candidate_hub.isCandidateByOperate(operator) is True
@@ -109,7 +783,7 @@ def test_is_candidate_by_operate(candidate_hub, required_margin):
 def test_is_candidate_by_consensus(candidate_hub, required_margin):
     consensus_address = random_address()
     candidate_hub.register(
-        consensus_address, accounts[0], 1,
+        consensus_address, accounts[0], 1, random_vote_address(),
         {'from': accounts[0], 'value': required_margin}
     )
     assert candidate_hub.isCandidateByConsensus(consensus_address) is True
@@ -118,7 +792,7 @@ def test_is_candidate_by_consensus(candidate_hub, required_margin):
 def test_get_candidates(candidate_hub, required_margin):
     operator = accounts[0]
     candidate_hub.register(
-        random_address(), accounts[0], 1,
+        random_address(), accounts[0], 1, random_vote_address(),
         {'from': operator, 'value': required_margin}
     )
     assert operator in candidate_hub.getCandidates()
@@ -141,7 +815,8 @@ def test_accept_delegate(candidate_hub, required_margin):
     for operate_addr, register, set_status, status, check_event, ret, err in tests:
         old_status = 1
         if register:
-            candidate_hub.register(random_address(), fee_address, 10, {'from': operate_addr, 'value': required_margin})
+            candidate_hub.register(random_address(), fee_address, 10, random_vote_address(),
+                                   {'from': operate_addr, 'value': required_margin})
         if set_status is not None:
             candidate_hub.setCandidateStatus(operate_addr, set_status, {'from': operate_addr})
             old_status = set_status
@@ -170,7 +845,8 @@ def test_refuse_delegate(candidate_hub, required_margin):
     for operate_addr, ret, err, register, set_status, status, check_event in tests:
         old_status = 1
         if register:
-            candidate_hub.register(random_address(), fee_address, 10, {'from': operate_addr, 'value': required_margin})
+            candidate_hub.register(random_address(), fee_address, 10, random_vote_address(),
+                                   {'from': operate_addr, 'value': required_margin})
         if set_status is not None:
             candidate_hub.setCandidateStatus(operate_addr, set_status, {'from': operate_addr})
             old_status = set_status
@@ -224,7 +900,8 @@ def test_bond_update_registration_failure(candidate_hub, required_margin):
     hex_value = padding_left(Web3.to_hex(required_margin * 2), 64)
     candidate_hub.updateParam('requiredMargin', hex_value)
     with brownie.reverts('deposit is not enough'):
-        candidate_hub.register(consensus_address, fee_address, 1, {'from': accounts[1], 'value': required_margin})
+        candidate_hub.register(consensus_address, fee_address, 1, random_vote_address(),
+                               {'from': accounts[1], 'value': required_margin})
 
 
 def test_register_candidate(candidate_hub, required_margin):
@@ -249,9 +926,11 @@ def test_register_candidate(candidate_hub, required_margin):
     for operate_addr, consensus_addr, fee_addr, commission, value, ret, err in tests:
         if ret is False:
             with brownie.reverts(err):
-                candidate_hub.register(consensus_addr, fee_addr, commission, {'from': operate_addr, 'value': value})
+                candidate_hub.register(consensus_addr, fee_addr, commission, random_vote_address(),
+                                       {'from': operate_addr, 'value': value})
         else:
-            tx = candidate_hub.register(consensus_addr, fee_addr, commission, {'from': operate_addr, 'value': value})
+            tx = candidate_hub.register(consensus_addr, fee_addr, commission, random_vote_address(),
+                                        {'from': operate_addr, 'value': value})
             expect_event(tx, "registered", {
                 "operateAddr": operate_addr,
                 "consensusAddr": consensus_addr,
@@ -265,7 +944,8 @@ def test_unregister_candidate(candidate_hub, required_margin):
     consensus_address = random_address()
     fee_address = random_address()
 
-    candidate_hub.register(consensus_address, fee_address, 10, {'from': accounts[3], 'value': required_margin})
+    candidate_hub.register(consensus_address, fee_address, 10, random_vote_address(),
+                           {'from': accounts[3], 'value': required_margin})
 
     tests = [
         (accounts[1], None, False, "candidate does not exist", None, None, None),
@@ -287,7 +967,8 @@ def test_unregister_candidate(candidate_hub, required_margin):
         if register is True:
             if consensus_addr is None:
                 consensus_addr = random_address()
-            candidate_hub.register(consensus_addr, fee_address, 10, {'from': operate_addr, "value": required_margin})
+            candidate_hub.register(consensus_addr, fee_address, 10, random_vote_address(),
+                                   {'from': operate_addr, "value": required_margin})
         if consensus_addr is None:
             consensus_addr = consensus_address
         if set_status is not None:
@@ -302,50 +983,6 @@ def test_unregister_candidate(candidate_hub, required_margin):
             expect_event(tx, "unregistered", {
                 'operateAddr': operate_addr,
                 'consensusAddr': consensus_addr
-            })
-
-
-def test_update_candidate(candidate_hub, required_margin):
-    consensus_address = random_address()
-    fee_address = random_address()
-    max_commission_change = candidate_hub.maxCommissionChange()
-
-    tests = [
-        (accounts[1], None, consensus_address, fee_address, 100, False, "candidate does not exist", None),
-        (accounts[2], True, consensus_address, fee_address, 0, False, "commissionThousandths should in range (0, 1000)",
-         None),
-        (accounts[3], True, random_address(), fee_address, 1000, False,
-         "commissionThousandths should in range (0, 1000)", None),
-        (accounts[3], None, consensus_address, fee_address, 100, False, "the consensus already exists", None),
-        (accounts[3], None, random_address(), fee_address, 201 + max_commission_change, False,
-         "commissionThousandths out of adjustment range", None),
-        (accounts[3], None, random_address(), fee_address, 199 - max_commission_change, False,
-         "commissionThousandths out of adjustment range", None),
-        (accounts[3], None, random_address(), fee_address, 200 + max_commission_change, True, "", None),
-        (accounts[3], None, random_address(), fee_address, 200 - max_commission_change, True, "", None),
-        (accounts[3], None, random_address(), fee_address, 200 + max_commission_change, True, "", None),
-        (accounts[3], None, random_address(), fee_address, 200 + max_commission_change * 2, True, "", True),
-    ]
-
-    for operate_addr, register, consensus_addr, fee_addr, commission, ret, err, need_turn_round in tests:
-        if need_turn_round:
-            turn_round()
-        if register:
-            if consensus_addr is None:
-                consensus_addr = random_address()
-            candidate_hub.register(consensus_addr, fee_addr, 200, {'from': operate_addr, 'value': required_margin})
-        if consensus_addr is None:
-            consensus_addr = consensus_address
-        if ret is False:
-            with brownie.reverts(err):
-                candidate_hub.update(consensus_addr, fee_addr, commission, {'from': operate_addr})
-        else:
-            tx = candidate_hub.update(consensus_addr, fee_addr, commission, {'from': operate_addr})
-            expect_event(tx, "updated", {
-                "operateAddr": operate_addr,
-                "consensusAddr": consensus_addr,
-                "feeAddress": fee_addr,
-                "commissionThousandths": commission
             })
 
 
@@ -365,7 +1002,8 @@ def test_add_margin(candidate_hub, required_margin):
     for operate_addr, register, set_margin, value, set_status, status, check_event, ret, err in tests:
         old_status = 1
         if register:
-            candidate_hub.register(random_address(), fee_address, 10, {'from': operate_addr, 'value': required_margin})
+            candidate_hub.register(random_address(), fee_address, 10, random_vote_address(),
+                                   {'from': operate_addr, 'value': required_margin})
         if set_status is not None:
             candidate_hub.setCandidateStatus(operate_addr, set_status, {'from': operate_addr})
             old_status = set_status
@@ -390,6 +1028,7 @@ def test_add_margin(candidate_hub, required_margin):
             assert candidate_hub.getCandidate(operate_addr).dict()['status'] == status
 
 
+# getValidators
 def test_get_validators(candidate_hub):
     candidates = []
     score_list1 = []
@@ -411,7 +1050,6 @@ def test_get_validators(candidate_hub):
         (candidates[:10], score_list1[:10], indexes[:10], 21, 10),
         (candidates[:10], score_list2[:10], indexes[:10], 21, 10),
     ]
-
     for candidate_list, score_list, index_list, count, expect_count in tests:
         validator_list = candidate_hub.getValidatorsMock(candidate_list, score_list, count)
         index_list.sort(key=lambda e: score_list[e], reverse=True)
@@ -440,7 +1078,8 @@ def test_jail_validator(candidate_hub, validator_set, required_margin):
     for operate_addr, register, _round, set_margin, set_status, status, fine, check_event, ret, err in tests:
         old_status = 1
         if register:
-            candidate_hub.register(random_address(), fee_address, 10, {'from': operate_addr, 'value': required_margin})
+            candidate_hub.register(random_address(), fee_address, 10, random_vote_address(),
+                                   {'from': operate_addr, 'value': required_margin})
         if set_status is not None:
             candidate_hub.setCandidateStatus(operate_addr, set_status, {'from': operate_addr})
             old_status = set_status
@@ -492,7 +1131,7 @@ def test_turn_round(candidate_hub, core_agent, validator_set, required_margin):
     ]
     for agents, deposit, set_status, status in tests:
         for agent, _set_status in zip(agents, set_status):
-            candidate_hub.register(agent, agent, 10, {'from': agent, 'value': required_margin})
+            candidate_hub.register(agent, agent, 10, random_vote_address(), {'from': agent, 'value': required_margin})
             candidate_hub.setCandidateStatus(agent, _set_status, {'from': agent})
         for agent, _deposit in zip(agents, deposit):
             if _deposit > 0:
@@ -539,3 +1178,461 @@ def __delegate_coin_success(core_agent, agent, delegator, old_value, new_value):
         "amount": new_value,
         "realtimeAmount": new_value + old_value
     })
+
+
+# updateAgent
+def test_update_agent_permission(candidate_hub, accounts):
+    with brownie.reverts("candidate does not exist"):
+        candidate_hub.updateAgent(accounts[1], {'from': accounts[1]})
+
+
+def test_update_agent_success(candidate_hub, accounts):
+    operator = accounts[5]
+    new_agent = accounts[6]
+
+    consensus_addr = accounts[7]
+    fee_addr = accounts[8]
+    vote_addr = random_vote_address()
+
+    candidate_hub.register(
+        consensus_addr,
+        fee_addr,
+        100,  # commissionThousandths
+        vote_addr,
+        {'from': operator, 'value': 1e18}
+    )
+
+    tx = candidate_hub.updateAgent(new_agent, {'from': operator})
+
+    assert len(tx.events['AgentUpdated']) > 0
+    assert tx.events['AgentUpdated']['operateAddr'] == operator
+    assert tx.events['AgentUpdated']['newAgent'] == new_agent
+
+    assert candidate_hub.agentMap(new_agent) != 0
+
+
+def test_update_agent_zero_address(candidate_hub, accounts):
+    operator = accounts[5]
+
+    consensus_addr = accounts[7]
+    fee_addr = accounts[8]
+    vote_addr = random_vote_address()
+
+    candidate_hub.register(
+        consensus_addr,
+        fee_addr,
+        100,
+        vote_addr,
+        {'from': operator, 'value': 1e18}
+    )
+
+    with brownie.reverts("agent address cannot be zero"):
+        candidate_hub.updateAgent(ZERO_ADDRESS, {'from': operator})
+
+
+def test_update_agent_already_exists(candidate_hub):
+    operator1 = accounts[5]
+    operator2 = accounts[6]
+    agent = accounts[7]
+
+    candidate_hub.register(
+        accounts[8],
+        accounts[9],
+        100,
+        random_vote_address(),
+        {'from': operator1, 'value': 1e18}
+    )
+
+    candidate_hub.register(
+        accounts[10],
+        accounts[11],
+        100,
+        random_vote_address(),
+        {'from': operator2, 'value': 1e18}
+    )
+
+    candidate_hub.updateAgent(agent, {'from': operator1})
+
+    with brownie.reverts("agent address already exists"):
+        candidate_hub.updateAgent(agent, {'from': operator2})
+    candidate_hub.updateAgent(accounts[13], {'from': operator2})
+    assert candidate_hub.agentMap(accounts[13]) == 2
+
+
+def test_update_agent_multiple_times(candidate_hub, accounts):
+    operator = accounts[5]
+    first_agent = accounts[6]
+    second_agent = accounts[7]
+
+    candidate_hub.register(
+        accounts[8],
+        accounts[9],
+        100,
+        random_vote_address(),
+        {'from': operator, 'value': 1e18}
+    )
+
+    tx1 = candidate_hub.updateAgent(first_agent, {'from': operator})
+    assert len(tx1.events['AgentUpdated']) > 0
+    assert candidate_hub.agentMap(first_agent) != 0
+
+    tx2 = candidate_hub.updateAgent(second_agent, {'from': operator})
+    assert len(tx2.events['AgentUpdated']) > 0
+    assert candidate_hub.agentMap(second_agent) != 0
+    assert candidate_hub.agentMap(first_agent) == 0
+
+
+# removeAgent
+def test_remove_agent_permission(candidate_hub, accounts):
+    with brownie.reverts("candidate does not exist"):
+        candidate_hub.removeAgent({'from': accounts[1]})
+
+
+def test_remove_agent_no_agent(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator)
+
+    with brownie.reverts("agent address does not exist"):
+        candidate_hub.removeAgent({'from': operator})
+
+
+def test_remove_agent_success(candidate_hub, accounts):
+    operator = accounts[5]
+    agent = accounts[6]
+    register_candidate(operator=operator)
+
+    candidate_hub.updateAgent(agent, {'from': operator})
+    assert candidate_hub.agentMap(agent) != 0
+
+    candidate_hub.removeAgent({'from': operator})
+    assert candidate_hub.agentMap(agent) == 0
+    assert candidate_hub.candidateSet(0).dict()['agent'] == ZERO_ADDRESS
+
+
+# editConsensusAddress
+def test_edit_consensus_address_permission(candidate_hub, accounts):
+    with brownie.reverts("candidate does not exist"):
+        candidate_hub.editConsensusAddress(accounts[1], {'from': accounts[1]})
+
+
+def test_edit_consensus_address_duplicate(candidate_hub, accounts):
+    operator1 = accounts[5]
+    operator2 = accounts[6]
+    consensus1 = register_candidate(operator=operator1)
+    consensus2 = register_candidate(operator=operator2)
+
+    with brownie.reverts("consensus already exists"):
+        candidate_hub.editConsensusAddress(consensus2, {'from': operator1})
+
+
+def test_edit_consensus_address_success(candidate_hub, accounts):
+    operator = accounts[5]
+    old_consensus = register_candidate(operator=operator)
+    new_consensus = accounts[7]
+
+    tx = candidate_hub.editConsensusAddress(new_consensus, {'from': operator})
+
+    assert 'ConsensusAddressEdited' in tx.events
+    assert tx.events['ConsensusAddressEdited']['operateAddr'] == operator
+    assert tx.events['ConsensusAddressEdited']['newConsensusAddr'] == new_consensus
+    assert candidate_hub.isCandidateByConsensus(old_consensus) is False
+    assert candidate_hub.isCandidateByConsensus(new_consensus)
+    assert candidate_hub.candidateSet(
+        0).dict()['consensusAddr'] == new_consensus
+
+
+def test_edit_consensus_address_by_agent_success(candidate_hub, accounts):
+    operator = accounts[5]
+    agent = accounts[6]
+    old_consensus = register_candidate(operator=operator)
+    new_consensus = accounts[7]
+
+    candidate_hub.updateAgent(agent, {'from': operator})
+
+    tx = candidate_hub.editConsensusAddress(new_consensus, {'from': agent})
+
+    assert 'ConsensusAddressEdited' in tx.events
+
+
+# editCommissionRate
+def test_edit_commission_rate_permission(candidate_hub, accounts):
+    with brownie.reverts("candidate does not exist"):
+        candidate_hub.editCommissionRate(100, {'from': accounts[1]})
+
+
+def test_edit_commission_rate_range(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator)
+
+    with brownie.reverts("commissionThousandths should in range (0, 1000)"):
+        candidate_hub.editCommissionRate(0, {'from': operator})
+
+    with brownie.reverts("commissionThousandths should in range (0, 1000)"):
+        candidate_hub.editCommissionRate(1000, {'from': operator})
+
+
+def test_edit_commission_rate_adjustment_range(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator, commission=500)
+    max_change = candidate_hub.maxCommissionChange()
+
+    with brownie.reverts("commissionThousandths out of adjustment range"):
+        candidate_hub.editCommissionRate(
+            500 + max_change + 1, {'from': operator})
+
+    with brownie.reverts("commissionThousandths out of adjustment range"):
+        candidate_hub.editCommissionRate(
+            500 - max_change - 1, {'from': operator})
+    tx = candidate_hub.editCommissionRate(500 + max_change, {'from': operator})
+    assert 'CommissionRateEdited' in tx.events
+    with brownie.reverts("commissionThousandths out of adjustment range"):
+        candidate_hub.editCommissionRate(
+            500 + max_change + 1, {'from': operator})
+
+
+def test_edit_commission_rate_by_agent_success(candidate_hub, accounts):
+    operator = accounts[5]
+    agent = accounts[6]
+    register_candidate(operator=operator, commission=500)
+    new_rate = 600
+
+    candidate_hub.updateAgent(agent, {'from': operator})
+
+    tx = candidate_hub.editCommissionRate(new_rate, {'from': agent})
+    assert 'CommissionRateEdited' in tx.events
+
+
+def test_edit_commission_rate_success(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator, commission=500)
+    new_rate = 600
+
+    tx = candidate_hub.editCommissionRate(new_rate, {'from': operator})
+
+    assert 'CommissionRateEdited' in tx.events
+    assert tx.events['CommissionRateEdited']['operateAddr'] == operator
+    assert tx.events['CommissionRateEdited']['newRate'] == new_rate
+    assert candidate_hub.candidateSet(
+        0).dict()['commissionThousandths'] == new_rate
+    assert candidate_hub.candidateSet(
+        0).dict()['commissionLastChangeRound'] == get_current_round()
+    assert candidate_hub.candidateSet(
+        0).dict()['commissionLastRoundValue'] == 500
+
+
+def test_edit_commission_rate_same_round_multiple_times(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator, commission=500)
+    max_change = candidate_hub.maxCommissionChange()
+
+    new_rate1 = 500 + max_change
+    tx1 = candidate_hub.editCommissionRate(new_rate1, {'from': operator})
+    assert 'CommissionRateEdited' in tx1.events
+    assert tx1.events['CommissionRateEdited']['newRate'] == new_rate1
+
+    new_rate2 = 500 + max_change
+    tx2 = candidate_hub.editCommissionRate(new_rate2, {'from': operator})
+    assert 'CommissionRateEdited' in tx2.events
+    assert tx2.events['CommissionRateEdited']['newRate'] == new_rate2
+
+    new_rate3 = 500 - max_change
+    tx3 = candidate_hub.editCommissionRate(new_rate3, {'from': operator})
+    assert 'CommissionRateEdited' in tx3.events
+    assert tx3.events['CommissionRateEdited']['newRate'] == new_rate3
+
+    candidate = candidate_hub.candidateSet(0).dict()
+    assert candidate['commissionThousandths'] == new_rate3
+    assert candidate['commissionLastChangeRound'] == get_current_round()
+    assert candidate['commissionLastRoundValue'] == 500
+
+    with brownie.reverts("commissionThousandths out of adjustment range"):
+        candidate_hub.editCommissionRate(
+            500 + max_change + 1, {'from': operator})
+
+    with brownie.reverts("commissionThousandths out of adjustment range"):
+        candidate_hub.editCommissionRate(
+            500 - max_change - 1, {'from': operator})
+
+
+# editVoteAddress
+def test_edit_vote_address_permission(candidate_hub, accounts):
+    with brownie.reverts("candidate does not exist"):
+        candidate_hub.editVoteAddress(
+            random_vote_address(), {'from': accounts[1]})
+
+
+def test_edit_vote_address_length(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator)
+
+    invalid_vote_addr = "0x1234"
+    with brownie.reverts("vote address length should be 48"):
+        candidate_hub.editVoteAddress(invalid_vote_addr, {'from': operator})
+
+
+def test_edit_vote_address_duplicate(candidate_hub, accounts):
+    operator1 = accounts[5]
+    operator2 = accounts[6]
+    consensus1 = register_candidate(operator=operator1)
+    vote_addr1 = candidate_hub.candidateSet(0).dict()['voteAddr']
+    register_candidate(operator=operator2)
+
+    with brownie.reverts("vote address already exists"):
+        candidate_hub.editVoteAddress(vote_addr1, {'from': operator2})
+
+
+def test_edit_vote_address_success(candidate_hub, accounts):
+    operator = accounts[5]
+    consensus = register_candidate(operator=operator)
+    old_vote_addr = candidate_hub.candidateSet(0).dict()['voteAddr']
+    new_vote_addr = random_vote_address()
+
+    tx = candidate_hub.editVoteAddress(new_vote_addr, {'from': operator})
+
+    assert 'VoteAddressEdited' in tx.events
+    assert tx.events['VoteAddressEdited']['operateAddr'] == operator
+    assert tx.events['VoteAddressEdited']['newVoteAddr'] == new_vote_addr
+
+
+def test_edit_vote_address_by_agent_success(candidate_hub, accounts):
+    operator = accounts[5]
+    agent = accounts[6]
+    register_candidate(operator=operator)
+    new_vote_addr = random_vote_address()
+
+    candidate_hub.updateAgent(agent, {'from': operator})
+
+    tx = candidate_hub.editVoteAddress(new_vote_addr, {'from': agent})
+    assert 'VoteAddressEdited' in tx.events
+
+
+# editDescription
+def test_edit_description_permission(candidate_hub, accounts):
+    with brownie.reverts("candidate does not exist"):
+        candidate_hub.editDescription(
+            "test", "test", "test", "test", {'from': accounts[1]})
+
+
+def test_edit_description_success(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator)
+
+    moniker = "Test Validator"
+    identity = "test-identity"
+    website = "https://test.com"
+    details = "Test validator details"
+
+    tx = candidate_hub.editDescription(
+        moniker, identity, website, details, {'from': operator})
+
+    assert 'DescriptionEdited' in tx.events
+    assert tx.events['DescriptionEdited']['operateAddr'] == operator
+    assert tx.events['DescriptionEdited']['moniker'] == moniker
+    assert tx.events['DescriptionEdited']['identity'] == identity
+    assert tx.events['DescriptionEdited']['website'] == website
+    assert tx.events['DescriptionEdited']['details'] == details
+    assert candidate_hub.candidateSet(
+        0).dict()['description']['moniker'] == moniker
+    assert candidate_hub.candidateSet(
+        0).dict()['description']['identity'] == identity
+    assert candidate_hub.candidateSet(
+        0).dict()['description']['website'] == website
+    assert candidate_hub.candidateSet(
+        0).dict()['description']['details'] == details
+
+
+def test_edit_description_by_agent_success(candidate_hub, accounts):
+    operator = accounts[5]
+    agent = accounts[6]
+    register_candidate(operator=operator)
+    new_moniker = "Test Validator"
+    new_identity = "test-identity"
+    new_website = "https://test.com"
+    new_details = "Test validator details"
+
+    candidate_hub.updateAgent(agent, {'from': operator})
+
+    tx = candidate_hub.editDescription(
+        new_moniker, new_identity, new_website, new_details, {'from': agent})
+    assert 'DescriptionEdited' in tx.events
+
+
+# editFeeAddress
+def test_edit_fee_address_permission(candidate_hub, accounts):
+    with brownie.reverts("candidate does not exist"):
+        candidate_hub.editFeeAddress(accounts[1], {'from': accounts[1]})
+
+
+def test_edit_fee_address_zero_address(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator)
+
+    with brownie.reverts("fee address cannot be zero"):
+        candidate_hub.editFeeAddress(ZERO_ADDRESS, {'from': operator})
+
+
+def test_edit_fee_address_success(candidate_hub, accounts):
+    operator = accounts[5]
+    register_candidate(operator=operator)
+    new_fee_addr = accounts[7]
+
+    tx = candidate_hub.editFeeAddress(new_fee_addr, {'from': operator})
+
+    assert 'FeeAddressEdited' in tx.events
+    assert tx.events['FeeAddressEdited']['operateAddr'] == operator
+    assert tx.events['FeeAddressEdited']['newFeeAddr'] == new_fee_addr
+    assert candidate_hub.candidateSet(0).dict()['feeAddr'] == new_fee_addr
+
+
+def test_edit_fee_address_by_agent_fail(candidate_hub, accounts):
+    operator = accounts[5]
+    agent = accounts[6]
+    register_candidate(operator=operator)
+    new_fee_addr = accounts[7]
+
+    candidate_hub.updateAgent(agent, {'from': operator})
+
+    with brownie.reverts("candidate does not exist"):
+        tx = candidate_hub.editFeeAddress(new_fee_addr, {'from': agent})
+
+
+def test_candidate_update_and_turn_round(candidate_hub, accounts, validator_set, set_candidate):
+    accounts[99].transfer(validator_set.address, Web3.to_wei(100000, 'ether'))
+    lock_script = "0480db8767b17576a914574fdd26858c28ede5225a809f747c01fcc1f92a88ac"
+    validator_set.updateBlockReward(30000)
+    operators, consensuses = set_candidate
+    for i, delegator in enumerate(accounts[:3]):
+        delegate_coin_success(operators[i], delegator, 10000)
+        delegate_btc_success(operators[i], delegator, 200, lock_script, relay=delegator)
+    turn_round()
+    validator_count = len(consensuses)
+    for i in range(validator_count):
+        candidate_hub.updateAgent(accounts[i], {'from': operators[i]})
+    turn_round(consensuses)
+    for i in range(validator_count):
+        moniker = f"validator{i}"
+        identity = f"identity{i}"
+        website = f"https://validator{i}.com"
+        details = f"details{i}"
+        tx = candidate_hub.editDescription(
+            moniker, identity, website, details, {'from': accounts[i]})
+    turn_round(consensuses)
+    for i in range(validator_count):
+        candidate_hub.editFeeAddress(accounts[i], {'from': operators[i]})
+    for i in range(validator_count):
+        new_commission = 500 + i
+        candidate_hub.editCommissionRate(new_commission, {'from': operators[i]})
+    turn_round(consensuses)
+    for i, operator in enumerate(operators):
+        index = candidate_hub.operateMap(operator)
+        c = candidate_hub.candidateSet(index - 1).dict()
+        assert c['agent'] == accounts[i]
+        assert c['feeAddr'] == accounts[i]
+        assert c['commissionThousandths'] == 500 + i
+        assert c['description']['moniker'] == f"validator{i}"
+        assert c['description']['identity'] == f"identity{i}"
+        assert c['description']['website'] == f"https://validator{i}.com"
+        assert c['description']['details'] == f"details{i}"
+    tx = stake_hub_claim_reward(accounts[0])
+    assert 'claimedReward' in tx.events
+    turn_round(consensuses)

@@ -1,9 +1,12 @@
 import codecs
 import hashlib
+import os
 import random
 import binascii
 import ecdsa
 from _sha256 import sha256
+
+from blspy import AugSchemeMPL
 from web3 import Web3
 from brownie.network.transaction import TransactionReceipt
 from brownie.network.account import LocalAccount
@@ -18,10 +21,22 @@ def random_address():
     return Account.create(str(random.random())).address
 
 
+def random_vote_address():
+    seed = os.urandom(32)
+    sk = AugSchemeMPL.key_gen(seed)
+    pk = sk.get_g1()
+    vote_address = bytes(pk)
+    return Web3.to_hex(vote_address)
+
+
 def random_btc_tx_id():
     rand_bytes = random.randbytes(32)
     tx_id = hashlib.sha256(sha256(rand_bytes).digest()).hexdigest()
     return '0x' + tx_id
+
+
+def random_bytes_data(length=32):
+    return os.urandom(length).hex()
 
 
 def generate_private_key():
@@ -62,7 +77,6 @@ def get_transaction_txid(btc_tx):
 
 def expect_event_not_emitted(tx_receipt: TransactionReceipt, event_name):
     assert event_name not in tx_receipt.events
-
 
 
 class AccountTracker:
@@ -174,7 +188,8 @@ def update_system_contract_address(update_contract,
                                    btc_lst_stake=None,
                                    core_agent=None,
                                    hash_power_agent=None,
-                                   lst_token=None
+                                   lst_token=None,
+                                   configuration=None
                                    ):
     if candidate_hub is None:
         candidate_hub = CandidateHubMock[0]
@@ -210,11 +225,13 @@ def update_system_contract_address(update_contract,
         hash_power_agent = HashPowerAgentMock[0]
     if lst_token is None:
         lst_token = BitcoinLSTToken[0]
+    if configuration is None:
+        configuration = ConfigurationMock[0]
 
     contracts = [
         validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
         pledge_agent, burn, foundation, stake_hub, btc_stake, btc_agent, btc_lst_stake, core_agent, hash_power_agent,
-        lst_token
+        lst_token, configuration
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
     getattr(update_contract, "updateContractAddr")(args)

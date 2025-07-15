@@ -3,34 +3,12 @@ import brownie
 from eth_abi import encode
 from web3 import Web3
 from brownie import *
-from .utils import expect_event, get_tracker, padding_left
+from .utils import expect_event, get_tracker, padding_left, update_system_contract_address
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_up(validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub,
-           gov_hub, pledge_agent, burn, foundation, stake_hub, btc_stake, btc_agent, btc_lst_stake, core_agent,
-           hash_power_agent, lst_token):
-    contracts = [
-        validator_set.address,
-        slash_indicator.address,
-        system_reward.address,
-        btc_light_client.address,
-        relay_hub.address,
-        candidate_hub.address,
-        accounts[0].address,
-        pledge_agent.address,
-        burn.address,
-        foundation.address,
-        stake_hub.address,
-        btc_stake.address,
-        btc_agent.address,
-        btc_lst_stake.address,
-        core_agent.address,
-        hash_power_agent.address,
-        lst_token.address
-    ]
-    args = encode(['address'] * len(contracts), [c for c in contracts])
-    getattr(relay_hub, "updateContractAddr")(args)
+def set_up(relay_hub):
+    update_system_contract_address(relay_hub, gov_hub=accounts[0])
 
 
 def test_update_param_failed_with_unknown_key(relay_hub):
@@ -110,3 +88,25 @@ def test_register_failed(relay_hub):
 
     with brownie.reverts("deposit value does not match requirement"):
         relay_hub.register({'from': accounts[1], 'value': 1e10})
+
+
+def test_reregister_after_unregister(relay_hub):
+    required_deposit = relay_hub.requiredDeposit()
+    relay_hub.register({'value': required_deposit})
+    relay_hub.unregister({'from': accounts[0]})
+    tx = relay_hub.register({'value': required_deposit})
+    assert 'relayerRegister' in tx.events
+
+
+def test_is_relayer_true(relay_hub):
+    required_deposit = relay_hub.requiredDeposit()
+    relay_hub.register({'value': required_deposit})
+    assert relay_hub.isRelayer(accounts[0])
+
+
+def test_is_relayer_false(relay_hub):
+    required_deposit = relay_hub.requiredDeposit()
+    relay_hub.register({'value': required_deposit})
+    relay_hub.unregister({'from': accounts[0]})
+    assert relay_hub.isRelayer(accounts[0]) is False
+    assert relay_hub.isRelayer(accounts[1]) is False

@@ -3,7 +3,8 @@ from web3 import Web3, constants
 import brownie
 from brownie import *
 from eth_abi import encode
-from .utils import expect_event, padding_left, expect_event_not_emitted, encode_args_with_signature
+from .utils import expect_event, padding_left, expect_event_not_emitted, encode_args_with_signature, \
+    update_system_contract_address
 from .common import execute_proposal
 
 origin_members = ["0x9fB29AAc15b9A4B7F17c3385939b007540f4d791", "0x96C42C56fdb78294F96B0cFa33c92bed7D75F96a"]
@@ -15,27 +16,7 @@ def set_up():
 
 
 def fake_gov():
-    contracts = [
-        ValidatorSetMock[0].address,
-        SlashIndicatorMock[0].address,
-        SystemRewardMock[0].address,
-        BtcLightClientMock[0].address,
-        RelayerHubMock[0].address,
-        CandidateHubMock[0].address,
-        accounts[0].address,
-        PledgeAgentMock[0].address,
-        Burn[0].address,
-        Foundation[0].address,
-        StakeHubMock[0].address,
-        BitcoinStakeMock[0].address,
-        BitcoinAgentMock[0].address,
-        BitcoinLSTStakeMock[0].address,
-        CoreAgentMock[0].address,
-        HashPowerAgentMock[0].address,
-        BitcoinLSTToken[0].address,
-    ]
-    args = encode(['address'] * len(contracts), [c for c in contracts])
-    getattr(GovHubMock[0], "updateContractAddr")(args)
+    update_system_contract_address(GovHubMock[0], gov_hub=accounts[0])
 
 
 def test_receive_money(gov_hub):
@@ -410,6 +391,7 @@ def test_vote_early_completion_success(gov_hub, pledge_agent, vote_count, is_com
         [encode(['string', 'bytes'], ['clearDeprecatedMembers', padding_value])],
         ['pledgeAgent clearDeprecatedMembers']
     )
+    start_height = chain.height + 1
     chain.mine(1)
     assert gov_hub.getMembers() == accounts[:vote_count[2]]
     for member in gov_hub.getMembers()[:vote_count[0]]:
@@ -421,7 +403,8 @@ def test_vote_early_completion_success(gov_hub, pledge_agent, vote_count, is_com
         chain.mine(gov_hub.votingPeriod() + 10)
     else:
         chain.mine(3)
-    assert gov_hub.proposals(1) == [1, accounts[0], 69, 89, vote_count[0], vote_count[1], vote_count[2], False, False]
+    assert gov_hub.proposals(1) == [1, accounts[0], start_height, start_height + gov_hub.votingPeriod(), vote_count[0],
+                                    vote_count[1], vote_count[2], False, False]
     gov_hub.execute(1)
     assert pledge_agent.btcFactor() == 0
 
@@ -813,6 +796,76 @@ def test_get_executed_proposal_state(gov_hub):
     with brownie.reverts():
         gov_hub.execute(1)
     assert gov_hub.getState(1) == 4
+
+
+def test_only_gov_can_execute(gov_hub):
+    value = padding_left(Web3.to_hex(100), 64)
+    with brownie.reverts(f"the msg sender must be governance contract"):
+        gov_hub.updateParam("proposalMaxOperations", value)
+
+
+@pytest.mark.parametrize("new_proposalMaxOperations", [1, 2, 5000, 6000, 1000000, 10000000])
+def test_update_proposal_max_operations_success(gov_hub, new_proposalMaxOperations):
+    value = padding_left(Web3.to_hex(new_proposalMaxOperations), 64)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    gov_hub.updateParam("proposalMaxOperations", value)
+    assert gov_hub.proposalMaxOperations() == value
+
+
+def test_proposal_max_operations_zero(gov_hub):
+    value = padding_left(Web3.to_hex(0), 64)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    uint256_max = 2 ** 256 - 1
+    with brownie.reverts(f"OutOfBounds: proposalMaxOperations, 0, 1, {uint256_max}"):
+        gov_hub.updateParam("proposalMaxOperations", value)
+
+
+@pytest.mark.parametrize("votingPeriod", [28800, 28801, 28802, 100000, 800000000])
+def test_update_voting_period_success(gov_hub, votingPeriod):
+    value = padding_left(Web3.to_hex(votingPeriod), 64)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    gov_hub.updateParam("votingPeriod", value)
+    assert gov_hub.votingPeriod() == value
+
+
+@pytest.mark.parametrize("votingPeriod", [0, 1, 1000, 28800 - 2, 28800 - 1])
+def test_voting_period_out_of_range(gov_hub, votingPeriod):
+    value = padding_left(Web3.to_hex(votingPeriod), 64)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    uint256_max = 2 ** 256 - 1
+    with brownie.reverts(f"OutOfBounds: votingPeriod, {votingPeriod}, 28800, {uint256_max}"):
+        gov_hub.updateParam("votingPeriod", value)
+
+
+@pytest.mark.parametrize("executingPeriod", [28800, 28801, 28802, 100000, 800000000])
+def test_update_executing_period_success(gov_hub, executingPeriod):
+    value = padding_left(Web3.to_hex(executingPeriod), 64)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    gov_hub.updateParam("executingPeriod", value)
+    assert gov_hub.executingPeriod() == value
+
+
+@pytest.mark.parametrize("executingPeriod", [0, 1, 1000, 28800 - 2, 28800 - 1])
+def test_executing_period_out_of_range(gov_hub, executingPeriod):
+    value = padding_left(Web3.to_hex(executingPeriod), 64)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    uint256_max = 2 ** 256 - 1
+    with brownie.reverts(f"OutOfBounds: executingPeriod, {executingPeriod}, 28800, {uint256_max}"):
+        gov_hub.updateParam("executingPeriod", value)
+
+
+def test_invalid_key(gov_hub):
+    value = padding_left(Web3.to_hex(100000), 64)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"UnsupportedGovParam: key_error"):
+        gov_hub.updateParam("key_error", value)
+
+
+def test_value_length_error(gov_hub):
+    value = padding_left(Web3.to_hex(100000), 66)
+    update_system_contract_address(gov_hub, gov_hub=accounts[0])
+    with brownie.reverts(f"MismatchParamLength: executingPeriod"):
+        gov_hub.updateParam("executingPeriod", value)
 
 
 def __add_member(c, member_address):
