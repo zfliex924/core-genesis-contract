@@ -7,7 +7,7 @@ const validators = [
   {
     "consensusAddr": "0x01Bca3615D24d3c638836691517b2B9b49b054B1",
     "feeAddr": "0x01Bca3615D24d3c638836691517b2B9b49b054B1",
-  },
+  }/*,
   {
     "consensusAddr": "0xa458499604A85E90225a14946f36368Ae24df16D",
     "feeAddr": "0xa458499604A85E90225a14946f36368Ae24df16D",
@@ -31,7 +31,7 @@ const validators = [
  {
    "consensusAddr": "0x8073CF54f45fe63F7F3Cd64c22447aaA528B198E",
    "feeAddr": "0x8073CF54f45fe63F7F3Cd64c22447aaA528B198E",
- }
+ }*/
 ];
 
 // ===============  Do not edit below ====
