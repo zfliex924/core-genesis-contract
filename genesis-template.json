@@ -31,6 +31,18 @@
       "period": {{initCycle.blockPeriod}},
       "epoch": {{initCycle.epochLength}},
       "round": {{initCycle.roundInterval}}
+    },
+    "blobSchedule": {
+      "cancun": {
+        "target": 3,
+        "max": 6,
+        "baseFeeUpdateFraction": 3338477
+      },
+      "prague": {
+        "target": 3,
+        "max": 6,
+        "baseFeeUpdateFraction": 3338477
+      }
     }
   },
   "nonce": "0x0",
