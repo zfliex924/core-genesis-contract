@@ -59,6 +59,8 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   mapping(address => uint256) public jailMap;
 
   uint256 public roundTag;
+  
+  uint256 public maxAlternateCount;
 
   mapping(address => uint256) public agentMap;
   
@@ -192,6 +194,8 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   /// @dev this method is called by Golang consensus engine at the end of a round
   function turnRound() public virtual onlyCoinbase onlyInit onlyZeroGasPrice {
     
+    IValidatorSet(VALIDATOR_CONTRACT_ADDR).exitMaintenanceTurnRound();
+    
     // distribute rewards for the about to end round
     IValidatorSet(VALIDATOR_CONTRACT_ADDR).distributeReward(roundTag);
 
@@ -219,7 +223,8 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     // choose top ones to form the validator set of the new round
     (uint256[] memory scores) =
       IStakeHub(STAKE_HUB_ADDR).getHybridScore(candidates, roundTag);
-    address[] memory validatorList = getValidators(candidates, scores, validatorCount);
+    uint256 sortedCount = getAlternateCount(maxAlternateCount, validatorCount, candidates.length);
+    address[] memory validatorList = getValidators(candidates, scores, validatorCount + sortedCount, sortedCount);
 
     // prepare arguments, and notify ValidatorSet contract
     address[] memory consensusAddrList = new address[](validatorList.length);
@@ -241,7 +246,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       statusList[index - 1] |= SET_VALIDATOR;
     }
 
-    IValidatorSet(VALIDATOR_CONTRACT_ADDR).updateValidatorSet(validatorList, consensusAddrList, feeAddrList, commissionThousandthsList, voteAddrList);
+    IValidatorSet(VALIDATOR_CONTRACT_ADDR).updateValidatorSet(validatorList, consensusAddrList, feeAddrList, commissionThousandthsList, voteAddrList, validatorCount);
 
     // clean slash contract
     ISlashIndicator(SLASH_CONTRACT_ADDR).clean();
@@ -490,8 +495,12 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   }
 
   /// Rank validator candidates on hybrid score using quicksort
-  function getValidators(address[] memory candidateList, uint256[] memory scoreList, uint256 count) internal pure returns (address[] memory validatorList){
+  function getValidators(address[] memory candidateList, uint256[] memory scoreList, uint256 count, uint256 sortedCount) internal pure returns (address[] memory validatorList){
+    require(count > sortedCount, "count should be greater than sortedCount");
     uint256 candidateSize = candidateList.length;
+    if (candidateSize == 0) {
+      return validatorList;
+    }
     // quicksort by scores O(nlogk)
     uint256 l = 0;
     uint256 r = 0;
@@ -530,6 +539,21 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
         break;
       }
     }
+
+    // select top sortedCount
+    for (uint256 i = count - 1; i >= count - sortedCount; i--) {
+      uint256 minIndex;
+      for (uint256 j = 1; j <= i; j++) {
+        if (scoreList[j] < scoreList[minIndex]) {
+            minIndex = j;
+        }
+      }
+      if (minIndex != i) {
+          (candidateList[i], candidateList[minIndex]) = (candidateList[minIndex], candidateList[i]);
+          (scoreList[i], scoreList[minIndex]) = (scoreList[minIndex], scoreList[i]);
+      }
+    }
+
     uint256 d = candidateSize - count;
     if (d != 0) {
       assembly {
@@ -577,6 +601,12 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
         revert OutOfBounds(key, newMaxCommissionChange, 1, type(uint256).max);
       }
       maxCommissionChange = newMaxCommissionChange;
+    } else if (Memory.compareStrings(key, "maxAlternateCount")) {
+      uint256 newAlternateValidatorCount = BytesToTypes.bytesToUint256(32, value);
+      if (newAlternateValidatorCount > validatorCount / 3) {
+        revert OutOfBounds(key, newAlternateValidatorCount, 0, validatorCount / 3);
+      }
+      maxAlternateCount = newAlternateValidatorCount;
     } else {
       revert UnsupportedGovParam(key);
     }
@@ -612,5 +642,14 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   /// @return round interval
   function getRoundInterval() external pure returns(uint256) {
     return SatoshiPlusHelper.ROUND_INTERVAL;
+  }
+
+  function getAlternateCount(uint256 _maxAlternateCount, uint256 _validatorCount, uint256 _candidateSize) internal pure returns (uint256) {
+    if (_candidateSize <= _validatorCount) {
+      _maxAlternateCount = 0;
+    } else if (_candidateSize < _validatorCount + _maxAlternateCount) {
+      _maxAlternateCount = _candidateSize - _validatorCount;
+    }
+    return _maxAlternateCount;
   }
 }

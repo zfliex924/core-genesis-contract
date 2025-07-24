@@ -12,8 +12,8 @@ import "./lib/RLPDecode.sol";
 import "./lib/SafeCast.sol";
 
 /// This contract handles BTC staking. 
-/// It interacts with BitcoinStake.sol and BitcoinLSTStake.sol for
-/// non-custodial BTC staking and LST BTC staking correspondingly. 
+/// It interacts with BitcoinStake.sol for
+/// non-custodial BTC staking correspondingly. 
 contract BitcoinAgent is IAgent, System, IParamSubscriber {
   using BytesLib for *;
   using SafeCast for *;
@@ -37,11 +37,11 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   // conversion rate between CORE and the asset
   uint256 public assetWeight;
 
-  // the same grade percentage applies to all LST stakes
+  // Deprecated
   uint256 public lstGradePercentage;
 
   struct StakeAmount {
-    // staked BTC amount from LST
+    // Deprecated, never used.
     uint256 lstStakeAmount;
     // staked BTC amount from non custodial
     uint256 stakeAmount;
@@ -53,13 +53,10 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   }
 
   event claimedBtcReward(address indexed delegator, uint256 amount, uint256 unclaimedAmount, int256 floatReward, uint256 accStakedAmount, uint256 dualStakingRate);
-  event claimedBtcLstReward(address indexed delegator, uint256 amount, uint256 unclaimedAmount, int256 floatReward, uint256 accStakedAmount, uint256 percent);
   event storedBtcReward(address indexed delegator, uint256 amount, uint256 unclaimedAmount, int256 floatReward, uint256 accStakedAmount, uint256 dualStakingRate);
-  event storedBtcLstReward(address indexed delegator, uint256 amount, uint256 unclaimedAmount, int256 floatReward, uint256 accStakedAmount, uint256 percent);
 
   function init() external onlyNotInit {
     assetWeight = DEFAULT_CORE_BTC_CONVERSION;
-    lstGradePercentage = SatoshiPlusHelper.DENOMINATOR;
     alreadyInit = true;
   }
 
@@ -68,28 +65,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
   function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 /*round*/) external override onlyStakeHub {
-    uint256 validatorSize = validators.length;
-    require(validatorSize == rewardList.length, "the length of validators and rewardList should be equal");
-
-    uint256[] memory rewards = new uint256[](validatorSize);
-    StakeAmount memory sa;
-    for (uint256 i = 0; i < validatorSize; ++i) {
-      if (rewardList[i] == 0) {
-        continue;
-      }
-      sa = candidateMap[validators[i]];
-      if (sa.lstStakeAmount + sa.stakeAmount == 0) {
-        continue;
-      }
-      rewards[i] = rewardList[i] * sa.lstStakeAmount / (sa.lstStakeAmount + sa.stakeAmount);
-    }
-    IBitcoinStake(BTCLST_STAKE_ADDR).distributeReward(validators, rewards);
-
-    for (uint256 i = 0; i < validatorSize; ++i) {
-      /// @dev could be 0-0
-      rewards[i] = rewardList[i] - rewards[i];
-    }
-    IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validators, rewards);
+    IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validators, rewardList);
   }
 
   /// Get staked BTC amount
@@ -98,12 +74,9 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// @return totalAmount Total BTC staked on all candidates in this round
   function getStakeAmounts(address[] calldata candidates, uint256 /*round*/) external override onlyStakeHub returns (uint256[] memory amounts, uint256 totalAmount) {
     uint256 candidateSize = candidates.length;
-    uint256[] memory lstAmounts = IBitcoinStake(BTCLST_STAKE_ADDR).getStakeAmounts(candidates);
     amounts = IBitcoinStake(BTC_STAKE_ADDR).getStakeAmounts(candidates);
     for (uint256 i = 0; i < candidateSize; ++i) {
-      candidateMap[candidates[i]].lstStakeAmount = lstAmounts[i];
       candidateMap[candidates[i]].stakeAmount = amounts[i];
-      amounts[i] += lstAmounts[i];
       totalAmount += amounts[i];
     }
   }
@@ -113,7 +86,6 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   /// @param round The new round tag
   function setNewRound(address[] calldata validators, uint256 round) external override onlyStakeHub {
     IBitcoinStake(BTC_STAKE_ADDR).setNewRound(validators, round);
-    IBitcoinStake(BTCLST_STAKE_ADDR).setNewRound(validators, round);
   }
 
   /// Claim reward for delegator
@@ -149,22 +121,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
     } else {
       emit storedBtcReward(delegator, btcReward, btcRewardUnclaimed, floatReward, btcAccStakedAmount, p);
     }
-
-    (uint256 btclstReward, , uint256 btclstAccStakedAmount) = IBitcoinStake(BTCLST_STAKE_ADDR).claimReward(delegator, settleRound, claim);
-    int256 lstFloatReward;
-    if (lstGradePercentage != SatoshiPlusHelper.DENOMINATOR) {
-      uint256 pLstReward = btclstReward * lstGradePercentage / SatoshiPlusHelper.DENOMINATOR;
-      lstFloatReward = (pLstReward.toInt256() - btclstReward.toInt256());
-      btclstReward = pLstReward;
-    }
-    floatReward += lstFloatReward;
-
-    if (claim) {
-      emit claimedBtcLstReward(delegator, btclstReward, 0, lstFloatReward, btclstAccStakedAmount, lstGradePercentage);
-    } else {
-      emit storedBtcLstReward(delegator, btclstReward, 0, lstFloatReward, btclstAccStakedAmount, lstGradePercentage);
-    }
-    return (btcReward + btclstReward, floatReward, btcAccStakedAmount + btclstAccStakedAmount);
+    return (btcReward, floatReward, btcAccStakedAmount);
   }
 
   /*********************** External methods ********************************/
@@ -228,9 +185,6 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
         revert MismatchParamLength(key);
       }
       uint256 newPercentage = value.toUint256(0);
-      if (newPercentage == 0 || newPercentage > SatoshiPlusHelper.DENOMINATOR * 10) {
-        revert OutOfBounds(key, newPercentage, 1, SatoshiPlusHelper.DENOMINATOR * 10);
-      }
       lstGradePercentage = newPercentage;
     } else {
         revert UnsupportedGovParam(key);

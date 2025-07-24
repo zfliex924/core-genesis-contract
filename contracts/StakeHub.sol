@@ -91,7 +91,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     operators[HASH_AGENT_ADDR] = true;
     operators[BTC_AGENT_ADDR] = true;
     operators[BTC_STAKE_ADDR] = true;
-    operators[BTCLST_STAKE_ADDR] = true;
+    // operators[BTCLST_STAKE_ADDR] = true;
 
     alreadyInit = true;
 

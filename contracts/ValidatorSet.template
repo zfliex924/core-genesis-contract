@@ -6,6 +6,7 @@ import "./lib/BytesToTypes.sol";
 import "./lib/Memory.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/IValidatorSet.sol";
+import "./interface/ISlashIndicator.sol";
 import "./interface/IStakeHub.sol";
 import "./interface/ISystemReward.sol";
 import "./interface/ICandidateHub.sol";
@@ -37,6 +38,11 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
   uint256 public voteRewardPercent;
 
+  uint256 public maintainSlashPercent;
+
+  uint256 public validatorCount;
+  address[] public rankedValidatorList;
+
   struct Validator {
     address operateAddress;
     address consensusAddress;
@@ -45,6 +51,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     uint256 income;
     bytes voteAddr;
     uint256 voteWeight;
+    uint256 enterMaintenanceHeight;
   }
 
   /*********************** events **************************/
@@ -77,6 +84,8 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   event validatorMisdemeanor(address indexed validator, uint256 amount);
   event validatorFelony(address indexed validator, uint256 amount);
   event received(address indexed from, uint256 amount);
+  event validatorEnterMaintenance(address indexed validator);
+  event validatorExitMaintenance(address indexed validator);
 
   /*********************** init **************************/
   function init() external onlyNotInit {
@@ -136,6 +145,21 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       if (index > 0) {
         currentValidatorSet[index - 1].voteWeight += weights[i];
       }
+    }
+  }
+
+  function exitMaintenanceTurnRound() external override onlyCandidate {
+    uint256 len = currentValidatorSet.length;
+    address[] memory valAddrs = new address[](len);
+    uint256 j;
+    for (uint256 i; i < len; ++i) {
+      if (currentValidatorSet[i].enterMaintenanceHeight != 0) {
+        valAddrs[j++] = currentValidatorSet[i].consensusAddress;
+      }
+    }
+
+    for (uint256 i; i < j; ++i) {
+        _exitMaintenance(valAddrs[i], currentValidatorSetMap[valAddrs[i]]);
     }
   }
 
@@ -219,17 +243,23 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     address[] calldata consensusAddrList,
     address payable[] calldata feeAddrList,
     uint256[] calldata commissionThousandthsList,
-    bytes[] calldata voteAddrList
+    bytes[] calldata voteAddrList,
+    uint256 _validatorCount
   ) external override onlyCandidate {
     // do verify.
     checkValidatorSet(operateAddrList, consensusAddrList, feeAddrList, commissionThousandthsList, voteAddrList);
     if (consensusAddrList.length == 0) {
       return;
     }
+
+    validatorCount = _validatorCount;
+    updateRankedValidatorList(consensusAddrList);
+    
     // do update validator set state
     uint256 i;
     uint256 lastLength = currentValidatorSet.length;
     uint256 currentLength = consensusAddrList.length;
+ 
     for (i = 0; i < lastLength; i++) {
       delete currentValidatorSetMap[currentValidatorSet[i].consensusAddress];
     }
@@ -238,15 +268,64 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     }
 
     for (i = 0; i < currentLength; ++i) {
+      Validator memory v;
+      v.operateAddress = operateAddrList[i];
+      v.consensusAddress = consensusAddrList[i];
+      v.feeAddress = feeAddrList[i];
+      v.commissionThousandths = commissionThousandthsList[i];
+      v.income = 0;
+      v.voteAddr = voteAddrList[i];
+      v.voteWeight = 0;
+      v.enterMaintenanceHeight = 0;
+        
       if (i >= lastLength) {
-        currentValidatorSet.push(Validator(operateAddrList[i], consensusAddrList[i], feeAddrList[i],commissionThousandthsList[i], 0, voteAddrList[i], 0));
+        currentValidatorSet.push(v);
       } else {
-        currentValidatorSet[i] = Validator(operateAddrList[i], consensusAddrList[i], feeAddrList[i],commissionThousandthsList[i], 0, voteAddrList[i], 0);
+        currentValidatorSet[i] = v;
       }
       currentValidatorSetMap[consensusAddrList[i]] = i + 1;
     }
 
     emit validatorSetUpdated();
+  }
+
+  function canEnterMaintenance(uint256 index) public view returns (bool) {
+    if (index == 0) {
+      return false;
+    }
+    Validator storage val = currentValidatorSet[index-1];
+    uint256 working = getWorkingCount();
+    if (val.enterMaintenanceHeight != 0 || working <= 1 || validatorCount >= working || validatorCount == 0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function enterMaintenance() external {
+    uint256 index = getValidatorIndexFromOps(msg.sender);
+    require(index > 0, "not a validator");
+    require(canEnterMaintenance(index), "can not enter Temporary Maintenance");
+    _enterMaintenance(currentValidatorSet[index-1].consensusAddress, index);
+  }
+
+  function enterMaintenance(address val) external override onlySlash {
+    uint256 index = currentValidatorSetMap[val];
+    if (index == 0) {
+      return;
+    }
+
+    if (canEnterMaintenance(index)) {
+      _enterMaintenance(val, index);
+    }
+  }
+
+  function exitMaintenance() external {
+    uint256 index = getValidatorIndexFromOps(msg.sender);
+    require(index > 0, "not a validator");
+    require(currentValidatorSet[index-1].enterMaintenanceHeight != 0, "not in Temporary Maintenance");
+
+    _exitMaintenance(currentValidatorSet[index-1].consensusAddress, index);
   }
 
   /// Get list of validators in the current round
@@ -275,12 +354,46 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   /// @return (List of validator consensus addresses, List of voting addresses)
   function getValidatorsAndVoteAddresses() external override view returns (address[] memory, bytes[] memory) {
     uint256 validatorSize = currentValidatorSet.length;
+    uint256 workingRankedValidatorLen;
+    address[] memory workingRankedValidatorList;
+    if (validatorCount == 0) {
+      workingRankedValidatorList = getWorkingValidators();
+      workingRankedValidatorLen = workingRankedValidatorList.length;
+      validatorSize = workingRankedValidatorLen;
+    } else {
+      uint256 len = rankedValidatorList.length;
+      for (uint256 i = 0; i < len; ++i) {
+        uint256 index = currentValidatorSetMap[rankedValidatorList[i]];
+        if (index != 0 && currentValidatorSet[index-1].enterMaintenanceHeight == 0) {
+          ++workingRankedValidatorLen;
+        }
+      }
+      workingRankedValidatorList = new address[](workingRankedValidatorLen);
+      uint256 j = 0;
+      for (uint256 i = 0; i < len; ++i) {
+        uint256 index = currentValidatorSetMap[rankedValidatorList[i]];
+        if (index != 0 && currentValidatorSet[index-1].enterMaintenanceHeight == 0) {
+          workingRankedValidatorList[j++] = currentValidatorSet[index-1].consensusAddress;
+        }
+      }
+      validatorSize = validatorCount;
+    }
+
+    if (validatorSize > workingRankedValidatorLen) {
+      validatorSize = workingRankedValidatorLen;
+    }
+    
     address[] memory consensusAddrs = new address[](validatorSize);
     bytes[] memory voteAddrs = new bytes[](validatorSize);
-    for (uint256 i = 0; i < validatorSize; i++) {
-      consensusAddrs[i] = currentValidatorSet[i].consensusAddress;
-      voteAddrs[i] = currentValidatorSet[i].voteAddr;
+
+    uint256 pushedCount;
+    for (uint256 i; pushedCount < validatorSize && i < workingRankedValidatorLen; ++i) {
+      uint256 index = currentValidatorSetMap[workingRankedValidatorList[i]];
+      consensusAddrs[pushedCount] = currentValidatorSet[index-1].consensusAddress;
+      voteAddrs[pushedCount] = currentValidatorSet[index-1].voteAddr;
+      ++pushedCount;
     }
+
     return (consensusAddrs, voteAddrs);
   }
 
@@ -293,6 +406,16 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       return 0;
     }
     return currentValidatorSet[index - 1].income;
+  }
+
+  function getValidatorIndexFromOps(address ops) public view returns (uint256) {
+    uint256 len = currentValidatorSet.length;
+    for (uint256 i = 0; i < len; i++) {
+      if (currentValidatorSet[i].operateAddress == ops) {
+          return i + 1;
+      }
+    }
+    return 0;
   }
 
   /*********************** For slash **************************/
@@ -344,6 +467,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       currentValidatorSet[index].income = 0;
       return;
     }
+
     address operateAddress = currentValidatorSet[index].operateAddress;
     emit validatorFelony(operateAddress, income);
     delete currentValidatorSetMap[validator];
@@ -383,6 +507,12 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
         revert OutOfBounds(key, newVoteRewardPercent, 0, 100);
       }
       voteRewardPercent = newVoteRewardPercent;
+    } else if (Memory.compareStrings(key, "maintainSlashPercent")) {
+      uint256 newMaintainSlashPercent = BytesToTypes.bytesToUint256(32, value);
+      if (newMaintainSlashPercent > 100) {
+        revert OutOfBounds(key, newMaintainSlashPercent, 0, 100);
+      }
+      maintainSlashPercent = newMaintainSlashPercent;
     } else {
       revert UnsupportedGovParam(key);
     }
@@ -421,6 +551,49 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     }
   }
 
+  function updateRankedValidatorList(address[] calldata consensusAddrList) internal {
+    uint256 currentLength = consensusAddrList.length;
+    uint256 lastRankedValLength = rankedValidatorList.length;
+
+    // Remove extra elements if new list is shorter
+    for (uint256 i = currentLength; i < lastRankedValLength; i++) {
+      rankedValidatorList.pop();
+    }
+
+    // Update or append elements based on list length
+    for (uint256 i = 0; i < currentLength; ++i) {
+      if (i >= lastRankedValLength) {
+          rankedValidatorList.push(consensusAddrList[i]);
+      } else {
+          rankedValidatorList[i] = consensusAddrList[i];
+      }
+    }
+  }
+
+  function getWorkingCount() public view returns (uint256) {
+    uint256 len = currentValidatorSet.length;
+    uint256 working;
+    for (uint256 i; i < len; ++i) {
+      if (currentValidatorSet[i].enterMaintenanceHeight == 0) {
+        ++working;
+      }
+    }
+    return working;
+  }
+
+  function getWorkingValidators() public view returns (address[] memory) {
+    uint256 len = currentValidatorSet.length;
+    uint256 working = getWorkingCount();
+    address[] memory workingValidators = new address[](working);
+    uint256 j;
+    for (uint256 i ; i < len; ++i) {
+      if (currentValidatorSet[i].enterMaintenanceHeight == 0) {
+        workingValidators[j++] = currentValidatorSet[i].consensusAddress;
+      }
+    }
+    return workingValidators;
+  }
+
   //rlp encode & decode function
   function decodeValidatorSet(bytes memory msgBytes) internal pure returns (Validator[] memory, bool) {
     RLPDecode.RLPItem[] memory items = msgBytes.toRLPItem().toList();
@@ -449,5 +622,25 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       success = true;
     }
     return (validator, success);
+  }
+
+  function _enterMaintenance(address validator, uint256 index) internal {
+    currentValidatorSet[index-1].enterMaintenanceHeight = block.number;
+    emit validatorEnterMaintenance(validator);
+  }
+
+  function _exitMaintenance(address validator, uint256 index) internal {
+    uint256 working = currentValidatorSet.length;
+    if (working > validatorCount) {
+      working = validatorCount;
+    }
+    uint256 slashCount = (block.number - currentValidatorSet[index-1].enterMaintenanceHeight) / working * maintainSlashPercent / 100;
+
+    currentValidatorSet[index-1].enterMaintenanceHeight = 0;
+    
+    if (slashCount != 0) {
+      ISlashIndicator(SLASH_CONTRACT_ADDR).exitMaintenanceSlash(validator, slashCount);
+    }
+    emit validatorExitMaintenance(validator);
   }
 }

@@ -155,16 +155,6 @@ Promise.all([
     "BitcoinStake"
   ),
   compileContract(
-    "bitcoinLSTstake",
-    "contracts/BitcoinLSTStake.sol",
-    "BitcoinLSTStake"
-  ),
-  compileContract(
-    "bitcoinLSTtoken",
-    "contracts/BitcoinLSTToken.sol",
-    "BitcoinLSTToken"
-  ),
-  compileContract(
     "configuration",
     "contracts/Configuration.sol",
     "Configuration"

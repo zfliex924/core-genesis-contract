@@ -23,10 +23,8 @@ contract System {
   address public STAKE_HUB_ADDR;
   address public BTC_STAKE_ADDR;
   address public BTC_AGENT_ADDR;
-  address public BTCLST_STAKE_ADDR;
   address public CORE_AGENT_ADDR;
   address public HASH_AGENT_ADDR;
-  address public BTCLST_TOKEN_ADDR;
   address public CONFIGURATION_ADDR;
 
   struct SystemContractAddr {
@@ -43,10 +41,8 @@ contract System {
     address stakeHub;
     address btcStake;
     address btcAgent;
-    address btcLSTStake;
     address coreAgent;
     address hashAgent;
-    address btcLstToken;
     address configurationContract;
   }
 
@@ -65,10 +61,8 @@ contract System {
     STAKE_HUB_ADDR = systemContractAddr.stakeHub;
     BTC_STAKE_ADDR = systemContractAddr.btcStake;
     BTC_AGENT_ADDR = systemContractAddr.btcAgent;
-    BTCLST_STAKE_ADDR = systemContractAddr.btcLSTStake;
     CORE_AGENT_ADDR = systemContractAddr.coreAgent;
     HASH_AGENT_ADDR = systemContractAddr.hashAgent;
-    BTCLST_TOKEN_ADDR = systemContractAddr.btcLstToken;
     CONFIGURATION_ADDR = systemContractAddr.configurationContract;
   }
   
@@ -93,9 +87,9 @@ contract System {
   address public constant HASH_AGENT_ADDR = 0x0000000000000000000000000000000000001012;
   address public constant BTC_AGENT_ADDR = 0x0000000000000000000000000000000000001013;
   address public constant BTC_STAKE_ADDR = 0x0000000000000000000000000000000000001014;
-  address public constant BTCLST_STAKE_ADDR = 0x0000000000000000000000000000000000001015;
+  // 0x0000000000000000000000000000000000001015 is deprecated
   address public constant CONFIGURATION_ADDR = 0x0000000000000000000000000000000000001016;
-  address public constant BTCLST_TOKEN_ADDR = 0x0000000000000000000000000000000000010001;
+  // 0x0000000000000000000000000000000000010001 is deprecated;
 {% endif %}
   modifier onlyCoinbase() {
   {% if not mock %}

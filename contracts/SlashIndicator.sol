@@ -72,6 +72,7 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
 
   /*********************** events **************************/
   event validatorSlashed(address indexed validator);
+  event validatorSlashed(address indexed validator, uint256 blockCount);
   event indicatorCleaned();
   
   function init() external onlyNotInit{
@@ -92,23 +93,28 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
     if (!IValidatorSet(VALIDATOR_CONTRACT_ADDR).isValidator(validator)) {
       return;
     }
-    Indicator memory indicator = indicators[validator];
-    if (indicator.exist) {
-      indicator.count++;
-    } else {
-      indicator.exist = true;
-      indicator.count = 1;
-      validators.push(validator);
-    }
-    indicator.height = block.number;
+    slashWithBlockCount(validator, 1);
+    Indicator storage indicator = indicators[validator];
     if (indicator.count % felonyThreshold == 0) {
       indicator.count = 0;
       IValidatorSet(VALIDATOR_CONTRACT_ADDR).felony(validator, felonyRound, felonyDeposit);
     } else if (indicator.count % misdemeanorThreshold == 0) {
       IValidatorSet(VALIDATOR_CONTRACT_ADDR).misdemeanor(validator);
+      IValidatorSet(VALIDATOR_CONTRACT_ADDR).enterMaintenance(validator);
     }
-    indicators[validator] = indicator;
     emit validatorSlashed(validator);
+  }
+
+  function exitMaintenanceSlash(address validator, uint256 blockCount) external override onlyValidator {
+    slashWithBlockCount(validator, blockCount);
+    Indicator storage indicator = indicators[validator];
+    if (indicator.count >= felonyThreshold) {
+      indicator.count = 0;
+      IValidatorSet(VALIDATOR_CONTRACT_ADDR).felony(validator, felonyRound, felonyDeposit);
+    } else if (indicator.count / misdemeanorThreshold > (indicator.count - blockCount) / misdemeanorThreshold) {
+      IValidatorSet(VALIDATOR_CONTRACT_ADDR).misdemeanor(validator);
+    }
+    emit validatorSlashed(validator, blockCount);
   }
 
   /// Slash the validator because of double sign
@@ -281,6 +287,18 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
   }
 
   /*********************** Internal Functions **************************/
+  function slashWithBlockCount(address validator, uint256 blockCount) internal {
+    Indicator storage indicator = indicators[validator];
+    if (indicator.exist) {
+      indicator.count += blockCount;
+    } else {
+      indicator.exist = true;
+      indicator.count = blockCount;
+      validators.push(validator);
+    }
+    indicator.height = block.number;
+  }
+
   function parseHeader(RLPDecode.RLPItem[] memory items) internal pure returns (bytes32,address){
     bytes memory extra = items[12].toBytes();
     bytes memory sig = BytesLib.slice(extra, extra.length - 65, 65);

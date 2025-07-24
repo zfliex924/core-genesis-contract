@@ -5,8 +5,10 @@ interface IValidatorSet {
   function misdemeanor(address validator) external;
   function felony(address validator, uint256 felonyRound, uint256 felonyDeposit) external;
   function distributeReward(uint256 roundTag) external returns (address[] memory operateAddrList);
-  function updateValidatorSet(address[] calldata operateAddrList, address[] calldata consensusAddrList, address payable[] calldata feeAddrList, uint256[] calldata commissionThousandthsList, bytes[] calldata voteAddrList) external;
+  function updateValidatorSet(address[] calldata operateAddrList, address[] calldata consensusAddrList, address payable[] calldata feeAddrList, uint256[] calldata commissionThousandthsList, bytes[] calldata voteAddrList, uint256 _validatorCount) external;
   function isValidator(address addr) external view returns (bool);
   function getValidatorOps() external view returns (address[] memory);
   function getValidatorsAndVoteAddresses() external view returns (address[] memory, bytes[] memory);
+  function enterMaintenance(address val) external;
+  function exitMaintenanceTurnRound() external;
 }
