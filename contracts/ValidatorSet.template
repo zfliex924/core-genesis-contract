@@ -613,14 +613,18 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   function decodeValidator(RLPDecode.RLPItem memory itemValidator) internal pure returns (Validator memory, bool) {
     Validator memory validator;
     RLPDecode.Iterator memory iter = itemValidator.iterator();
-    bool success = false;
-    while (iter.hasNext()) {
+    bool success = iter.hasNext();
+    while (iter.hasNext() && success) {
       validator.consensusAddress = iter.next().toAddress();
       validator.feeAddress = payable(iter.next().toAddress());
       validator.operateAddress = validator.feeAddress;
+      validator.voteAddr = iter.next().toBytes();
       validator.commissionThousandths = 1000;
-      success = true;
+      if (validator.voteAddr.length != 48) {
+        success = false;
+      }
     }
+
     return (validator, success);
   }
 
