@@ -1,5 +1,6 @@
 const web3 = require("web3")
 const RLP = require('rlp');
+const init_cycle = require("./init_cycle")
 
 // Configure
 const validators = [
@@ -69,10 +70,11 @@ const validators = [
 
 // ===============  Do not edit below ====
 function generateExtradata(validators) {
-  let extraVanity =Buffer.alloc(32);
+  let extraVanity = Buffer.alloc(32);
   let validatorsBytes = extraDataSerialize(validators);
-  let extraSeal =Buffer.alloc(65);
-  return Buffer.concat([extraVanity,validatorsBytes,extraSeal]);
+  let turnLengthByte = Buffer.from([init_cycle.turnLength]); // Initial turnLength from init_cycle.js
+  let extraSeal = Buffer.alloc(65);
+  return Buffer.concat([extraVanity,validatorsBytes,turnLengthByte,extraSeal]);
 }
 
 function extraDataSerialize(validators) {
