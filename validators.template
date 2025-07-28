@@ -4,11 +4,13 @@ const init_cycle = require("./init_cycle")
 
 // Configure
 const validators = [
-  {% for v in validators %}
+  {%- for v in validators %}
    {
      "consensusAddr": "{{ v.consensusAddr }}",
      "feeAddr": "{{ v.feeAddr }}",
-   },{% endfor %}
+     "voteAddr": "{{ v.voteAddr }}",
+   },
+  {%- endfor %}
 ];
 
 // ===============  Do not edit below ====
