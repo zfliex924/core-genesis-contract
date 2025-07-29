@@ -27,6 +27,11 @@
     "theseusFixTime": 0,
     "lubanTime": 0,
     "platoTime": 0,
+    "bohrTime": 0,
+    "pascalTime": 0,
+    "pragueTime": 0,
+    "lorentzTime": 0,
+
     "satoshi": {
       "period": {{initCycle.blockPeriod}},
       "epoch": {{initCycle.epochLength}},
@@ -116,17 +121,9 @@
       "balance": "0x0",
       "code": "0x{{bitcoinstake}}"
     },
-    "0x0000000000000000000000000000000000001015": {
-      "balance": "0x0",
-      "code": "0x{{bitcoinLSTstake}}"
-    },
     "0x0000000000000000000000000000000000001016": {
       "balance": "0x0",
       "code": "0x{{configuration}}"
-    },
-    "0x0000000000000000000000000000000000010001": {
-      "balance": "0x0",
-      "code": "0x{{bitcoinLSTtoken}}"
     }{% for v in initHolders %},
     "{{ v.address.replace('0x', '') }}": {
       "balance": "0x{{ v.balance }}"
