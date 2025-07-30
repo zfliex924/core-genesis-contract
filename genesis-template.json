@@ -30,7 +30,6 @@
     "bohrTime": 0,
     "pascalTime": 0,
     "pragueTime": 0,
-    "lorentzTime": 0,
 
     "satoshi": {
       "period": {{initCycle.blockPeriod}},
