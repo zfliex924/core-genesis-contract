@@ -412,6 +412,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     return currentValidatorSet[index - 1].income;
   }
 
+  /// Get the index of a validator in the current round
+  /// @param ops The operate address
+  /// @return The index of the validator
   function getValidatorIndexFromOps(address ops) public view returns (uint256) {
     uint256 len = currentValidatorSet.length;
     for (uint256 i = 0; i < len; i++) {
@@ -420,6 +423,32 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       }
     }
     return 0;
+  }
+
+  /// Get the complete ranked validator list
+  /// @return List of ranked validator consensus addresses
+  function getRankedValidatorList() external view returns (address[] memory) {
+    uint256 length = rankedValidatorList.length;
+    address[] memory rankedValidators = new address[](length);
+    for (uint256 i = 0; i < length; i++) {
+      rankedValidators[i] = rankedValidatorList[i];
+    }
+    return rankedValidators;
+  }
+
+  /// Get the list of validators that are still in the validator set
+  /// @return (List of validator consensus addresses, List of voting addresses)
+  function getLivingValidators() external view override returns (address[] memory, bytes[] memory) {
+    uint256 len = currentValidatorSet.length;
+    address[] memory consensusAddrs = new address[](len);
+    bytes[] memory voteAddrs = new bytes[](len);
+
+    for (uint256 i = 0; i < len; i++) {
+      consensusAddrs[i] = currentValidatorSet[i].consensusAddress;
+      voteAddrs[i] = currentValidatorSet[i].voteAddr;
+    }
+
+    return (consensusAddrs, voteAddrs);
   }
 
   /*********************** For slash **************************/

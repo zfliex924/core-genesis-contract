@@ -9,6 +9,7 @@ interface IValidatorSet {
   function isValidator(address addr) external view returns (bool);
   function getValidatorOps() external view returns (address[] memory);
   function getValidatorsAndVoteAddresses() external view returns (address[] memory, bytes[] memory);
+  function getLivingValidators() external view returns (address[] memory, bytes[] memory);
   function enterMaintenance(address val) external;
   function exitMaintenanceTurnRound() external;
 }

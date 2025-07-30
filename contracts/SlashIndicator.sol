@@ -159,7 +159,7 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
     require(verifyBLSSignature(evidence.voteA, evidence.voteAddr) &&
       verifyBLSSignature(evidence.voteB, evidence.voteAddr), "verify signature failed");
 
-    (address[] memory vals, bytes[] memory voteAddrs) = IValidatorSet(VALIDATOR_CONTRACT_ADDR).getValidatorsAndVoteAddresses();
+    (address[] memory vals, bytes[] memory voteAddrs) = IValidatorSet(VALIDATOR_CONTRACT_ADDR).getLivingValidators();
     if (voteAddrs.length <= 1) {
       return;
     }
