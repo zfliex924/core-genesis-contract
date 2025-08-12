@@ -33,7 +33,7 @@
 
     "satoshi": {
       "period": 3,
-      "epoch": 20,
+      "epoch": 200,
       "round": 1800
     },
     "blobSchedule": {
