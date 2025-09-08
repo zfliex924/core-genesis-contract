@@ -28,6 +28,7 @@ contract System {
   address public constant BTC_STAKE_ADDR = 0x0000000000000000000000000000000000001014;
   // 0x0000000000000000000000000000000000001015 is deprecated
   address public constant CONFIGURATION_ADDR = 0x0000000000000000000000000000000000001016;
+  address public constant CHANNEL_ADDR = 0x0000000000000000000000000000000000001017;
   // 0x0000000000000000000000000000000000010001 is deprecated;
 
   modifier onlyCoinbase() {
@@ -84,13 +85,15 @@ contract System {
     _;
   }
 
-  modifier onlyBtcStake() {
-    require(msg.sender == BTC_STAKE_ADDR, "the msg sender must be bitcoin stake contract");
+  modifier onlyBtcAgent() {
+    require(msg.sender == BTC_AGENT_ADDR, "the msg sender must be bitcoin agent contract");
     _;
   }
 
-  modifier onlyBtcAgent() {
-    require(msg.sender == BTC_AGENT_ADDR, "the msg sender must be bitcoin agent contract");
+  modifier onlyCaller(address expected) {
+    if (msg.sender != expected) {
+      revert NotPermissionalCaller(expected, msg.sender);
+    }
     _;
   }
 
@@ -109,4 +112,9 @@ contract System {
   /// The passed param is unsupported.
   /// @param key The name of the parameter
   error UnsupportedGovParam(string key);
+
+  /// The msg sender is not allowed.
+  /// @param expected expected caller.
+  /// @param actual actual caller.
+  error NotPermissionalCaller(address expected, address actual);
 }

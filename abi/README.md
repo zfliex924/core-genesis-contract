@@ -15,7 +15,7 @@
 | TeamVesting    |0x0000000000000000000000000000000000002000 | [teamvesting](TeamVesting.abi)       |
 | StakeHub    |0x0000000000000000000000000000000000001010 | [stakehub](StakeHub.abi)       |
 | CoreAgent    |0x0000000000000000000000000000000000001011 | [coreagent](CoreAgent.abi)       |
-| HashStakeAgent    |0x0000000000000000000000000000000000001012 | [hashstakeagent](HashStakeAgent.abi)       |
+| HashPowerAgent    |0x0000000000000000000000000000000000001012 | [hashpoweragent](HashPowerAgent.abi)       |
 | BitcoinAgent    |0x0000000000000000000000000000000000001013 | [bitcoinagent](BitcoinAgent.abi)       |
 | BitcoinStake    |0x0000000000000000000000000000000000001014 | [bitcoinstake](BitcoinStake.abi)       |
 | BitcoinLSTStake    |0x0000000000000000000000000000000000001015 | [bitcoinlststake](BitcoinLSTStake.abi)       |

@@ -279,7 +279,7 @@ def test_turnround_update_voteaddrlist_success(candidate_hub, validator_set, sla
     assert validator_set.getValidatorsAndVoteAddresses()[1] == vote_address_list
     turn_round(consensuses)
     assert validator_set.currentValidatorSet(0) == [operators[0], consensuses[0], operators[0], 1000, 0,
-                                                    vote_address_list[0], 0]
+                                                    vote_address_list[0], 0, 0]
 
 
 @pytest.mark.parametrize("times", [
@@ -491,6 +491,7 @@ def test_registration_index_correct_after_success(candidate_hub, required_margin
     assert candidate_hub.candidateSet(1)['operateAddr'] == accounts[2]
 
 
+# updateParam
 def test_only_gov_can_call(candidate_hub, required_margin):
     value = padding_left(Web3.to_hex(candidate_hub.dues() + 10), 64)
     with brownie.reverts("the msg sender must be governance contract"):
@@ -553,6 +554,7 @@ def test_dues_cannot_greater_than_required_margin(candidate_hub, required_margin
         candidate_hub.updateParam("dues", value)
 
 
+# updateParam-validatorCount
 @pytest.mark.parametrize("validator_count", [6, 25, 41])
 def test_govern_validator_count_success(candidate_hub, required_margin, validator_count):
     value = padding_left(Web3.to_hex(validator_count), 64)
@@ -567,6 +569,25 @@ def test_validator_count_out_of_range(candidate_hub, required_margin, validator_
     update_system_contract_address(candidate_hub, gov_hub=accounts[0])
     with brownie.reverts(f"OutOfBounds: validatorCount, {validator_count}, 6, 41"):
         candidate_hub.updateParam("validatorCount", value)
+
+
+@pytest.mark.parametrize("validator_count", [19, 20, 21, 22])
+def test_update_validator_count_after_max_alternate_count(candidate_hub, validator_count):
+    old_validator_count = candidate_hub.validatorCount()
+    max_alternate = old_validator_count // 3
+    value = padding_left(Web3.to_hex(max_alternate), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    candidate_hub.updateParam("maxAlternateCount", value)
+    assert candidate_hub.maxAlternateCount() == max_alternate
+    assert old_validator_count == 21
+    assert max_alternate == 7
+    value2 = padding_left(Web3.to_hex(validator_count), 64)
+    if validator_count < 21:
+        with brownie.reverts(f"OutOfBounds: maxAlternateCount, {max_alternate}, 0, {validator_count // 3}"):
+            candidate_hub.updateParam("validatorCount", value2)
+    else:
+        candidate_hub.updateParam("validatorCount", value2)
+        assert candidate_hub.validatorCount() == validator_count
 
 
 @pytest.mark.parametrize("maxCommissionChange", [1, 500, 1000])
@@ -590,6 +611,23 @@ def test_governance_param_error(candidate_hub, required_margin):
     update_system_contract_address(candidate_hub, gov_hub=accounts[0])
     with brownie.reverts(f"UnsupportedGovParam: error_key"):
         candidate_hub.updateParam("error_key", value)
+
+
+# updateParam - maxAlternateCount
+@pytest.mark.parametrize("maxAlternateCount", [0, 1, 2, 6, 7])
+def test_govern_max_alternate_count_success(candidate_hub, maxAlternateCount):
+    value = padding_left(Web3.to_hex(maxAlternateCount), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    candidate_hub.updateParam("maxAlternateCount", value)
+    assert candidate_hub.maxAlternateCount() == maxAlternateCount
+
+
+def test_max_alternate_count_out_of_range(candidate_hub):
+    value = padding_left(Web3.to_hex(candidate_hub.validatorCount() // 3 + 1), 64)
+    update_system_contract_address(candidate_hub, gov_hub=accounts[0])
+    with brownie.reverts(
+            f"OutOfBounds: maxAlternateCount, {candidate_hub.validatorCount() // 3 + 1}, 0, {candidate_hub.validatorCount() // 3}"):
+        candidate_hub.updateParam("maxAlternateCount", value)
 
 
 def test_refuse_delegate_success(candidate_hub, set_candidate):
@@ -1050,8 +1088,9 @@ def test_get_validators(candidate_hub):
         (candidates[:10], score_list1[:10], indexes[:10], 21, 10),
         (candidates[:10], score_list2[:10], indexes[:10], 21, 10),
     ]
+    sorted_count = 0
     for candidate_list, score_list, index_list, count, expect_count in tests:
-        validator_list = candidate_hub.getValidatorsMock(candidate_list, score_list, count)
+        validator_list = candidate_hub.getValidatorsMock(candidate_list, score_list, count, sorted_count)
         index_list.sort(key=lambda e: score_list[e], reverse=True)
         for i in range(expect_count):
             flag = False
@@ -1061,6 +1100,110 @@ def test_get_validators(candidate_hub):
                     break
             assert flag is True
         assert len(validator_list) == expect_count
+
+
+def test_get_validators_single_candidate(candidate_hub):
+    candidates = [accounts[1]]
+    scores = [123]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 1, 0)
+    assert result == [accounts[1]]
+    result2 = candidate_hub.getValidatorsMock(candidates, scores, 3, 0)
+    assert result2 == [accounts[1]]
+    with brownie.reverts():
+        result3 = candidate_hub.getValidatorsMock(candidates, scores, 3, 1)
+
+
+def test_get_validators_basic(candidate_hub):
+    candidates = [accounts[1], accounts[2], accounts[3]]
+    scores = [100, 200, 150]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 3, 0)
+    assert result == candidates
+    result = candidate_hub.getValidatorsMock(candidates, scores, 3, 2)
+    assert result == [accounts[2], accounts[3], accounts[1]]
+
+
+def test_get_validators_more_candidates(candidate_hub):
+    candidates = [accounts[1], accounts[2], accounts[3], accounts[4], accounts[5]]
+    scores = [100, 200, 150, 300, 250]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 3, 0)
+    assert result == [accounts[4], accounts[5], accounts[2]]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 3, 2)
+    assert result == [accounts[4], accounts[5], accounts[2]]
+
+
+def test_get_validators_candidates_less_than_count(candidate_hub):
+    candidates = [accounts[1], accounts[2]]
+    scores = [100, 200]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 3, 0)
+    assert set(result) == set(candidates)
+    assert len(result) == 2
+    result2 = candidate_hub.getValidatorsMock(candidates, scores, 3, 1)
+    assert result2 == [accounts[2], accounts[1]]
+    assert len(result2) == 2
+
+
+def test_get_validators_mixed_order_with_sorted_count(candidate_hub):
+    candidates = [random_address() for _ in range(10)]
+    scores = [3000, 2000, 1100, 8000, 1000, 7000, 4000, 10000, 5000, 6000]
+    max_alternate_count = 12
+    count = 8
+    get_alternate_count = candidate_hub.getAlternateCountMock(max_alternate_count, count, len(candidates))
+    assert get_alternate_count == 2
+    result = candidate_hub.getValidatorsMock(candidates, scores, count + get_alternate_count, get_alternate_count)
+    assert result[-2] == candidates[2]
+    assert result[-1] == candidates[4]
+    sorted_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    expected = [candidates[i] for i in sorted_indices[:8]]
+    assert result[:-2] != expected[:-2]
+
+
+def test_get_validators_sorted_count_eq_count(candidate_hub):
+    candidates = [accounts[1], accounts[2], accounts[3], accounts[4], accounts[5]]
+    scores = [500, 400, 300, 200, 100]
+    with brownie.reverts("count should be greater than sortedCount"):
+        result = candidate_hub.getValidatorsMock(candidates, scores, 3, 3)
+
+
+def test_get_validators_with_sorted_count_equal_scores(candidate_hub):
+    candidates = [accounts[1], accounts[2], accounts[3], accounts[4], accounts[5]]
+    scores = [200, 300, 200, 300, 100]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 4, 2)
+    assert len(result) == 4
+    assert result[0] in [accounts[2], accounts[4]]
+    assert result[1] in [accounts[2], accounts[4]]
+    assert result[2] in [accounts[1], accounts[3]]
+    assert result[3] in [accounts[1], accounts[3]]
+
+
+def test_get_validators_with_sorted_count_zero_scores(candidate_hub):
+    candidates = [accounts[1], accounts[2], accounts[3], accounts[4], accounts[5]]
+    scores = [0, 0, 300, 0, 200]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 3, 1)
+    assert result == [accounts[3], accounts[5], accounts[4]]
+
+
+def test_get_validators_many_candidates_with_sorted_count(candidate_hub):
+    candidates = [accounts[i] for i in range(1, 31)]
+    scores = [1000 - i * 10 for i in range(30)]
+    random.shuffle(scores)
+    canditates_dict = {accounts[i]: scores[i - 1] for i in range(1, 31)}
+
+    result = candidate_hub.getValidatorsMock(candidates, scores, 21, 10)
+    sorted_canditates = sorted(canditates_dict.items(), key=lambda x: x[1], reverse=True)
+    for i in sorted_canditates[:11]:
+        assert i[0] in result[:11]
+    assert result[11:] == [i[0] for i in sorted_canditates[11:21]]
+    for validator in result:
+        assert validator in candidates
+
+
+def test_get_validators_with_equal_scores(candidate_hub):
+    candidates = [accounts[1], accounts[2], accounts[3], accounts[4]]
+    scores = [200, 200, 150, 200]
+    result = candidate_hub.getValidatorsMock(candidates, scores, 3, 0)
+    assert len(result) == 3
+    for addr in result:
+        assert addr in [accounts[1], accounts[2], accounts[4]]
 
 
 def test_jail_validator(candidate_hub, validator_set, required_margin):
@@ -1454,6 +1597,62 @@ def test_edit_commission_rate_same_round_multiple_times(candidate_hub, accounts)
             500 - max_change - 1, {'from': operator})
 
 
+def test_remove_candidate_agent_map_index(candidate_hub, slash_indicator):
+    operators = []
+    consensuses = []
+    for operator in accounts[5:10]:
+        operators.append(operator)
+        consensuses.append(register_candidate(operator=operator))
+    turn_round()
+    agents = [accounts[10], accounts[11], accounts[12], accounts[13], accounts[14]]
+    candidate_hub.setDues(1e18)
+    for i in range(1, 5):
+        candidate_hub.updateAgent(agents[i], {'from': operators[i]})
+    for i in range(5):
+        assert candidate_hub.operateMap(operators[i]) == i + 1
+        assert candidate_hub.getConsensusMap(consensuses[i]) == i + 1
+    for i in range(1, 4):
+        assert candidate_hub.agentMap(agents[i]) == i + 1
+    assert candidate_hub.agentMap(agents[0]) == 0
+    felony_threshold = slash_indicator.felonyThreshold()
+    for _ in range(felony_threshold):
+        tx = slash_indicator.slash(consensuses[0])
+    candidate_hub.editVoteAddress(random_vote_address(), {'from': agents[-1]})
+    result = [0, 2, 3, 4, 1]
+    for r in range(1, 5):
+        assert candidate_hub.operateMap(operators[r]) == result[r]
+        assert candidate_hub.getConsensusMap(consensuses[r]) == result[r]
+        assert candidate_hub.agentMap(agents[r]) == result[r]
+    assert candidate_hub.agentMap(agents[0]) == 0
+    assert candidate_hub.operateMap(operators[0]) == 0
+    assert candidate_hub.getConsensusMap(consensuses[0]) == 0
+
+
+def test_remove_candidate_agent_map_index_with_all_agents(candidate_hub, slash_indicator):
+    operators = []
+    consensuses = []
+    for operator in accounts[5:12]:
+        operators.append(operator)
+        consensuses.append(register_candidate(operator=operator))
+    agents = [accounts[13], accounts[14], accounts[15], accounts[16], accounts[17], accounts[18], accounts[19]]
+    for i in range(7):
+        candidate_hub.updateAgent(agents[i], {'from': operators[i]})
+    for i in range(7):
+        assert candidate_hub.operateMap(operators[i]) == i + 1
+        assert candidate_hub.getConsensusMap(consensuses[i]) == i + 1
+        assert candidate_hub.agentMap(agents[i]) == i + 1
+    candidate_hub.unregister({'from': operators[2]})
+    candidate_list = candidate_hub.getCandidates()
+    assert len(candidate_list) == 6
+    assert candidate_hub.operateMap(operators[-1]) == 3
+    assert candidate_hub.getConsensusMap(consensuses[-1]) == 3
+    assert candidate_hub.agentMap(agents[-1]) == 3
+    vote_addr = random_vote_address()
+    candidate_hub.editVoteAddress(vote_addr, {'from': agents[-1]})
+    assert candidate_hub.candidateSet(2).dict()['voteAddr'] == vote_addr
+    assert candidate_hub.candidateSet(2).dict()['operateAddr'] == operators[-1]
+
+
 # editVoteAddress
 def test_edit_vote_address_permission(candidate_hub, accounts):
     with brownie.reverts("candidate does not exist"):
@@ -1636,3 +1835,58 @@ def test_candidate_update_and_turn_round(candidate_hub, accounts, validator_set,
     tx = stake_hub_claim_reward(accounts[0])
     assert 'claimedReward' in tx.events
     turn_round(consensuses)
+
+
+# getAlternateCount
+def test_get_alternate_count_basic_scenarios(candidate_hub):
+    # candidateSize <= validatorCount, return 0
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 3, 2)
+    assert alternate_count == 0
+
+    # candidateSize = validatorCount, return 0
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 3, 3)
+    assert alternate_count == 0
+
+    # candidateSize < validatorCount + maxAlternateCount, return candidateSize - validatorCount
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 3, 5)
+    assert alternate_count == 2  # 5 - 3 = 2
+
+    # candidateSize >= validatorCount + maxAlternateCount, return maxAlternateCount
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 3, 10)
+    assert alternate_count == 5
+
+
+def test_get_alternate_count_edge_cases(candidate_hub):
+    # all parameters are 0
+    alternate_count = candidate_hub.mockGetAlternateCount(0, 0, 0)
+    assert alternate_count == 0
+
+    # maxAlternateCount is 0
+    alternate_count = candidate_hub.mockGetAlternateCount(0, 3, 5)
+    assert alternate_count == 0
+
+    # validatorCount is 0
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 0, 3)
+    assert alternate_count == 3
+
+    # candidateSize is 0
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 3, 0)
+    assert alternate_count == 0
+
+
+def test_get_alternate_count_typical_scenarios(candidate_hub):
+    # candidateSize = validatorCount, return 0
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 10, 10)
+    assert alternate_count == 0
+
+    # candidateSize > validatorCount, return candidateSize - validatorCount
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 10, 12)
+    assert alternate_count == 2
+
+    # candidateSize > validatorCount + maxAlternateCount, return maxAlternateCount
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 10, 20)
+    assert alternate_count == 5
+
+    # candidateSize < validatorCount, return 0
+    alternate_count = candidate_hub.mockGetAlternateCount(5, 10, 8)
+    assert alternate_count == 0

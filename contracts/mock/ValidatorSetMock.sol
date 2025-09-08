@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache2.0
 pragma solidity 0.8.4;
 
 import "../ValidatorSet.sol";
@@ -89,9 +90,9 @@ contract ValidatorSetMock is ValidatorSet {
 
         for (i = 0; i < currentLength; ++i) {
             if (i >= lastLength) {
-                currentValidatorSet.push(Validator(operateAddrList[i], consensusAddrList[i], feeAddrList[i], commissionThousandthsList[i], 0, '', 0));
+                currentValidatorSet.push(Validator(operateAddrList[i], consensusAddrList[i], feeAddrList[i], commissionThousandthsList[i], 0, '', 0, 0));
             } else {
-                currentValidatorSet[i] = Validator(operateAddrList[i], consensusAddrList[i], feeAddrList[i], commissionThousandthsList[i], 0, '', 0);
+                currentValidatorSet[i] = Validator(operateAddrList[i], consensusAddrList[i], feeAddrList[i], commissionThousandthsList[i], 0, '', 0, 0);
             }
             currentValidatorSetMap[consensusAddrList[i]] = i + 1;
         }
@@ -180,5 +181,26 @@ contract ValidatorSetMock is ValidatorSet {
         IPledgeAgentMock(PLEDGE_AGENT_ADDR).addRoundRewardOld{value: rewardSum}(operateAddressList, rewardList);
         totalInCome = 0;
         return operateAddressList;
+    }
+    function setValidatorCount(uint256 _validatorCount) external {
+        validatorCount = _validatorCount;
+    }
+    function clearCurrentValidatorSet() external {
+        for (uint i = 0; i < currentValidatorSet.length; i++) {
+            delete currentValidatorSetMap[currentValidatorSet[i].consensusAddress];
+        }
+        delete currentValidatorSet;
+    }
+    function getCurrentValidatorSet() external view returns (Validator[] memory) {
+        return currentValidatorSet;
+    }
+    function setMaintainSlashPercent(uint256 _maintainSlashPercent) external {
+        maintainSlashPercent = _maintainSlashPercent;
+    }
+    function mockUpdateRankedValidatorList(address[] calldata consensusAddrList) external {
+        updateRankedValidatorList(consensusAddrList);
+    }
+    function getRankedValidatorList() external view returns (address[] memory) {
+        return rankedValidatorList;
     }
 }

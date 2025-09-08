@@ -26,6 +26,7 @@ async function processValidatorConf(network) {
     validators.push({
       consensusAddr: vs[0],
       feeAddr: vs[1],
+      voteAddr: vs[2] || '0x' + '00'.repeat(48), // 48 bytes of zeros
     })
   }
   return validators

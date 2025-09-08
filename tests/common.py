@@ -28,7 +28,33 @@ def get_candidate(operator=None):
     return CandidateHubMock[0].candidateSet(idx - 1).dict()
 
 
-def turn_round(miners: list = None, tx_fee=100, round_count=1,weights=None):
+def chain_deposit(miners, tx_fee=100,deposit_count=1):
+    if isinstance(miners, list):
+        for miner in miners:
+            for _ in range(deposit_count):
+                tx  = ValidatorSetMock[0].deposit(miner, {"value": tx_fee, "from": accounts[99]})
+                print(f'chain_deposit>>>>>>>>>>deposit_count{deposit_count}:', tx.events)
+    else:
+        for _ in range(deposit_count):
+            tx = ValidatorSetMock[0].deposit(miners, {"value": tx_fee, "from": accounts[99]})
+            print(f'chain_deposit>>>>>>>>>>deposit_count{deposit_count}:',tx.events)
+            
+        
+
+def chain_vote(miners, weights):
+    if isinstance(miners, list):
+        for miner in miners:
+            ValidatorSetMock[0].vote(miner, weights, {"from": accounts[99]})
+    else:
+        ValidatorSetMock[0].vote(miners, weights, {"from": accounts[99]})
+
+
+def chain_get_validator_consensus():
+    consensus, vote_addresses = ValidatorSetMock[0].getValidatorsAndVoteAddresses()
+    print(f'chain_get_validator_consensus>>>>>>>>consensus:{consensus}')
+    return consensus
+
+def turn_round(miners: list = None, tx_fee=100, round_count=1, weights=None):
     if miners is None:
         miners = []
     if weights is None:
@@ -54,6 +80,10 @@ def execute_proposal(target, value, signature, calldata, msg):
     GovHubMock[0].execute(proposal_id)
     return proposal_id
 
+def expect_validator_consensus(consensuses):
+    assert len(chain_get_validator_consensus()) == len(consensuses)
+    for consensus in chain_get_validator_consensus():
+        assert consensus in consensuses
 
 def register_relayer(relayer_address=None):
     if relayer_address is None:
@@ -70,8 +100,6 @@ def set_round_tag(round_tag):
     CandidateHubMock[0].setRoundTag(round_tag)
     BitcoinStakeMock[0].setRoundTag(round_tag)
     CoreAgentMock[0].setRoundTag(round_tag)
-    BitcoinLSTStakeMock[0].setRoundTag(round_tag)
-    BitcoinLSTStakeMock[0].setInitRound(round_tag)
     PledgeAgentMock[0].setRoundTag(round_tag)
 
 
@@ -80,9 +108,11 @@ def stake_hub_claim_reward(account):
     if isinstance(account, list):
         for i in account:
             tx = StakeHubMock[0].claimReward({'from': i})
+            print(f'stake_hub_claim_reward>>>>>>>>account:{i}', tx.events)
 
     else:
         tx = StakeHubMock[0].claimReward({'from': account})
+        print(f'stake_hub_claim_reward>>>>>>>>account:{account}', tx.events)
     return tx
 
 
@@ -94,3 +124,41 @@ def claim_stake_and_relay_reward(account):
     else:
         tx0 = stake_hub_claim_reward(account)
     return tx0
+
+
+def slash_validator(consensus,slash_type='felony'):
+    tx =None
+    slash_indicator = SlashIndicatorMock[0]
+    if slash_type == 'felony':
+        slash_threshold = slash_indicator.felonyThreshold()
+        for _ in range(slash_threshold):
+            tx = slash_indicator.slash(consensus)
+        assert 'validatorFelony' in tx.events
+    elif slash_type == 'minor':
+        slash_threshold = slash_indicator.misdemeanorThreshold()
+        for _ in range(slash_threshold):
+            tx = slash_indicator.slash(consensus)
+        assert 'validatorMisdemeanor' in tx.events
+    return tx
+
+def refuse_delegate(operator):
+    tx = CandidateHubMock[0].refuseDelegate({'from': operator})
+    print(f'refuse_delegate>>>>>>>>operator:{operator}', tx.events)
+    return tx
+
+def accept_delegate(operator):
+    tx = CandidateHubMock[0].acceptDelegate({'from': operator})
+    print(f'accept_delegate>>>>>>>>operator:{operator}', tx.events)
+    return tx
+
+def enter_maintenance(operator):
+    tx = ValidatorSetMock[0].enterMaintenance({'from': operator})
+    assert 'validatorEnterMaintenance' in tx.events
+    print(f'enter_maintenance>>>>>>>>operator:{operator}', tx.events)
+    return tx
+
+def exit_maintenance(operator):
+    tx = ValidatorSetMock[0].exitMaintenance({'from': operator})
+    assert 'validatorExitMaintenance' in tx.events
+    print(f'exit_maintenance>>>>>>>>operator:{operator}', tx.events)
+    return tx

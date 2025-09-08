@@ -1,4 +1,5 @@
 import time
+import hashlib
 
 from tests.common import get_current_round, stake_hub_claim_reward
 from tests.utils import *
@@ -58,7 +59,9 @@ def build_btc_lst_stake_opreturn(delegator, fee=1, version=2, chain_id=1112, mag
 
 
 def build_btc_stake_opreturn(agent_address, delegate_address, lock_data, chain_id=1112, core_fee=1,
-                             version=1):
+                             version=1, channel_id=0):
+    if channel_id > 0:
+        version = 2
     if isinstance(lock_data, int):
         hex_result = value2hex(lock_data)
         lock_time_hex = reverse_by_bytes(hex_result)
@@ -71,7 +74,14 @@ def build_btc_stake_opreturn(agent_address, delegate_address, lock_data, chain_i
     delegate_address_hex = str(delegate_address)[2:].lower()
     agent_address_hex = str(agent_address)[2:]
     core_fee_hex = format(core_fee, 'x').zfill(2)
-    message = flag_hex + version_hex + chain_id_hex + delegate_address_hex + agent_address_hex + core_fee_hex + op_return_data
+    message = flag_hex + version_hex + chain_id_hex + delegate_address_hex + agent_address_hex
+    if version == 2:
+        assert channel_id > 0
+        channel_id_hex = int_to_varint_hex(channel_id)
+        message += channel_id_hex
+    message += core_fee_hex
+    message += op_return_data
+
     message_length = remove_0x(hex(len(message) // 2))
     op_return = remove_0x(hex(Opcode.OP_RETURN))
     if len(message) // 2 > 76:
@@ -86,11 +96,13 @@ def build_btc_stake_opreturn(agent_address, delegate_address, lock_data, chain_i
         'chain_id_hex': chain_id_hex,
         'delegate_address_hex': delegate_address_hex,
         'agent_address_hex': agent_address_hex,
-        'core_fee_hex': core_fee_hex,
         'op_return_data': op_return_data,
         'hex_value': op_return,
-        'message': message
+        'message': message,
+        'core_fee_hex': core_fee_hex
     }
+    if version == 2:
+        opreturn_info['channel_id'] = channel_id_hex
     return opreturn_info
 
 
@@ -170,21 +182,24 @@ def build_btc_lst_tx(delegator, amount, pay_address, input_tx_id=None, vout=0, f
     return btc_tx
 
 
-def build_btc_tx(agent, delegator, amount, lock_script, lock_data=1736956800, pay_address_type='p2sh', fee=1,
-                 version=1,
-                 chain_id=1112):
+def build_btc_tx(
+    agent, delegator, amount, lock_script, lock_data=1736956800, pay_address_type='p2sh', fee=1,
+    version=1, chain_id=1112, channel_id=0
+):
+    if channel_id > 0:
+        version = 2
     pay_address = get_btc_script().k2_btc_pay_address(lock_script, pay_address_type)
     btc_tx_info = {}
     inputs = [build_input()]
     outputs = [build_output(amount, pay_address),
-               build_btc_stake_opreturn(agent, delegator, lock_data, chain_id, fee, version)]
+               build_btc_stake_opreturn(agent, delegator, lock_data, chain_id, fee, version, channel_id)]
     generate_btc_transaction_info(btc_tx_info, inputs, outputs)
     btc_tx = build_btc_transaction(btc_tx_info)
     return btc_tx
 
 
-def get_transaction_op_return_data(chain_id, agent_address, delegate_address, lock_data, core_fee=1, version=1):
-    opreturn = build_btc_stake_opreturn(agent_address, delegate_address, lock_data, chain_id, core_fee, version)
+def get_transaction_op_return_data(chain_id, agent_address, delegate_address, lock_data, core_fee=1, version=1, channel_id=0):
+    opreturn = build_btc_stake_opreturn(agent_address, delegate_address, lock_data, chain_id, core_fee, version, channel_id)
     return opreturn['message']
 
 
@@ -216,13 +231,12 @@ def set_last_round_tag(stake_round, time0=None):
     CandidateHubMock[0].setRoundTag(current_round)
     BitcoinStakeMock[0].setRoundTag(current_round)
     CoreAgentMock[0].setRoundTag(current_round)
-    BitcoinLSTStakeMock[0].setInitRound(current_round)
     return end_round0, current_round
 
 
 # delegate
 def run_stake_operation(operation, candidate, account, operation_amount, target_agent=None, tx_id=None,
-                        lock_script=None, btc_value=None):
+                        lock_script=None, btc_value=None, channel_id=0):
     tx = None
     if operation == 'delegate':
         tx = delegate_coin_success(candidate, account, operation_amount)
@@ -231,7 +245,7 @@ def run_stake_operation(operation, candidate, account, operation_amount, target_
     elif operation == 'transfer':
         tx = transfer_coin_success(candidate, target_agent, account, operation_amount)
     elif operation == 'delegate_btc':
-        tx = delegate_btc_success(candidate, account, btc_value, lock_script, events=True)
+        tx = delegate_btc_success(candidate, account, btc_value, lock_script, events=True, channel_id=channel_id)
     elif operation == 'transfer_btc':
         tx = transfer_btc_success(tx_id, target_agent, account)
     elif operation == 'claim':
@@ -272,7 +286,7 @@ def undelegate_coin_success(candidate, delegator, amount):
 
 
 def delegate_btc_success(agent, delegator, btc_amount, lock_script, lock_data=None, relay=None, stake_duration=None,
-                         fee=1, script_type='p2sh', lock_time=None, events=None):
+                         fee=1, script_type='p2sh', lock_time=None, events=None, channel_id=0):
     if stake_duration is None:
         stake_duration = Utils.MONTH
     if lock_time is None:
@@ -280,7 +294,7 @@ def delegate_btc_success(agent, delegator, btc_amount, lock_script, lock_data=No
     set_block_time_stamp(stake_duration, lock_time)
     if lock_data is None:
         lock_data = lock_script
-    btc_tx0 = build_btc_tx(agent, delegator, int(btc_amount), lock_script, lock_data, script_type, fee)
+    btc_tx0 = build_btc_tx(agent, delegator, int(btc_amount), lock_script, lock_data, script_type, fee, channel_id=channel_id)
     if relay is None:
         relay = accounts[0]
     tx = BitcoinStakeMock[0].delegate(btc_tx0, 1, [], 0, lock_script, {"from": relay})
@@ -303,50 +317,15 @@ def delegate_power_success(candidate, delegator, value=1, stake_round=0):
     BtcLightClientMock[0].setMiners(stake_round, candidate, [delegator] * value)
 
 
-def delegate_btc_lst_success(delegator, btc_amount, lock_script, percentage=5000, relay=None):
-    BitcoinAgentMock[0].setPercentage(percentage)
-    delegator_asset = BitcoinLSTToken[0].balanceOf(delegator)
-    btc_tx0 = build_btc_lst_tx(delegator, int(btc_amount), lock_script)
-    if relay is None:
-        relay = accounts[0]
-    tx = BitcoinLSTStakeMock[0].delegate(btc_tx0, 1, [], 0, lock_script, {"from": relay})
-    assert 'delegated' in tx.events
-    delegator_asset += btc_amount
-    assert BitcoinLSTToken[0].balanceOf(delegator) == delegator_asset
-    tx_id = get_transaction_txid(btc_tx0)
-    return tx_id
-
-
-def transfer_btc_lst_success(delegator, amount, to):
-    from_asset0 = BitcoinLSTToken[0].balanceOf(delegator)
-    to_asset = BitcoinLSTToken[0].balanceOf(to)
-    BitcoinLSTToken[0].transfer(to, amount, {"from": delegator})
-    from_asset = from_asset0 - amount
-    to_asset += amount
-    if delegator == to:
-        to_asset = from_asset0
-        from_asset = from_asset0
-    assert BitcoinLSTToken[0].balanceOf(delegator) == from_asset
-    assert BitcoinLSTToken[0].balanceOf(to) == to_asset
-
-
-def redeem_btc_lst_success(delegator, amount, pkscript):
-    UTXO_FEE = 100
-    tx = BitcoinLSTStakeMock[0].redeem(amount, pkscript, {"from": delegator})
-    assert tx.events['redeemed']['amount'] == amount - UTXO_FEE
-    return tx
-
-
 # mock delegate 
-# agent, delegator, btc_amount, lock_script
 def mock_delegate_btc_success(agent, delegator, btc_amount, lock_time=None, block_timestamp=0, output_index=0,
-                              tx_id=None):
+                              tx_id=None, channel_id=0):
     if tx_id is None:
         tx_id = random_btc_tx_id()
     if lock_time is None:
         lock_time = LOCK_TIME
     tx = BitcoinStakeMock[0].mockDelegateBtc(tx_id, btc_amount, agent, delegator, lock_time, block_timestamp,
-                                             output_index)
+                                             output_index, channel_id)
     assert 'mockDelegatedBtc' in tx.events
     return tx_id
 
@@ -469,7 +448,7 @@ class BtcScript:
             script_hash = f"{hex(Opcode.OP_HASH160)}14{public_key_hash}{hex(Opcode.OP_EQUAL)}"
             pay_address = '0x' + script_hash.replace('0x', '')
         elif lock_script_type == 'p2wsh':
-            redeem_script = sha256(bytes.fromhex(lock_script)).hexdigest()
+            redeem_script = hashlib.sha256(bytes.fromhex(lock_script)).hexdigest()
             script_hash = f"{op2hex(Opcode.OP_0)}{hex(Opcode.OP_DATA_32)}{redeem_script}"
             pay_address = '0x' + script_hash.replace('0x', '')
         return pay_address
@@ -503,12 +482,12 @@ class BtcScript:
             lock_script = '0x' + script_hash.replace('0x', '')
         elif lock_script_type == AddressType.P2WSH:  # 34 bytes
             public_key_hash = public_key_2pkhash(lock_public_key)
-            redeem_script = sha256(bytes.fromhex(public_key_hash.replace('0x', ''))).hexdigest()
+            redeem_script = hashlib.sha256(bytes.fromhex(public_key_hash.replace('0x', ''))).hexdigest()
             script_hash = f"{op2hex(Opcode.OP_0)}{hex(Opcode.OP_DATA_32)}{redeem_script}"
             lock_script = '0x' + script_hash.replace('0x', '')
         elif lock_script_type == AddressType.P2TAPROOT:  # 34 bytes
             public_key_hash = public_key_2pkhash(lock_public_key)
-            redeem_script = sha256(bytes.fromhex(public_key_hash.replace('0x', ''))).hexdigest()
+            redeem_script = hashlib.sha256(bytes.fromhex(public_key_hash.replace('0x', ''))).hexdigest()
             script_hash = f"{op2hex(Opcode.OP_1)}{hex(Opcode.OP_DATA_32)}{redeem_script}"
             lock_script = '0x' + script_hash.replace('0x', '')
         return lock_script
@@ -662,18 +641,6 @@ class StakeManager:
             rewards = []
         StakeHubMock[0].setDelegatorMap(account, change_round, rewards)
 
-    @staticmethod
-    def add_wallet(script):
-        update_system_contract_address(BitcoinLSTStakeMock[0], gov_hub=accounts[10])
-        BitcoinLSTStakeMock[0].updateParam('add', script, {'from': accounts[10]})
-        update_system_contract_address(BitcoinLSTStakeMock[0], gov_hub=GovHubMock[0])
-
-    @staticmethod
-    def remove_wallet(script):
-        update_system_contract_address(BitcoinLSTStakeMock[0], gov_hub=accounts[10])
-        BitcoinLSTStakeMock[0].updateParam('remove', script, {'from': accounts[10]})
-        update_system_contract_address(BitcoinLSTStakeMock[0], gov_hub=GovHubMock[0])
-
 
 class RoundRewardManager:
     @staticmethod
@@ -681,13 +648,27 @@ class RoundRewardManager:
         BitcoinAgentMock[0].setCoreRewardMap(delegator, reward, acc_stake_amount)
 
     @staticmethod
-    def mock_btc_lst_reward_map(delegator, reward, delegate_amount):
-        BitcoinLSTStakeMock[0].setBtcLstRewardMap(delegator, reward, delegate_amount)
-
-    @staticmethod
-    def mock_btc_reward_map(delegator, reward, unclaimed_reward, delegate_amount):
-        BitcoinStakeMock[0].setBtcRewardMap(delegator, reward, unclaimed_reward, delegate_amount)
+    def mock_btc_reward_map(candidate, roundTag, reward, unclaimed_reward, btc_amount=1):
+        BitcoinStakeMock[0].setAccruedRewardPerBTCMap(candidate, roundTag - 1,
+                                                      (reward + unclaimed_reward) * 1e8 // btc_amount)
+        if unclaimed_reward > 0:
+            BitcoinStakeMock[0].setIsActive(True)
+            BitcoinStakeMock[0].popTtlpRates()
+            BitcoinStakeMock[0].setTlpRates(0, reward / (reward + unclaimed_reward) * 10000)
 
     @staticmethod
     def mock_power_reward_map(delegator, reward, delegate_amount):
         HashPowerAgentMock[0].setPowerRewardMap(delegator, reward, delegate_amount)
+
+
+def int_to_varint_hex(value: int) -> str:
+    if value < 0xfd:
+        return value.to_bytes(1, "little").hex()
+    elif value <= 0xffff:
+        return "fd" + value.to_bytes(2, "little").hex()
+    elif value <= 0xffffffff:
+        return "fe" + value.to_bytes(4, "little").hex()
+    elif value <= 0xffffffffffffffff:
+        return "ff" + value.to_bytes(8, "little").hex()
+    else:
+        raise ValueError("Integer too large for Bitcoin varint encoding")

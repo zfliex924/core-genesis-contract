@@ -30,7 +30,19 @@
     "bohrTime": 0,
     "pascalTime": 0,
     "pragueTime": 0,
-
+    "hermesTime": 0,
+    "blobSchedule": {
+      "cancun": {
+        "target": 3,
+        "max": 6,
+        "baseFeeUpdateFraction": 3338477
+      },
+      "prague": {
+        "target": 6,
+        "max": 9,
+        "baseFeeUpdateFraction": 5007716
+      }
+    },
     "satoshi": {
       "period": {{initCycle.blockPeriod}},
       "epoch": {{initCycle.epochLength}},
@@ -123,6 +135,11 @@
     "0x0000000000000000000000000000000000001016": {
       "balance": "0x0",
       "code": "0x{{configuration}}"
+    },
+    "0x0000F90827F1C53a10cb7A02335B175320002935": {
+      "balance": "0x0",
+      "nonce": "0x1",
+      "code": "0x3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500"
     }{% for v in initHolders %},
     "{{ v.address.replace('0x', '') }}": {
       "balance": "0x{{ v.balance }}"

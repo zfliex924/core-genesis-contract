@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache2.0
 pragma solidity 0.8.4;
 
+import "./interface/ICoreAgent.sol";
 import "./interface/IPledgeAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/ISystemReward.sol";
@@ -163,9 +164,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   function delegateCoin(address agent) external payable override noReentrant{
     _moveCOREData(agent, msg.sender);
     _distributeReward(msg.sender);
-
-    (bool success, ) = CORE_AGENT_ADDR.call {value: msg.value} (abi.encodeWithSignature("proxyDelegate(address,address)", agent, msg.sender));
-    require (success, "call CORE_AGENT_ADDR.proxyDelegate() failed");
+    ICoreAgent(CORE_AGENT_ADDR).proxyDelegate{value: msg.value}(agent, msg.sender, 0);
   }
 
   /// Undelegate coin from a validator
@@ -183,9 +182,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     _moveCOREData(agent, msg.sender);
     _distributeReward(msg.sender);
 
-    (bool success, bytes memory data) = CORE_AGENT_ADDR.call(abi.encodeWithSignature("proxyUnDelegate(address,address,uint256)", agent, msg.sender, amount));
-    require (success, "call CORE_AGENT_ADDR.proxyUnDelegate() failed");
-    uint256 undelegateAmount =  abi.decode(data, (uint256));
+    uint256 undelegateAmount = ICoreAgent(CORE_AGENT_ADDR).proxyUnDelegate(agent, msg.sender, amount, 0);
     Address.sendValue(payable(msg.sender), undelegateAmount);
   }
 
@@ -228,7 +225,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     if (proxyRewardSum != 0) {
       rewardMap[msg.sender] += proxyRewardSum;
     }
-    
+
     _distributeReward(msg.sender);
 
     return (rewardSum + proxyRewardSum, true);

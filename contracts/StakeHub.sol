@@ -8,6 +8,8 @@ import "./interface/ISystemReward.sol";
 import "./interface/IBitcoinStake.sol";
 import "./interface/IValidatorSet.sol";
 import "./interface/ICandidateHub.sol";
+import "./interface/IChannel.sol";
+import "./interface/ICoreAgent.sol";
 import "./System.sol";
 import "./lib/Address.sol";
 import "./lib/Memory.sol";
@@ -71,7 +73,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   /*********************** events **************************/
   event roundReward(string indexed name, uint256 round, address[] validator, uint256[] amount);
-  event claimedReward(address indexed delegator, uint256 amount);
+  event claimedReward(address indexed delegator, uint256[] amounts);
   event claimedRelayerReward(address indexed relayer, uint256 amount);
   event received(address indexed from, uint256 amount);
 
@@ -245,7 +247,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     }
     if (reward != 0) {
       Address.sendValue(payable(delegator), reward);
-      emit claimedReward(delegator, reward);
+      emit claimedReward(delegator, rewards);
     }
   }
 
@@ -309,25 +311,18 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     uint256 assetSize = assets.length;
     rewards = new uint256[](assetSize);
     int256 totalFloatReward;
-    int256 floatReward;
-    uint256 accStakedCoreAmount;
-    if (d.changeRound != 0 && d.changeRound < lastRound) {
-      (rewards[0], floatReward, accStakedCoreAmount) = IAgent(assets[0].agent).claimReward(delegator, 0, d.changeRound, claim);
-      totalFloatReward += floatReward;
-      (rewards[2], floatReward,) = IAgent(assets[2].agent).claimReward(delegator, accStakedCoreAmount, d.changeRound, claim);
-      totalFloatReward += floatReward;
+    uint256 stakedCoreAmount1;
+    uint256 stakedCoreAmount2;
+    (rewards[0], stakedCoreAmount1, stakedCoreAmount2) = ICoreAgent(assets[0].agent).claimReward(delegator, claim);
+
+    (rewards[1],) = IAgent(assets[1].agent).claimReward(delegator, 0, lastRound, claim);
+
+    if (stakedCoreAmount1 != stakedCoreAmount2) {
+      (rewards[2], totalFloatReward) = IAgent(assets[2].agent).claimReward(delegator, stakedCoreAmount1, d.changeRound, claim);
     }
-
-    uint256 tempReward;
-    (tempReward, floatReward, accStakedCoreAmount) = IAgent(assets[0].agent).claimReward(delegator, 0, lastRound, claim);
-    totalFloatReward += floatReward;
-    rewards[0] += tempReward;
-
-    uint256 totalReward = rewards[0];
-    for (uint256 i = 1; i < assetSize; ++i) {
-      (tempReward, floatReward,) = IAgent(assets[i].agent).claimReward(delegator, accStakedCoreAmount, lastRound, claim);
-      rewards[i] += tempReward;
-      totalReward += rewards[i];
+    if (d.changeRound < lastRound || stakedCoreAmount1 == stakedCoreAmount2) {
+      (uint256 reward, int256 floatReward) = IAgent(assets[2].agent).claimReward(delegator, stakedCoreAmount2, lastRound, claim);
+      rewards[2] += reward;
       totalFloatReward += floatReward;
     }
 
@@ -337,6 +332,13 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
       surplus += actualAmount;
     }
     surplus = (surplus.toInt256() - totalFloatReward).toUint256();
+  }
+
+  function claimCommission() external returns(uint256 commission, address feeAddress) {
+    (commission, feeAddress) = IChannel(CHANNEL_ADDR).resetCommission(msg.sender);
+    if (commission != 0) {
+      Address.sendValue(payable(feeAddress), commission);
+    }
   }
 
   /*********************** Governance ********************************/

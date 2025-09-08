@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache2.0
 pragma solidity 0.8.4;
 
-import "./interface/IAgent.sol";
+import "./interface/IBtcAgent.sol";
 import "./interface/IBitcoinStake.sol";
 import "./interface/IParamSubscriber.sol";
 import "./lib/Memory.sol";
@@ -14,7 +14,7 @@ import "./lib/SafeCast.sol";
 /// This contract handles BTC staking. 
 /// It interacts with BitcoinStake.sol for
 /// non-custodial BTC staking correspondingly. 
-contract BitcoinAgent is IAgent, System, IParamSubscriber {
+contract BitcoinAgent is IBtcAgent, System, IParamSubscriber {
   using BytesLib for *;
   using SafeCast for *;
   using RLPDecode for bytes;
@@ -37,7 +37,7 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
   // conversion rate between CORE and the asset
   uint256 public assetWeight;
 
-  // Deprecated
+  // Deprecated in V-1.0.20
   uint256 public lstGradePercentage;
 
   struct StakeAmount {
@@ -45,11 +45,6 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
     uint256 lstStakeAmount;
     // staked BTC amount from non custodial
     uint256 stakeAmount;
-  }
-
-  struct DualStakingGrade {
-    uint32 stakeRate;
-    uint32 percentage;
   }
 
   event claimedBtcReward(address indexed delegator, uint256 amount, uint256 unclaimedAmount, int256 floatReward, uint256 accStakedAmount, uint256 dualStakingRate);
@@ -90,43 +85,43 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
-  /// @param coreAmount the accumurated amount of staked CORE.
+  /// @param coreAmount the staked amount of staked CORE.
   /// @param settleRound the settlement round
   /// @param claim claim or store rewards
   /// @return reward Amount claimed
   /// @return floatReward floating reward amount
-  /// @return accStakedAmount accumulated stake amount (multiplied by rounds), used for grading calculation
-  function claimReward(address delegator, uint256 coreAmount, uint256 settleRound, bool claim) external override onlyStakeHub returns (uint256 reward, int256 floatReward, uint256 accStakedAmount) {
-    (uint256 btcReward, uint256 btcRewardUnclaimed, uint256 btcAccStakedAmount) = IBitcoinStake(BTC_STAKE_ADDR).claimReward(delegator, settleRound, claim);
-    uint256 gradeLength = grades.length;
-    uint256 p = SatoshiPlusHelper.DENOMINATOR;
-    if (gradeActive && gradeLength != 0 && btcAccStakedAmount != 0) {
-      uint256 stakeRate = coreAmount / btcAccStakedAmount / assetWeight;
-      p = grades[0].percentage;
-      for (uint256 j = gradeLength - 1; j != 0; j--) {
-        if (stakeRate >= grades[j].stakeRate) {
-          p = grades[j].percentage;
-          break;
-        }
-      }
-      uint256 pReward = btcReward * p / SatoshiPlusHelper.DENOMINATOR;
-      floatReward = pReward.toInt256() - btcReward.toInt256();
-      btcReward = pReward;
-    }
-    if (btcRewardUnclaimed != 0) {
-      floatReward -= btcRewardUnclaimed.toInt256();
-    }
-    if (claim) {
-      emit claimedBtcReward(delegator, btcReward, btcRewardUnclaimed, floatReward, btcAccStakedAmount, p);
-    } else {
-      emit storedBtcReward(delegator, btcReward, btcRewardUnclaimed, floatReward, btcAccStakedAmount, p);
-    }
-    return (btcReward, floatReward, btcAccStakedAmount);
+  function claimReward(address delegator, uint256 coreAmount, uint256 settleRound, bool claim) external override onlyStakeHub returns (uint256 reward, int256 floatReward) {
+    return IBitcoinStake(BTC_STAKE_ADDR).claimReward(delegator, coreAmount, settleRound, claim);
   }
 
   /*********************** External methods ********************************/
-  function getGrades() external view returns (DualStakingGrade[] memory) {
+  /// Returns grades.
+  function getGrades() external view override returns (DualStakingGrade[] memory) {
     return grades;
+  }
+
+  /// Return a grade for the given stake rate.
+  ///
+  /// @param rate the stake rate
+  /// @return percentage the target percentage
+  /// @return stakeRate the target stake rate
+  function getGrade(uint256 rate) external view override returns (uint256 percentage, uint256 stakeRate) {
+    percentage = SatoshiPlusHelper.DENOMINATOR;
+    stakeRate = 0;
+    uint256 gradeLength = grades.length;
+    if (gradeActive && gradeLength != 0) {
+      percentage = grades[0].percentage;
+      stakeRate = grades[0].stakeRate;
+      rate /= assetWeight;
+      for (uint256 j = gradeLength - 1; j != 0; j--) {
+        if (rate >= grades[j].stakeRate) {
+          percentage = grades[j].percentage;
+          stakeRate = grades[j].stakeRate;
+          break;
+        }
+      }
+      stakeRate *= assetWeight;
+    }
   }
 
   /*********************** Governance ********************************/
@@ -180,12 +175,6 @@ contract BitcoinAgent is IAgent, System, IParamSubscriber {
         revert OutOfBounds(key, newGradeActive, 0, 1);
       }
       gradeActive = newGradeActive == 1;
-    } else if (Memory.compareStrings(key, "lstGradePercentage")) {
-      if (value.length != 32) {
-        revert MismatchParamLength(key);
-      }
-      uint256 newPercentage = value.toUint256(0);
-      lstGradePercentage = newPercentage;
     } else {
         revert UnsupportedGovParam(key);
     }

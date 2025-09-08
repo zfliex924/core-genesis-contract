@@ -3,7 +3,6 @@ build/
 .idea
 pids
 logs
-.idea/
 contracts/.prettierrc
 contracts/flattened/*.sol
 contracts/artifacts
@@ -15,6 +14,7 @@ abi/Address.abi
 abi/BytesLib.abi
 abi/BytesToTypes.abi
 abi/BitcoinHelper.abi
+abi/Context.abi
 abi/I*.abi
 abi/Memory.abi
 abi/Ownable.abi

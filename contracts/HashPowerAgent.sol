@@ -16,9 +16,9 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   mapping(address => Reward) public rewardMap;
 
   /*********************** events **************************/
-  event claimedHashReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
+  event claimedHashReward(address indexed delegator, uint256 amount);
   event validatorAvgReward(address indexed validator, uint256 avgReward);
-  event storedHashReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
+  event storedHashReward(address indexed delegator, uint256 amount);
 
   struct Reward {
     uint256 reward;
@@ -54,7 +54,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
         avgReward = rewardList[i] / minerSize;
         for (uint256 j = 0; j < minerSize; ++j) {
           rewardMap[miners[j]].reward += avgReward;
-          rewardMap[miners[j]].accStakedAmount += 1;
         }
         emit validatorAvgReward(validators[i], avgReward);
       }
@@ -84,19 +83,17 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /// @param claim claim or store claim
   /// @return reward Amount claimed
   /// @return floatReward floating reward amount
-  /// @return accStakedAmount accumulated stake amount (multiplied by rounds), used for grading calculation
-  function claimReward(address delegator, uint256 /*coreAmount*/, uint256 /*settleRound*/, bool claim) external override onlyStakeHub returns (uint256 reward, int256 floatReward, uint256 accStakedAmount) {
+  function claimReward(address delegator, uint256 /*coreAmount*/, uint256 /*settleRound*/, bool claim) external override onlyStakeHub returns (uint256 reward, int256 floatReward) {
     reward = rewardMap[delegator].reward;
     if (reward != 0) {
-      accStakedAmount = rewardMap[delegator].accStakedAmount;
       delete rewardMap[delegator];
+      if (claim) {
+        emit claimedHashReward(delegator, reward);
+      } else {
+        emit storedHashReward(delegator, reward);
+      }
     }
-    if (claim) {
-      emit claimedHashReward(delegator, reward, accStakedAmount);
-    } else {
-      emit storedHashReward(delegator, reward, accStakedAmount);
-    }
-    return (reward, 0, accStakedAmount);
+    return (reward, 0);
   }
 
   /*********************** Governance ********************************/

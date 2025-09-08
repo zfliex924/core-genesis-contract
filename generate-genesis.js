@@ -158,6 +158,11 @@ Promise.all([
     "configuration",
     "contracts/Configuration.sol",
     "Configuration"
+  ),
+  compileContract(
+    "channel",
+    "contracts/Channel.sol",
+    "Channel"
   )
 ]).then(result => {
 

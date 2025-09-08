@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache2.0
 pragma solidity 0.8.4;
 
-import "./interface/IAgent.sol";
+import "./interface/IChannel.sol";
+import "./interface/ICoreAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/ISystemReward.sol";
@@ -13,7 +14,7 @@ import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 
 /// This contract handles CORE staking.
-contract CoreAgent is IAgent, System, IParamSubscriber {
+contract CoreAgent is ICoreAgent, System, IParamSubscriber {
 
   uint256 public constant INIT_REQUIRED_COIN_DEPOSIT = 1e18;
 
@@ -61,12 +62,17 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   struct Delegator {
     address[] candidates;
     uint256 amount;
+    uint256 channelAmount;
   }
 
   struct Reward {
     uint256 reward;
     uint256 accStakedAmount;
   }
+
+  error NotImplemented();
+
+  error InsufficientTokens(uint32 channelId);
 
   /*********************** events **************************/
   event delegatedCoin(address indexed candidate, address indexed delegator, uint256 amount, uint256 realtimeAmount);
@@ -83,8 +89,8 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   event collectedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
   event storedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
 
-  modifier onlyPledgeAgent() {
-    require(msg.sender == PLEDGE_AGENT_ADDR, "the sender must be PledgeAgent contract");
+  modifier onlyInternalCall() {
+    require(msg.sender == PLEDGE_AGENT_ADDR || msg.sender == CHANNEL_ADDR, "the sender must be PledgeAgent or Channel contracts");
     _;
   }
 
@@ -177,6 +183,11 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   /// @param candidate The operator address of validator
   /// @param amount The amount of CORE to undelegate
   function undelegateCoin(address candidate, uint256 amount) public {
+    Delegator storage d = delegatorMap[msg.sender];
+    if (d.amount < d.channelAmount + amount) {
+      revert InsufficientTokens(0);
+    }
+
     IStakeHub(STAKE_HUB_ADDR).onStakeChange(msg.sender);
     uint256 dAmount = _undelegateCoin(candidate, msg.sender, amount, false);
     _deductTransferredAmount(msg.sender, dAmount);
@@ -202,49 +213,60 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     emit transferredCoin(sourceCandidate, targetCandidate, msg.sender, amount, newDeposit);
   }
 
-
   /// Claim reward for delegator
   /// @param delegator the delegator address
-  /// @param settleRound the settlement round
   /// @param claim claim or store rewards
   /// @return reward Amount claimed
-  /// @return floatReward floating reward amount
-  /// @return accStakedAmount accumulated stake amount (multiplied by rounds), used for grading calculation
-  function claimReward(address delegator, uint256 /*coreAmount*/, uint256 settleRound, bool claim) external override onlyStakeHub returns (uint256 reward, int256 floatReward, uint256 accStakedAmount) {
+  /// @return stakedAmount1 the staked amount in the first round
+  /// @return stakedAmount2 the real amount in the last round
+  function claimReward(address delegator, bool claim) external override onlyStakeHub returns (uint256 reward, uint256 stakedAmount1, uint256 stakedAmount2) {
+    uint256 initAmount = delegatorMap[delegator].amount;
     address[] storage candidates = delegatorMap[delegator].candidates;
     uint256 candidateSize = candidates.length;
     address candidate;
     uint256 rewardSum;
-    uint256 accStakedAmountSum;
+    uint256 s1;
+    uint256 s2;
     for (uint256 i = candidateSize; i != 0; --i) {
       candidate = candidates[i - 1];
       CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
-      (reward, accStakedAmount) = _collectRewardFromCandidate(candidate, cd, settleRound);
+      (reward, s1, s2) = _collectRewardFromCandidate(candidate, cd);
       rewardSum += reward;
-      accStakedAmountSum += accStakedAmount;
-      if (claim) {
-        emit collectedReward(candidate, delegator, reward, accStakedAmount);
-      } else {
-        emit storedReward(candidate, delegator, reward, accStakedAmount);
+      stakedAmount1 += s1;
+      stakedAmount2 += s2;
+      if (reward != 0) {
+        if (claim) {
+          emit collectedReward(candidate, delegator, reward, 0);
+        } else {
+          emit storedReward(candidate, delegator, reward, 0);
+        }
       }
       if (cd.realtimeAmount == 0 && cd.transferredAmount == 0) {
         _removeDelegation(delegator, candidate);
       }
     }
 
+    if (rewardSum != 0) {
+      rewardSum = IChannel(CHANNEL_ADDR).payCommissions(delegator, initAmount, rewardSum);
+    }
+
     reward = rewardMap[delegator].reward;
-    accStakedAmount = rewardMap[delegator].accStakedAmount;
-    if (accStakedAmount != 0 || reward != 0) {
+    if (reward != 0 || rewardMap[delegator].accStakedAmount != 0) {
       delete rewardMap[delegator];
     }
     reward += rewardSum;
-    floatReward = 0;
-    accStakedAmount += accStakedAmountSum;
-    if (claim) {
-      emit claimedCoinReward(delegator, reward, accStakedAmount);
-    } else {
-      emit storedCoinReward(delegator, reward, accStakedAmount);
+    if (reward != 0) {
+      if (claim) {
+        emit claimedCoinReward(delegator, reward, 0);
+      } else {
+        emit storedCoinReward(delegator, reward, 0);
+      }
     }
+  }
+
+  /// Claim reward for delegator
+  function claimReward(address, uint256, uint256, bool) external override pure returns (uint256, int256) {
+    revert NotImplemented();
   }
 
   /*********************** Receive data from PledgeAgent ***************************/
@@ -254,7 +276,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   /// @param stakedAmount the staked amount of last round snapshot
   /// @param transferredAmount the transferred out amount counted in reward calculation
   /// @param round data of the round
-  function moveData(address candidate, address delegator, uint256 stakedAmount, uint256 transferredAmount, uint256 round) external payable onlyPledgeAgent {
+  function moveData(address candidate, address delegator, uint256 stakedAmount, uint256 transferredAmount, uint256 round) external payable onlyInternalCall {
     uint256 realtimeAmount = msg.value;
     require(stakedAmount <= realtimeAmount, "require stakedAmount <= realtimeAmount");
     Candidate storage a = candidateMap[candidate];
@@ -264,20 +286,20 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
       cd.changeRound = roundTag;
       delegatorMap[delegator].candidates.push(candidate);
     } else if (changeRound != roundTag) {
-      uint256 lastRoundTag = roundTag - 1;
-      (uint256 reward, uint256 accStakedAmount) = _collectRewardFromCandidate(candidate, cd, lastRoundTag);
-      rewardMap[delegator].reward += reward;
-      rewardMap[delegator].accStakedAmount += accStakedAmount;
-      emit storedReward(candidate, delegator, reward, accStakedAmount);
+      (uint256 reward, ,) = _collectRewardFromCandidate(candidate, cd);
+      if (reward != 0) {
+        rewardMap[delegator].reward += reward;
+        emit storedReward(candidate, delegator, reward, 0);
+      }
     }
     if (round < roundTag) {
-      uint256 lastRoundTag = roundTag - 1;
-      (uint256 reward,,uint256 accStakedAmount) = _collectReward(candidate, stakedAmount, realtimeAmount, transferredAmount, round, lastRoundTag);
+      (, uint256 reward, ,) = _collectReward(candidate, stakedAmount, realtimeAmount, transferredAmount, round);
       stakedAmount = realtimeAmount;
-      rewardMap[delegator].reward += reward;
-      rewardMap[delegator].accStakedAmount += accStakedAmount;
       cd.changeRound = roundTag;
-      emit storedReward(candidate, delegator, reward, accStakedAmount);
+      if (reward != 0) {
+        rewardMap[delegator].reward += reward;
+        emit storedReward(candidate, delegator, reward, 0);
+      }
     } else {
       cd.transferredAmount += transferredAmount;
     }
@@ -286,10 +308,12 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     delegatorMap[delegator].amount += realtimeAmount;
   }
 
-  /// for backward compatibility - allow users to stake through PledgeAgent
+  /// for backward compatibility - allow users to unstake through PledgeAgent
+  /// support channel from v1.0.20
   /// @param candidate the validator candidate address
   /// @param delegator the delegator address
-  function proxyDelegate(address candidate, address delegator) external payable onlyPledgeAgent {
+  /// @param channelId the channel id, 0 represents from PledgeAgent
+  function proxyDelegate(address candidate, address delegator, uint32 channelId) external payable override onlyInternalCall {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(candidate)) {
       revert InactiveCandidate(candidate);
     }
@@ -297,17 +321,35 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
     IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
     uint256 realtimeAmount = _delegateCoin(candidate, delegator, msg.value, false);
     emit delegatedCoin(candidate, delegator, msg.value, realtimeAmount);
+    if (channelId != 0) {
+      delegatorMap[delegator].channelAmount += msg.value;
+    }
   }
 
   /// for backward compatibility - allow users to unstake through PledgeAgent
+  /// support channel from v1.0.20
   /// @param candidate the validator candidate address
   /// @param delegator the delegator address
   /// @param amount the amount of CORE to unstake
-  function proxyUnDelegate(address candidate, address delegator, uint256 amount) external onlyPledgeAgent returns(uint256) {
+  /// @param channelId the channel id, 0 represents from PledgeAgent
+  function proxyUnDelegate(address candidate, address delegator, uint256 amount, uint32 channelId) external override onlyInternalCall returns(uint256) {
     IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
     if (amount == 0) {
       amount = candidateMap[candidate].cDelegatorMap[delegator].realtimeAmount;
     }
+
+    Delegator storage d = delegatorMap[delegator];
+    if (channelId == 0) {
+      if (d.amount < d.channelAmount + amount) {
+        revert InsufficientTokens(channelId);
+      }
+    } else {
+      if (d.channelAmount < amount) {
+        revert InsufficientTokens(channelId);
+      }
+      d.channelAmount -= amount;
+    }
+
     uint256 dAmount = _undelegateCoin(candidate, delegator, amount, false);
     _deductTransferredAmount(delegator, dAmount);
     Address.sendValue(payable(PLEDGE_AGENT_ADDR), amount);
@@ -320,7 +362,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   /// @param targetCandidate the validator candidate address to transfer to
   /// @param delegator the delegator address
   /// @param amount the amount of CORE to unstake
-  function proxyTransfer(address sourceCandidate, address targetCandidate, address delegator, uint256 amount) external onlyPledgeAgent {
+  function proxyTransfer(address sourceCandidate, address targetCandidate, address delegator, uint256 amount) external onlyInternalCall {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetCandidate)) {
       revert InactiveCandidate(targetCandidate);
     }
@@ -414,7 +456,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
       CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
       transferredAmount = cd.transferredAmount;
       if (transferredAmount != 0) {
-        if (transferredAmount < amount) {
+        if (transferredAmount <= amount) {
           amount -= transferredAmount;
           cd.transferredAmount = 0;
           if (cd.realtimeAmount == 0) {
@@ -433,28 +475,39 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   }
 
   /// Exposed for staking API to do readonly calls, restricted to onlyStakeHub() for safety reasons.
-  /// @param candidate the validator candidate to collect rewards
   /// @param delegator the address of delegator
-  /// @param settleRound the settlement round
-  /// @return reward The amount of CORE collected
-  /// @return accStakedAmount accumulated stake amount (multiplied by days), used for grading calculation
-  function viewCollectRewardFromCandidate(address candidate, address delegator, uint256 settleRound) external onlyStakeHub returns (uint256 reward, uint256 accStakedAmount) {
-    CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
-    return _collectRewardFromCandidate(candidate, cd, settleRound);
+  /// @return candidates the validator list with stakes
+  /// @return rewards rewards on each validator
+  /// @return stakedAmount1 the staked amount in the first round
+  /// @return stakedAmount2 the staked amount in the last round
+  function calculateRewards(address delegator) external onlyStakeHub returns (address[] memory candidates, uint256[] memory rewards, uint256 stakedAmount1, uint256 stakedAmount2) {
+    address candidate;
+    uint256 size = delegatorMap[delegator].candidates.length;
+    rewards = new uint256[](size);
+    uint256 s1;
+    uint256 s2;
+    for (uint256 i = 0; i < size; ++i) {
+      candidate = delegatorMap[delegator].candidates[i];
+      CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
+      (rewards[i], s1, s2) = _collectRewardFromCandidate(candidate, cd);
+      stakedAmount1 += s1;
+      stakedAmount2 += s2;
+    }
+    return (delegatorMap[delegator].candidates, rewards, stakedAmount1, stakedAmount2);
   }
 
   /// collect reward from a validator candidate
-  /// @param candidate the validator candidate to collect rewards
+  /// @param candidate the validator candidate to collect reward from
   /// @param cd the structure stores user CORE stake information
-  /// @param settleRound the settlement round
-  /// @return reward The amount of CORE collected
-  /// @return accStakedAmount accumulated stake amount (multiplied by days), used for grading calculation
-  function _collectRewardFromCandidate(address candidate, CoinDelegator storage cd, uint256 settleRound) internal returns (uint256 reward, uint256 accStakedAmount) {
+  /// @return reward the amount of rewards collected
+  /// @return stakedAmount1 the staked amount in the first round
+  /// @return stakedAmount2 the staked amount in the last round
+  function _collectRewardFromCandidate(address candidate, CoinDelegator storage cd) internal returns (uint256 reward, uint256 stakedAmount1, uint256 stakedAmount2) {
     uint256 stakedAmount = cd.stakedAmount;
     uint256 realtimeAmount = cd.realtimeAmount;
     uint256 transferredAmount = cd.transferredAmount;
     bool changed;
-    (reward, changed, accStakedAmount) = _collectReward(candidate, stakedAmount, realtimeAmount, transferredAmount, cd.changeRound, settleRound);
+    (changed, reward, stakedAmount1, stakedAmount2) = _collectReward(candidate, stakedAmount, realtimeAmount, transferredAmount, cd.changeRound);
     if (changed) {
       if (transferredAmount != 0) {
         cd.transferredAmount = 0;
@@ -462,7 +515,7 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
       if (realtimeAmount != stakedAmount) {
         cd.stakedAmount = realtimeAmount;
       }
-      cd.changeRound = settleRound + 1;
+      cd.changeRound = roundTag;
     }
   }
 
@@ -472,39 +525,28 @@ contract CoreAgent is IAgent, System, IParamSubscriber {
   /// @param realtimeAmount realtime staked CORE amount
   /// @param transferredAmount transferred in CORE amount, also eligible for rewards
   /// @param changeRound the last round when the delegator acted
-  /// @param settleRound the settlement round
-  /// @return reward the amount of rewards collected
   /// @return changed whether the changedRound value should be updated
-  /// @return accStakedAmount accumulated stake amount (multiplied by days), used for grading calculation
-  function _collectReward(address candidate, uint256 stakedAmount, uint256 realtimeAmount, uint256 transferredAmount, uint256 changeRound, uint256 settleRound) internal returns (uint256 reward, bool changed, uint256 accStakedAmount) {
+  /// @return reward the amount of rewards
+  /// @return stakedAmount1 the staked amount in the change round
+  /// @return stakedAmount2 the staked amount in the last round
+  function _collectReward(address candidate, uint256 stakedAmount, uint256 realtimeAmount, uint256 transferredAmount, uint256 changeRound) internal returns (bool changed, uint256 reward, uint256 stakedAmount1, uint256 stakedAmount2) {
     require(changeRound != 0, "invalid delegator");
-    require(settleRound < roundTag, "invalid settle round");
-    if (changeRound <= settleRound) {
-      uint256 lastRoundReward = _getRoundAccruedReward(candidate, settleRound);
+    uint256 lastRound = roundTag - 1;
+    changed = changeRound <= lastRound;
+    if (changed) {
+      uint256 changeRoundReward = _getRoundAccruedReward(candidate, changeRound);
       uint256 lastChangeRoundReward = _getRoundAccruedReward(candidate, changeRound - 1);
-      uint256 changeRoundReward;
-      reward = stakedAmount * (lastRoundReward - lastChangeRoundReward);
-      accStakedAmount = stakedAmount * (settleRound - changeRound + 1);
-      
-      if (transferredAmount != 0) {
-        changeRoundReward = _getRoundAccruedReward(candidate, changeRound);
-        reward += transferredAmount * (changeRoundReward - lastChangeRoundReward);
-        accStakedAmount += transferredAmount;
-      }
+      stakedAmount1 = stakedAmount + transferredAmount;
+      reward = stakedAmount1 * (changeRoundReward - lastChangeRoundReward) / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
 
-      if (realtimeAmount != stakedAmount) {
-        if (changeRound < settleRound) {
-          if (changeRoundReward == 0) {
-            changeRoundReward = _getRoundAccruedReward(candidate, changeRound);
-          }
-          reward += (realtimeAmount - stakedAmount) * (lastRoundReward - changeRoundReward);
-          accStakedAmount += (realtimeAmount - stakedAmount) * (settleRound - changeRound);
-        }
+      if (changeRound < lastRound) {
+        stakedAmount2 = realtimeAmount;
+        uint256 lastRoundReward = _getRoundAccruedReward(candidate, lastRound);
+        reward += stakedAmount2 * (lastRoundReward - changeRoundReward) / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
+      } else {
+        stakedAmount2 = stakedAmount1;
       }
-      reward /= SatoshiPlusHelper.CORE_STAKE_DECIMAL;
-      return (reward, true, accStakedAmount);
     }
-    return (0, false, 0);
   }
 
   /// remove delegate record of a candidate/delegator pair

@@ -4,7 +4,7 @@ const init_cycle = {
     epochLength: 200,
     roundInterval: 1800,
     validatorCount: 7,
-    turnLength: 5
+    turnLength: 1
 };
 
 

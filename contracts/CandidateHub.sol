@@ -594,6 +594,10 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       if (newValidatorCount <= 5 || newValidatorCount >= 42) {
         revert OutOfBounds(key, newValidatorCount, 6, 41);
       }
+      // Check if the current maxAlternateCount would violate the constraint with the new validatorCount
+      if (maxAlternateCount > newValidatorCount / 3) {
+        revert OutOfBounds("maxAlternateCount", maxAlternateCount, 0, newValidatorCount / 3);
+      }
       validatorCount = newValidatorCount;
     } else if (Memory.compareStrings(key, "maxCommissionChange")) {
       uint256 newMaxCommissionChange = BytesToTypes.bytesToUint256(32, value);

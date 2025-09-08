@@ -1,10 +1,9 @@
 import pytest
 import brownie
-from web3 import Web3
+from .common import *
+from .delegate import delegate_coin_success
+from .utils import *
 from eth_abi import encode
-from brownie import *
-from .utils import expect_event, padding_left, random_address, random_btc_tx_id, random_vote_address
-from .common import execute_proposal
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -17,8 +16,26 @@ def set_up(slash_indicator):
         encode(['string', 'bytes'], ['felonyThreshold', Web3.to_bytes(hexstr=hex_value)]),
         "update felonyThreshold"
     )
+@pytest.fixture(scope="module", autouse=True)
+def deposit_for_reward(validator_set, gov_hub):
+    accounts[99].transfer(validator_set.address, Web3.to_wei(100000, 'ether'))
 
 
+
+@pytest.fixture()
+def set_candidate_maintenance(candidate_hub):
+    candidate_hub.setValidatorCount(3)
+    operators = []
+    consensuses = []
+    for operator in accounts[5:10]:
+        operators.append(operator)
+        consensuses.append(register_candidate(operator=operator))
+    for operator in operators[:3]:
+        delegate_coin_success(operator, accounts[0], 1e18)
+        delegate_coin_success(operator, accounts[1], 1e18)
+    return operators, consensuses
+
+# slash
 def test_slash(slash_indicator, validator_set):
     for slash_address, times, count in (
             (random_address(), 1, 1),
@@ -30,6 +47,32 @@ def test_slash(slash_indicator, validator_set):
             expect_event(tx, "validatorSlashed", {'validator': slash_address})
         result = slash_indicator.getSlashIndicator(slash_address)
         assert result[1] == count
+
+def test_slash_force_enter_maintenance(slash_indicator,candidate_hub, validator_set, set_candidate_maintenance):
+    candidate_hub.setMaxAlternateCount(5)
+    operators, consensuses = set_candidate_maintenance
+    validator = consensuses[0]
+    operator = operators[0]
+    turn_round()
+    slash_indicator.setMisdemeanorThreshold(2)
+    slash_indicator.setFelonyThreshold(5)
+    validator_set.deposit(validator, {"value": 10000, "from": accounts[99]})
+
+    for _ in range(2):
+        tx= slash_indicator.slash(validator)
+    assert 'validatorEnterMaintenance' in tx.events
+    validator = validator_set.getValidatorByConsensus(consensuses[0])
+    assert validator['enterMaintenanceHeight'] != 0
+    old_enter_maintenance_height = validator['enterMaintenanceHeight']
+
+    result = slash_indicator.getSlashIndicator(consensuses[0])
+    assert result[1] == 2  
+    slash_indicator.slash(consensuses[0])
+    tx  = slash_indicator.slash(consensuses[0])
+    assert 'validatorEnterMaintenance' not  in tx.events
+    validator = validator_set.getValidatorByConsensus(consensuses[0])
+    assert validator['enterMaintenanceHeight'] == old_enter_maintenance_height
+
 
 
 def test_double_sign_slash(slash_indicator, candidate_hub):
@@ -113,3 +156,229 @@ def test_ecrecovery_faild(slash_indicator, candidate_hub):
     num_bytes = num.to_bytes(65, byteorder='big')
     address = slash_indicator.mockEcrecovery(random_btc_tx_id(), num_bytes).return_value
     assert address == ZERO_ADDRESS
+
+
+# exitMaintenanceSlash
+def test_revert_when_caller_is_not_validator_contract(slash_indicator, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    validator = consensuses[0]
+    block_count = 5
+
+    with brownie.reverts("the msg sender must be validatorSet contract"):
+        slash_indicator.exitMaintenanceSlash(validator, block_count, {'from': operators[0]})
+
+
+def test_revert_when_contract_not_initialized(slash_indicator, validator_set, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    slash_indicator.setAlreadyInit(False)
+    validator = consensuses[0]
+    block_count = 5
+    slash_indicator.exitMaintenanceSlash(validator, block_count, {'from': validator_set.address})
+
+
+@pytest.mark.parametrize("block_count", [2, 150])
+def test_exit_maintenance_slash_validator_success(slash_indicator, validator_set, block_count,
+                                                  set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+    validator = consensuses[0]
+    tx = slash_indicator.exitMaintenanceSlash(validator, block_count, {'from': validator_set.address})
+    if block_count == 2:
+        expect_event(tx, "validatorMisdemeanor")
+        result = slash_indicator.getSlashIndicator(validator)
+        assert result[1] == block_count
+    else:
+        expect_event(tx, "validatorFelony")
+        result = slash_indicator.getSlashIndicator(validator)
+        assert result[1] == 0
+    expect_event(tx, "validatorSlashed", {'validator': validator, 'blockCount': block_count})
+    turn_round(consensuses)
+
+
+@pytest.mark.parametrize("block_count", [20, 120])
+def test_exit_maintenance_slash_existing_validator_success(slash_indicator, validator_set, block_count,
+                                                           set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    validator = consensuses[0]
+    turn_round()
+    slash_indicator.setMisdemeanorThreshold(50)
+    for i in range(30):
+        slash_indicator.slash(validator)
+    assert slash_indicator.getSlashIndicator(validator)[1] == 30
+    tx = slash_indicator.exitMaintenanceSlash(validator, block_count, {'from': validator_set.address})
+    if block_count == 20:
+        expect_event(tx, "validatorMisdemeanor")
+    else:
+        expect_event(tx, "validatorFelony")
+
+
+def test_exit_maintenance_slash_felony_threshold_exceeded_success(slash_indicator, validator_set,
+                                                                  set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    validator = consensuses[0]
+    slash_indicator.setMisdemeanorThreshold(5)
+    slash_indicator.setFelonyThreshold(10)
+    turn_round()
+    for _ in range(10):
+        tx = slash_indicator.slash(validator)
+    expect_event(tx, "validatorFelony")
+    assert slash_indicator.getSlashIndicator(validator)[1] == 0
+    tx = slash_indicator.exitMaintenanceSlash(validator, 11, {'from': validator_set.address})
+    assert len(tx.events) == 1
+    expect_event(tx, "validatorSlashed", {'validator': validator, 'blockCount': 11})
+    assert slash_indicator.getSlashIndicator(validator)[1] == 0
+    tx = slash_indicator.exitMaintenanceSlash(validator, 5, {'from': validator_set.address})
+    assert len(tx.events) == 1
+    expect_event(tx, "validatorSlashed", {'validator': validator, 'blockCount': 5})
+
+
+def test_exit_maintenance_slash_misdemeanor_threshold_crossed_success(slash_indicator, candidate_hub, validator_set,
+                                                                      set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    validator = consensuses[0]
+    slash_indicator.setMisdemeanorThreshold(40)
+    slash_indicator.setFelonyThreshold(150)
+    turn_round()
+    validator_set.deposit(validator, {"value": 10000, "from": accounts[99]})
+    for _ in range(20):
+        slash_indicator.slash(validator)
+    tx = slash_indicator.exitMaintenanceSlash(validator, 61, {'from': validator_set.address})
+    expect_event(tx, "validatorMisdemeanor", {'validator': operators[0], 'amount': 40000})
+    turn_round(consensuses)
+
+
+def test_exit_maintenance_slash_no_threshold_crossed_success(slash_indicator, validator_set, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    validator = consensuses[0]
+    slash_indicator.setMisdemeanorThreshold(10)
+    slash_indicator.setFelonyThreshold(15)
+    turn_round()
+    tx = slash_indicator.exitMaintenanceSlash(validator, 2, {'from': validator_set.address})
+    assert 'validatorMisdemeanor' not in tx.events
+    for _ in range(2):
+        slash_indicator.slash(validator)
+    tx = slash_indicator.exitMaintenanceSlash(validator, 2, {'from': validator_set.address})
+    assert 'validatorMisdemeanor' not in tx.events
+    assert slash_indicator.getSlashIndicator(validator)[1] == 6
+
+
+def test_exit_maintenance_slash_zero_block_count_success(slash_indicator, validator_set, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    validator = consensuses[0]
+    turn_round()
+
+    tx = slash_indicator.exitMaintenanceSlash(validator, 0, {'from': validator_set.address})
+
+    expect_event(tx, "validatorSlashed", {'validator': validator, 'blockCount': 0})
+
+    result = slash_indicator.getSlashIndicator(validator)
+    assert result[1] == 0
+
+
+# slashWithBlockCount
+def test_slash_with_block_count_new_validator_success(slash_indicator, validator_set, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+    validator = consensuses[0]
+    block_count = 5
+
+    slash_indicator.mockSlashWithBlockCount(validator, block_count)
+
+    result = slash_indicator.getSlashIndicator(validator)
+    assert result[0] == chain.height 
+    assert result[1] == block_count 
+
+    assert slash_indicator.validators(0) == validator
+
+
+def test_slash_with_block_count_existing_validator_success(slash_indicator, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+    validator = consensuses[0]
+
+    slash_indicator.mockSlashWithBlockCount(validator, 5)
+    result1 = slash_indicator.getSlashIndicator(validator)
+    assert result1[1] == 5
+
+    slash_indicator.mockSlashWithBlockCount(validator, 3)
+    result2 = slash_indicator.getSlashIndicator(validator)
+    assert result2[1] == 8 
+
+    assert result2[0] == chain.height
+
+
+def test_slash_with_block_count_multiple_validators_success(slash_indicator, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+
+    for i, validator in enumerate(consensuses[:3]):
+        tx = slash_indicator.mockSlashWithBlockCount(validator, i + 1)
+        result = slash_indicator.getSlashIndicator(validator)
+        assert result[1] == i + 1
+        assert result[0] == chain.height
+
+    assert slash_indicator.validators(0) == consensuses[0]
+    assert slash_indicator.validators(1) == consensuses[1]
+    assert slash_indicator.validators(2) == consensuses[2]
+
+
+def test_slash_with_block_count_zero_block_count_success(slash_indicator, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+    validator = consensuses[0]
+
+    slash_indicator.mockSlashWithBlockCount(validator, 0)
+
+    result = slash_indicator.getSlashIndicator(validator)
+    assert result[0] == chain.height
+    assert result[1] == 0
+
+    assert slash_indicator.validators(0) == validator
+
+
+def test_slash_with_block_count_height_update_success(slash_indicator, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+    validator = consensuses[0]
+
+    slash_indicator.mockSlashWithBlockCount(validator, 1)
+    result1 = slash_indicator.getSlashIndicator(validator)
+    initial_height = result1[0]
+
+    chain.mine(5)
+
+    slash_indicator.mockSlashWithBlockCount(validator, 2)
+    result2 = slash_indicator.getSlashIndicator(validator)
+
+    assert result2[0] > initial_height
+    assert result2[0] == chain.height
+    assert result2[1] == 3  # 1 + 2 = 3
+
+
+def test_slash_with_block_count_indicator_structure_success(slash_indicator, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+    validator = consensuses[0]
+    slash_indicator.setMisdemeanorThreshold(20)
+    for _ in range(10):
+        slash_indicator.slash(validator)
+    slash_indicator.mockSlashWithBlockCount(validator, 10)
+    indicator = slash_indicator.indicators(validator)
+    assert indicator['height'] == chain.height
+    assert indicator['count'] == 20
+    assert indicator['exist'] == True
+
+
+def test_slash_with_block_count_accumulation_success(slash_indicator, set_candidate_maintenance):
+    operators, consensuses = set_candidate_maintenance
+    turn_round()
+    validator = consensuses[0]
+
+    for i in range(5):
+        slash_indicator.mockSlashWithBlockCount(validator, i + 1)
+        result = slash_indicator.getSlashIndicator(validator)
+        expected_count = sum(range(1, i + 2))
+        assert result[1] == expected_count
+        assert result[0] == chain.height
+    final_result = slash_indicator.getSlashIndicator(validator)
+    assert final_result[1] == 15
