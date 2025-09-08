@@ -1,5 +1,6 @@
 const web3 = require("web3")
 const RLP = require('rlp');
+const init_cycle = require("./init_cycle")
 
 // Configure
 const validators = [
@@ -7,6 +8,7 @@ const validators = [
    {
      "consensusAddr": "0x4121F067B0F5135D77C29b2B329e8Cb1bd96C960",
      "feeAddr": "0xF8B18CeCC98D976ad253D38E4100a73D4e154726",
+     // "voteAddr": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"  // optional voteAddr field
    },
    {
      "consensusAddr": "0x7f461f8a1c35eDEcD6816e76Eb2E84eb661751eE",
@@ -68,18 +70,25 @@ const validators = [
 
 // ===============  Do not edit below ====
 function generateExtradata(validators) {
-  let extraVanity =Buffer.alloc(32);
+  let extraVanity = Buffer.alloc(32);
   let validatorsBytes = extraDataSerialize(validators);
-  let extraSeal =Buffer.alloc(65);
-  return Buffer.concat([extraVanity,validatorsBytes,extraSeal]);
+  let turnLengthByte = Buffer.from([init_cycle.turnLength]); // Initial turnLength from init_cycle.js
+  let extraSeal = Buffer.alloc(65);
+  return Buffer.concat([extraVanity,validatorsBytes,turnLengthByte,extraSeal]);
 }
 
 function extraDataSerialize(validators) {
   let n = validators.length;
   let arr = [];
+  const defaultVoteAddr = "0x" + "00".repeat(48); // 48 bytes of zeros
+  
+  arr.push(Buffer.from([n]));
   for (let i = 0;i<n;i++) {
     let validator = validators[i];
+    const voteAddr = validator.voteAddr || defaultVoteAddr;
+    
     arr.push(Buffer.from(web3.utils.hexToBytes(validator.consensusAddr)));
+    arr.push(Buffer.from(web3.utils.hexToBytes(voteAddr)));
   }
   return Buffer.concat(arr);
 }
@@ -87,10 +96,14 @@ function extraDataSerialize(validators) {
 function validatorUpdateRlpEncode(validators) {
   let n = validators.length;
   let vals = [];
+  const defaultVoteAddr = "0x" + "00".repeat(48); // 48 bytes of zeros
+  
   for (let i = 0;i<n;i++) {
+    const voteAddr = validators[i].voteAddr || defaultVoteAddr;
     vals.push([
       validators[i].consensusAddr,
       validators[i].feeAddr,
+      voteAddr,
     ]);
   }
   return web3.utils.bytesToHex(RLP.encode(vals));

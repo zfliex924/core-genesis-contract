@@ -23,8 +23,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   uint256 public constant BLOCK_REWARD_INCENTIVE_PERCENT = 10;
   uint256 public constant REDUCE_FACTOR = 9639;
   uint256 public constant SUBSIDY_REDUCE_INTERVAL = 10512000;
+  uint256 public constant INIT_TURN_LENGTH = 1;
 
-  bytes public constant INIT_VALIDATORSET_BYTES = hex"f90285ea944121f067b0f5135d77c29b2b329e8cb1bd96c96094f8b18cecc98d976ad253d38e4100a73d4e154726ea947f461f8a1c35edecd6816e76eb2e84eb661751ee94f8b18cecc98d976ad253d38e4100a73d4e154726ea94fd806ab93db5742944b7b50ce759e5eee5f6fe5094f8b18cecc98d976ad253d38e4100a73d4e154726ea947ef3a94ad1c443481fb3d86829355ca90477f8b594f8b18cecc98d976ad253d38e4100a73d4e154726ea9467d1ad48f91e131413bd0b04e823f3ae4f81e85394f8b18cecc98d976ad253d38e4100a73d4e154726ea943fb42cab4416024dc1b4c9e21b9acd0dfcef35f694f8b18cecc98d976ad253d38e4100a73d4e154726ea943511e3b8ac7336b99517d324145e9b5bb33e08a494f8b18cecc98d976ad253d38e4100a73d4e154726ea94729f39a54304fcc6ec279684c71491a385d7b9ae94f8b18cecc98d976ad253d38e4100a73d4e154726ea94f44a785fd9f23f0abd443541386e71356ce619dc94f8b18cecc98d976ad253d38e4100a73d4e154726ea942efd3cf0733421aec3e4202480d0a90bd157514994f8b18cecc98d976ad253d38e4100a73d4e154726ea94613b0f519ada008cb99b6130e89122ba416bf15994f8b18cecc98d976ad253d38e4100a73d4e154726ea94c0925eeb800ff6ba4695ded61562a10102152b5f94f8b18cecc98d976ad253d38e4100a73d4e154726ea9419e3c7d7e69f273f3f91c060bb438a007f6fc33c94f8b18cecc98d976ad253d38e4100a73d4e154726ea94e127f110d172a0c4c6209fe045dd71781e8fe9d494f8b18cecc98d976ad253d38e4100a73d4e154726ea94f778dc4a199a440dbe9f16d1e13e185bb179b3b794f8b18cecc98d976ad253d38e4100a73d4e154726";
+  bytes public constant INIT_VALIDATORSET_BYTES = hex"f90573f85b944121f067b0f5135d77c29b2b329e8cb1bd96c96094f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b947f461f8a1c35edecd6816e76eb2e84eb661751ee94f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b94fd806ab93db5742944b7b50ce759e5eee5f6fe5094f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b947ef3a94ad1c443481fb3d86829355ca90477f8b594f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b9467d1ad48f91e131413bd0b04e823f3ae4f81e85394f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b943fb42cab4416024dc1b4c9e21b9acd0dfcef35f694f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b943511e3b8ac7336b99517d324145e9b5bb33e08a494f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b94729f39a54304fcc6ec279684c71491a385d7b9ae94f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b94f44a785fd9f23f0abd443541386e71356ce619dc94f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b942efd3cf0733421aec3e4202480d0a90bd157514994f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b94613b0f519ada008cb99b6130e89122ba416bf15994f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b94c0925eeb800ff6ba4695ded61562a10102152b5f94f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b9419e3c7d7e69f273f3f91c060bb438a007f6fc33c94f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b94e127f110d172a0c4c6209fe045dd71781e8fe9d494f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85b94f778dc4a199a440dbe9f16d1e13e185bb179b3b794f8b18cecc98d976ad253d38e4100a73d4e154726b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
   /*********************** state of the contract **************************/
   uint256 public blockReward;
@@ -42,6 +43,8 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
   uint256 public validatorCount;
   address[] public rankedValidatorList;
+
+  uint256 public turnLength;
 
   struct Validator {
     address operateAddress;
@@ -98,6 +101,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     }
     blockReward = BLOCK_REWARD;
     blockRewardIncentivePercent = BLOCK_REWARD_INCENTIVE_PERCENT;
+    turnLength = INIT_TURN_LENGTH;
     alreadyInit = true;
   }
 
@@ -408,6 +412,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     return currentValidatorSet[index - 1].income;
   }
 
+  /// Get the index of a validator in the current round
+  /// @param ops The operate address
+  /// @return The index of the validator
   function getValidatorIndexFromOps(address ops) public view returns (uint256) {
     uint256 len = currentValidatorSet.length;
     for (uint256 i = 0; i < len; i++) {
@@ -416,6 +423,17 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       }
     }
     return 0;
+  }
+
+  /// Get the complete ranked validator list
+  /// @return List of ranked validator consensus addresses
+  function getRankedValidatorList() external view returns (address[] memory) {
+    uint256 length = rankedValidatorList.length;
+    address[] memory rankedValidators = new address[](length);
+    for (uint256 i = 0; i < length; i++) {
+      rankedValidators[i] = rankedValidatorList[i];
+    }
+    return rankedValidators;
   }
 
   /// Get the list of validators that are still in the validator set
@@ -528,6 +546,12 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
         revert OutOfBounds(key, newMaintainSlashPercent, 0, 100);
       }
       maintainSlashPercent = newMaintainSlashPercent;
+    } else if (Memory.compareStrings(key, "turnLength")) {
+      uint256 newTurnLength = BytesToTypes.bytesToUint256(32, value);
+      if (newTurnLength == 0 || newTurnLength > 9) {
+        revert OutOfBounds(key, newTurnLength, 1, 9);
+      }
+      turnLength = newTurnLength;
     } else {
       revert UnsupportedGovParam(key);
     }
@@ -609,6 +633,15 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     return workingValidators;
   }
 
+  /// Get turn length
+  /// @return The turn length, returns INIT_TURN_LENGTH if turnLength is 0
+  function getTurnLength() public view returns (uint256) {
+    if (turnLength == 0) {
+      return INIT_TURN_LENGTH;
+    }
+    return turnLength;
+  }
+
   //rlp encode & decode function
   function decodeValidatorSet(bytes memory msgBytes) internal pure returns (Validator[] memory, bool) {
     RLPDecode.RLPItem[] memory items = msgBytes.toRLPItem().toList();
@@ -628,14 +661,18 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   function decodeValidator(RLPDecode.RLPItem memory itemValidator) internal pure returns (Validator memory, bool) {
     Validator memory validator;
     RLPDecode.Iterator memory iter = itemValidator.iterator();
-    bool success = false;
-    while (iter.hasNext()) {
+    bool success = iter.hasNext();
+    while (iter.hasNext() && success) {
       validator.consensusAddress = iter.next().toAddress();
       validator.feeAddress = payable(iter.next().toAddress());
       validator.operateAddress = validator.feeAddress;
+      validator.voteAddr = iter.next().toBytes();
       validator.commissionThousandths = 1000;
-      success = true;
+      if (validator.voteAddr.length != 48) {
+        success = false;
+      }
     }
+
     return (validator, success);
   }
 

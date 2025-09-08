@@ -365,11 +365,11 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
     bytesConcat(input, voteAddr, 128, 48);
 
     // call the precompiled contract to verify the BLS signature
-    // the precompiled contract's address is 0x66
+    // the precompiled contract's address is 0x65
     bytes memory output = new bytes(1);
     assembly {
       let len := mload(input)
-      if iszero(staticcall(not(0), 0x66, add(input, 0x20), len, add(output, 0x20), 0x01)) {
+      if iszero(staticcall(not(0), 0x65, add(input, 0x20), len, add(output, 0x20), 0x01)) {
         revert(0, 0)
       }
     }

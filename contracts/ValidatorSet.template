@@ -23,6 +23,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   uint256 public constant BLOCK_REWARD_INCENTIVE_PERCENT = 10;
   uint256 public constant REDUCE_FACTOR = 9639;
   uint256 public {% if not mock %}constant{% endif %} SUBSIDY_REDUCE_INTERVAL = 10512000;
+  uint256 public constant INIT_TURN_LENGTH = {{initTurnLength}};
 
   bytes public constant INIT_VALIDATORSET_BYTES = hex"{{initValidatorSetBytes}}";
 
@@ -42,6 +43,8 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
   uint256 public validatorCount;
   address[] public rankedValidatorList;
+
+  uint256 public turnLength;
 
   struct Validator {
     address operateAddress;
@@ -98,6 +101,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     }
     blockReward = BLOCK_REWARD;
     blockRewardIncentivePercent = BLOCK_REWARD_INCENTIVE_PERCENT;
+    turnLength = INIT_TURN_LENGTH;
     alreadyInit = true;
   }
 
@@ -408,6 +412,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     return currentValidatorSet[index - 1].income;
   }
 
+  /// Get the index of a validator in the current round
+  /// @param ops The operate address
+  /// @return The index of the validator
   function getValidatorIndexFromOps(address ops) public view returns (uint256) {
     uint256 len = currentValidatorSet.length;
     for (uint256 i = 0; i < len; i++) {
@@ -416,6 +423,17 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       }
     }
     return 0;
+  }
+
+  /// Get the complete ranked validator list
+  /// @return List of ranked validator consensus addresses
+  function getRankedValidatorList() external view returns (address[] memory) {
+    uint256 length = rankedValidatorList.length;
+    address[] memory rankedValidators = new address[](length);
+    for (uint256 i = 0; i < length; i++) {
+      rankedValidators[i] = rankedValidatorList[i];
+    }
+    return rankedValidators;
   }
 
   /// Get the list of validators that are still in the validator set
@@ -528,6 +546,12 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
         revert OutOfBounds(key, newMaintainSlashPercent, 0, 100);
       }
       maintainSlashPercent = newMaintainSlashPercent;
+    } else if (Memory.compareStrings(key, "turnLength")) {
+      uint256 newTurnLength = BytesToTypes.bytesToUint256(32, value);
+      if (newTurnLength == 0 || newTurnLength > 9) {
+        revert OutOfBounds(key, newTurnLength, 1, 9);
+      }
+      turnLength = newTurnLength;
     } else {
       revert UnsupportedGovParam(key);
     }
@@ -609,6 +633,15 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     return workingValidators;
   }
 
+  /// Get turn length
+  /// @return The turn length, returns INIT_TURN_LENGTH if turnLength is 0
+  function getTurnLength() public view returns (uint256) {
+    if (turnLength == 0) {
+      return INIT_TURN_LENGTH;
+    }
+    return turnLength;
+  }
+
   //rlp encode & decode function
   function decodeValidatorSet(bytes memory msgBytes) internal pure returns (Validator[] memory, bool) {
     RLPDecode.RLPItem[] memory items = msgBytes.toRLPItem().toList();
@@ -628,14 +661,18 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   function decodeValidator(RLPDecode.RLPItem memory itemValidator) internal pure returns (Validator memory, bool) {
     Validator memory validator;
     RLPDecode.Iterator memory iter = itemValidator.iterator();
-    bool success = false;
-    while (iter.hasNext()) {
+    bool success = iter.hasNext();
+    while (iter.hasNext() && success) {
       validator.consensusAddress = iter.next().toAddress();
       validator.feeAddress = payable(iter.next().toAddress());
       validator.operateAddress = validator.feeAddress;
+      validator.voteAddr = iter.next().toBytes();
       validator.commissionThousandths = 1000;
-      success = true;
+      if (validator.voteAddr.length != 48) {
+        success = false;
+      }
     }
+
     return (validator, success);
   }
 
