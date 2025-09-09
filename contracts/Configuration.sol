@@ -210,8 +210,9 @@ contract Configuration is System {
      */
     function toBytes32(RLPDecode.RLPItem memory item) internal pure returns (bytes32) {
         bytes memory data = item.toBytes();
-        bytes32 result;
+        require(data.length >= 32, "invalid input length");
 
+        bytes32 result;
         assembly {
             result := mload(add(data, 32))
         }

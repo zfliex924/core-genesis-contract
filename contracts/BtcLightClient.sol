@@ -110,6 +110,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     roundSize = ROUND_SIZE;
     maxWeight = MAXIMUM_WEIGHT;
     storeBlockGasPrice = INIT_STORE_BLOCK_GAS_PRICE;
+    height2HashMap[INIT_CHAIN_HEIGHT] = blockHash;
     alreadyInit = true;
   }
 
@@ -120,6 +121,8 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     require(
       tx.gasprice == (storeBlockGasPrice == 0 ? INIT_STORE_BLOCK_GAS_PRICE : storeBlockGasPrice), 
       "must use limited gasprice");
+    require(blockBytes.length >= 80, "block bytes length must >= 80");
+
     bytes memory headerBytes = slice(blockBytes, 0, 80);
     bytes32 blockHash = doubleShaFlip(headerBytes);
     require(submitters[blockHash] == address(0x0), "can't sync duplicated header");
