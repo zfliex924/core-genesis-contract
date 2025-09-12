@@ -24,4 +24,10 @@ interface IChannel {
   /// @return commission Amount claimed
   /// @return feeAddress the fee address
   function resetCommission(address partner) external returns (uint256 commission, address feeAddress);
+
+  /// This method is a callback when delegate undelegate coin.
+  ///
+  /// @param delegator the delegator address
+  /// @param amount the undelegate amount
+  function onUndelegateCoin(address delegator, uint256 amount) external;
 }

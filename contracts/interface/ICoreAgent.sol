@@ -24,6 +24,5 @@ interface ICoreAgent is IAgent {
   /// @param candidate the validator candidate address
   /// @param delegator the delegator address
   /// @param amount the amount of CORE to unstake
-  /// @param channelId the channel id, 0 represents from PledgeAgent
-  function proxyUnDelegate(address candidate, address delegator, uint256 amount, uint32 channelId) external returns(uint256);
+  function proxyUnDelegate(address candidate, address delegator, uint256 amount) external returns(uint256);
 }

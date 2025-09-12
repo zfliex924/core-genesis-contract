@@ -74,7 +74,7 @@ contract Channel is IChannel, System, IParamSubscriber {
   /// @param reward the reward for total staked tx
   /// @return remainingReward the remain reward after pay commission.
   function payCommissionById(uint32 partnerId, uint256 reward) external override onlyCaller(BTC_STAKE_ADDR) returns (uint256 remainingReward) {
-    if (partnerId == 0 && partnerId > partnerIdGenerator) {
+    if (partners[partnerId].status == 0) {
       return reward;
     }
     Partner storage p = partners[partnerId];
@@ -97,6 +97,9 @@ contract Channel is IChannel, System, IParamSubscriber {
     remainingReward = reward;
     for (uint256 i = ids.length; i != 0; i--) {
       Partner storage p = partners[ids[i-1]];
+      if (p.status == 0) {
+        continue;
+      }
       uint256 commission = p.delegatorAmounts[delegator] * p.coreCommissionRate / SatoshiPlusHelper.DENOMINATOR * reward / amount;
       p.commission += commission;
       remainingReward -= commission;
@@ -110,11 +113,31 @@ contract Channel is IChannel, System, IParamSubscriber {
   /// @return feeAddress the fee address
   function resetCommission(address partner) external override onlyCaller(STAKE_HUB_ADDR) returns (uint256 commission, address feeAddress) {
     uint32 id = partnerIdMap[partner];
-    if (id != 0) {
+    if (id != 0 && partners[id].status != 0) {
       feeAddress = partners[id].feeAddress;
       commission = partners[id].commission;
       if (commission != 0) {
         partners[id].commission = 0;
+      }
+    }
+  }
+
+  /// This method is a callback when delegate undelegate coin.
+  ///
+  /// @param delegator the delegator address
+  /// @param amount the undelegate amount
+  function onUndelegateCoin(address delegator, uint256 amount) external override onlyCaller(CORE_AGENT_ADDR) {
+    uint32[] storage ids = delegators[delegator];
+    for (uint256 i = ids.length; amount != 0 && i != 0; i--) {
+      uint32 tempId = ids[i-1];
+      uint256 stakedAmount = partners[tempId].delegatorAmounts[delegator];
+      if (stakedAmount > amount) {
+        partners[tempId].delegatorAmounts[delegator] = stakedAmount - amount;
+        break;
+      } else {
+        amount -= stakedAmount;
+        delete partners[tempId].delegatorAmounts[delegator];
+        ids.pop();
       }
     }
   }
@@ -216,37 +239,6 @@ contract Channel is IChannel, System, IParamSubscriber {
       delegators[delegator].push(id);
     }
     p.delegatorAmounts[delegator] = existAmount + amount;
-  }
-
-  /// unstake CORE from a partner channel
-  /// @param candidate The operator address of validator
-  /// @param amount The amount of CORE to undelegate
-  /// @param id The partner id
-  function undelegateCoin(address candidate, uint256 amount, uint32 id) external {
-    if (id == 0 || id > partnerIdGenerator) {
-      return;
-    }
-    uint256 stakedAmount = partners[id].delegatorAmounts[msg.sender];
-    if (stakedAmount < amount) {
-      revert InsufficientAmount(amount, stakedAmount);
-    }
-    ICoreAgent(CORE_AGENT_ADDR).proxyUnDelegate(candidate, msg.sender, amount, id);
-    if (stakedAmount > amount) {
-      partners[id].delegatorAmounts[msg.sender] = stakedAmount - amount;
-    } else {
-      delete partners[id].delegatorAmounts[msg.sender];
-      // remove id from Delegator
-      uint32[] storage ids = delegators[msg.sender];
-      for (uint256 i = ids.length; i != 0; i--) {
-        if (ids[i-1] == id) {
-          if (i != ids.length) {
-            ids[i-1] = ids[ids.length-1];
-          }
-          ids.pop();
-        }
-      }
-    }
-    Address.sendValue(payable(msg.sender), amount);
   }
 
   /*********************** Governance ********************************/

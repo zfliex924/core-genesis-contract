@@ -183,16 +183,8 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   /// @param candidate The operator address of validator
   /// @param amount The amount of CORE to undelegate
   function undelegateCoin(address candidate, uint256 amount) public {
-    Delegator storage d = delegatorMap[msg.sender];
-    if (d.amount < d.channelAmount + amount) {
-      revert InsufficientTokens(0);
-    }
-
-    IStakeHub(STAKE_HUB_ADDR).onStakeChange(msg.sender);
-    uint256 dAmount = _undelegateCoin(candidate, msg.sender, amount, false);
-    _deductTransferredAmount(msg.sender, dAmount);
+    amount = undelegate(candidate, msg.sender, amount);
     Address.sendValue(payable(msg.sender), amount);
-    emit undelegatedCoin(candidate, msg.sender, amount);
   }
 
   /// Transfer coin stake to a new validator
@@ -331,29 +323,9 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   /// @param candidate the validator candidate address
   /// @param delegator the delegator address
   /// @param amount the amount of CORE to unstake
-  /// @param channelId the channel id, 0 represents from PledgeAgent
-  function proxyUnDelegate(address candidate, address delegator, uint256 amount, uint32 channelId) external override onlyInternalCall returns(uint256) {
-    IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
-    if (amount == 0) {
-      amount = candidateMap[candidate].cDelegatorMap[delegator].realtimeAmount;
-    }
-
-    Delegator storage d = delegatorMap[delegator];
-    if (channelId == 0) {
-      if (d.amount < d.channelAmount + amount) {
-        revert InsufficientTokens(channelId);
-      }
-    } else {
-      if (d.channelAmount < amount) {
-        revert InsufficientTokens(channelId);
-      }
-      d.channelAmount -= amount;
-    }
-
-    uint256 dAmount = _undelegateCoin(candidate, delegator, amount, false);
-    _deductTransferredAmount(delegator, dAmount);
+  function proxyUnDelegate(address candidate, address delegator, uint256 amount) external override onlyInternalCall returns(uint256) {
+    amount = undelegate(candidate, delegator, amount);
     Address.sendValue(payable(PLEDGE_AGENT_ADDR), amount);
-    emit undelegatedCoin(candidate, delegator, amount);
     return amount;
   }
 
@@ -400,6 +372,37 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     }
 
     return cd.realtimeAmount;
+  }
+
+
+  /// for backward compatibility - allow users to unstake through PledgeAgent
+  /// support channel from v1.0.20
+  /// @param candidate the validator candidate address
+  /// @param delegator the delegator address
+  /// @param amount the amount of CORE to unstake
+  function undelegate(address candidate, address delegator, uint256 amount) internal returns(uint256) {
+    IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
+    if (amount == 0) {
+      amount = candidateMap[candidate].cDelegatorMap[delegator].realtimeAmount;
+    }
+
+    uint256 dAmount = _undelegateCoin(candidate, delegator, amount, false);
+    _deductTransferredAmount(delegator, dAmount);
+    emit undelegatedCoin(candidate, delegator, amount);
+
+    Delegator storage d = delegatorMap[delegator];
+    uint256 undelegateAmount = amount;
+    if (amount > d.channelAmount) {
+      undelegateAmount = d.channelAmount;
+      d.channelAmount = 0;
+    } else {
+      d.channelAmount -= amount;
+    }
+    if (undelegateAmount != 0) {
+      IChannel(CHANNEL_ADDR).onUndelegateCoin(delegator, undelegateAmount);
+    }
+
+    return amount;
   }
 
   /// undelegate CORE tokens

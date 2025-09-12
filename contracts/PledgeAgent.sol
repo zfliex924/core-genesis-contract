@@ -182,7 +182,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     _moveCOREData(agent, msg.sender);
     _distributeReward(msg.sender);
 
-    uint256 undelegateAmount = ICoreAgent(CORE_AGENT_ADDR).proxyUnDelegate(agent, msg.sender, amount, 0);
+    uint256 undelegateAmount = ICoreAgent(CORE_AGENT_ADDR).proxyUnDelegate(agent, msg.sender, amount);
     Address.sendValue(payable(msg.sender), undelegateAmount);
   }
 
