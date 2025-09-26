@@ -634,11 +634,11 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     }
   }
 
-  function _applyDualStaking(uint256 coreAmount, uint256 bctAmount) internal view returns (uint256, uint256) {
+  function _applyDualStaking(uint256 coreAmount, uint256 btcAmount) internal view returns (uint256, uint256) {
     uint256 dsPercentage;
-    uint256 stakeRate = coreAmount / bctAmount;
+    uint256 stakeRate = coreAmount / btcAmount;
     (dsPercentage, stakeRate) = IBtcAgent(BTC_AGENT_ADDR).getGrade(stakeRate);
-    uint256 dualAmount = stakeRate * bctAmount;
+    uint256 dualAmount = stakeRate * btcAmount;
     if (coreAmount > dualAmount) {
       coreAmount -= dualAmount;
     } else {
@@ -660,7 +660,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   function _collectReward(bytes32 txid, uint256 coreAmount, uint256 drRound, uint256 settleRound, bool claim) internal returns (uint256 reward, bool expired, int256 floatReward, uint256 remainingCoreAmount) {
     require(drRound != 0, "invalid deposit receipt");
     require(settleRound < roundTag, "invalid settle round");
-    uint256 bctAmount;
+    uint256 btcAmount;
     (settleRound, expired) = _getCalculateRound(txid, settleRound);
     uint256 ldPercentage;
     uint256 dsPercentage;
@@ -670,7 +670,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       DepositReceipt storage dr = receiptMap[txid];
       // full reward
       reward = (_getRoundAccruedReward(dr.candidate, settleRound) - _getRoundAccruedReward(dr.candidate, drRound)) * bt.amount / SatoshiPlusHelper.BTC_DECIMAL;
-      bctAmount = bt.amount;
+      btcAmount = bt.amount;
       dr.round = settleRound;
 
       if (reward != 0) {
@@ -690,7 +690,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
           reward = pReward;
         }
         
-        (remainingCoreAmount, dsPercentage) = _applyDualStaking(coreAmount, bctAmount);
+        (remainingCoreAmount, dsPercentage) = _applyDualStaking(coreAmount, btcAmount);
         pReward = reward * dsPercentage / SatoshiPlusHelper.DENOMINATOR;
         floatReward += pReward.toInt256() - reward.toInt256();
         reward = pReward;

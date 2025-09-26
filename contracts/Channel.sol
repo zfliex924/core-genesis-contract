@@ -16,6 +16,7 @@ contract Channel is IChannel, System, IParamSubscriber {
 
   uint256 public constant INIT_REQUIRED_MARGIN = 1e22;
   uint256 public constant DEFAULT_COMMISSION_LIMIT = 2000;
+  uint256 public constant INIT_DUES = 1e20;
 
   // the refundable deposit
   uint256 public requiredMargin;
@@ -64,6 +65,7 @@ contract Channel is IChannel, System, IParamSubscriber {
   function init() external onlyNotInit {
     requiredMargin = INIT_REQUIRED_MARGIN;
     commissionLimit = DEFAULT_COMMISSION_LIMIT;
+    dues = INIT_DUES;
     alreadyInit = true;
   }
 

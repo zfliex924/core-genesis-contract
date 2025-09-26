@@ -46,12 +46,19 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
   uint256 public turnLength;
 
+  // key is the `consensusAddress` of `Validator`,
+  // value is the extension information of Validator.
+  mapping(address => ValidatorEx) public exMap;
+
   struct Validator {
     address operateAddress;
     address consensusAddress;
     address payable feeAddress;
     uint256 commissionThousandths;
     uint256 income;
+  }
+
+  struct ValidatorEx {
     bytes voteAddr;
     uint256 voteWeight;
     uint256 enterMaintenanceHeight;
@@ -92,13 +99,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
   /*********************** init **************************/
   function init() external onlyNotInit {
-    (Validator[] memory validatorSet, bool valid) = decodeValidatorSet(INIT_VALIDATORSET_BYTES);
+    (bool valid) = decodeValidatorSet(INIT_VALIDATORSET_BYTES);
     require(valid, "failed to parse init validatorSet");
-    uint256 validatorSize = validatorSet.length;
-    for (uint256 i = 0; i < validatorSize; i++) {
-      currentValidatorSet.push(validatorSet[i]);
-      currentValidatorSetMap[validatorSet[i].consensusAddress] = i + 1;
-    }
+
     blockReward = BLOCK_REWARD;
     blockRewardIncentivePercent = BLOCK_REWARD_INCENTIVE_PERCENT;
     turnLength = INIT_TURN_LENGTH;
@@ -146,8 +149,8 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
     for (uint256 i; i < valAddrs.length; ++i) {
       uint256 index = currentValidatorSetMap[valAddrs[i]];
-      if (index > 0) {
-        currentValidatorSet[index - 1].voteWeight += weights[i];
+      if (index != 0) {
+        exMap[valAddrs[i]].voteWeight += weights[i];
       }
     }
   }
@@ -156,14 +159,16 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     uint256 len = currentValidatorSet.length;
     address[] memory valAddrs = new address[](len);
     uint256 j;
+    address consensusAddress;
     for (uint256 i; i < len; ++i) {
-      if (currentValidatorSet[i].enterMaintenanceHeight != 0) {
-        valAddrs[j++] = currentValidatorSet[i].consensusAddress;
+      consensusAddress = currentValidatorSet[i].consensusAddress;
+      if (exMap[consensusAddress].enterMaintenanceHeight != 0) {
+        valAddrs[j++] = consensusAddress;
       }
     }
 
     for (uint256 i; i < j; ++i) {
-        _exitMaintenance(valAddrs[i], currentValidatorSetMap[valAddrs[i]]);
+        _exitMaintenance(valAddrs[i]);
     }
   }
 
@@ -181,7 +186,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       uint256 incentiveValue = (v.income * blockRewardIncentivePercent) / 100;
       incentiveSum += incentiveValue;
       v.income -= incentiveValue;
-      voteWeightSum += v.voteWeight;
+      voteWeightSum += exMap[v.consensusAddress].voteWeight;
     }
     ISystemReward(SYSTEM_REWARD_ADDR).receiveRewards{ value: incentiveSum }();
 
@@ -220,8 +225,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     if (voteRewardSum != 0) {
       for (uint256 i = 0; i < currentValidatorSet.length; i++) {
         Validator memory v = currentValidatorSet[i];
-        if (v.voteWeight != 0) {
-          uint256 reward = voteRewardSum * v.voteWeight / voteWeightSum;
+        uint256 voteWeight = exMap[v.consensusAddress].voteWeight;
+        if (voteWeight != 0) {
+          uint256 reward = voteRewardSum * voteWeight / voteWeightSum;
           bool success = v.feeAddress.send(reward);
           if(success) {
             emit voteRewardTransfer(v.operateAddress, v.feeAddress, reward);
@@ -265,6 +271,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     uint256 currentLength = consensusAddrList.length;
  
     for (i = 0; i < lastLength; i++) {
+      delete exMap[currentValidatorSet[i].consensusAddress];
       delete currentValidatorSetMap[currentValidatorSet[i].consensusAddress];
     }
     for (i = currentLength; i < lastLength; i++) {
@@ -278,9 +285,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       v.feeAddress = feeAddrList[i];
       v.commissionThousandths = commissionThousandthsList[i];
       v.income = 0;
-      v.voteAddr = voteAddrList[i];
-      v.voteWeight = 0;
-      v.enterMaintenanceHeight = 0;
+      exMap[v.consensusAddress].voteAddr = voteAddrList[i];
         
       if (i >= lastLength) {
         currentValidatorSet.push(v);
@@ -297,9 +302,9 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     if (index == 0) {
       return false;
     }
-    Validator storage val = currentValidatorSet[index-1];
+    address consensusAddress = currentValidatorSet[index-1].consensusAddress;
     uint256 working = getWorkingCount();
-    if (val.enterMaintenanceHeight != 0 || working <= 1 || validatorCount >= working || validatorCount == 0) {
+    if (exMap[consensusAddress].enterMaintenanceHeight != 0 || working <= 1 || validatorCount >= working || validatorCount == 0) {
       return false;
     }
 
@@ -310,7 +315,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     uint256 index = getValidatorIndexFromOps(msg.sender);
     require(index > 0, "not a validator");
     require(canEnterMaintenance(index), "can not enter Temporary Maintenance");
-    _enterMaintenance(currentValidatorSet[index-1].consensusAddress, index);
+    _enterMaintenance(currentValidatorSet[index-1].consensusAddress);
   }
 
   function enterMaintenance(address val) external override onlySlash {
@@ -320,16 +325,17 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     }
 
     if (canEnterMaintenance(index)) {
-      _enterMaintenance(val, index);
+      _enterMaintenance(val);
     }
   }
 
   function exitMaintenance() external {
     uint256 index = getValidatorIndexFromOps(msg.sender);
-    require(index > 0, "not a validator");
-    require(currentValidatorSet[index-1].enterMaintenanceHeight != 0, "not in Temporary Maintenance");
+    require(index != 0, "not a validator");
+    address consensusAddress = currentValidatorSet[index-1].consensusAddress;
+    require(exMap[consensusAddress].enterMaintenanceHeight != 0, "not in Temporary Maintenance");
 
-    _exitMaintenance(currentValidatorSet[index-1].consensusAddress, index);
+    _exitMaintenance(consensusAddress);
   }
 
   /// Get list of validators in the current round
@@ -368,7 +374,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       uint256 len = rankedValidatorList.length;
       for (uint256 i = 0; i < len; ++i) {
         uint256 index = currentValidatorSetMap[rankedValidatorList[i]];
-        if (index != 0 && currentValidatorSet[index-1].enterMaintenanceHeight == 0) {
+        if (index != 0 && exMap[rankedValidatorList[i]].enterMaintenanceHeight == 0) {
           ++workingRankedValidatorLen;
         }
       }
@@ -376,7 +382,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       uint256 j = 0;
       for (uint256 i = 0; i < len; ++i) {
         uint256 index = currentValidatorSetMap[rankedValidatorList[i]];
-        if (index != 0 && currentValidatorSet[index-1].enterMaintenanceHeight == 0) {
+        if (index != 0 && exMap[rankedValidatorList[i]].enterMaintenanceHeight == 0) {
           workingRankedValidatorList[j++] = currentValidatorSet[index-1].consensusAddress;
         }
       }
@@ -391,10 +397,12 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     bytes[] memory voteAddrs = new bytes[](validatorSize);
 
     uint256 pushedCount;
+    address consensusAddress;
     for (uint256 i; pushedCount < validatorSize && i < workingRankedValidatorLen; ++i) {
       uint256 index = currentValidatorSetMap[workingRankedValidatorList[i]];
-      consensusAddrs[pushedCount] = currentValidatorSet[index-1].consensusAddress;
-      voteAddrs[pushedCount] = currentValidatorSet[index-1].voteAddr;
+      consensusAddress = currentValidatorSet[index-1].consensusAddress;
+      consensusAddrs[pushedCount] = consensusAddress;
+      voteAddrs[pushedCount] = exMap[consensusAddress].voteAddr;
       ++pushedCount;
     }
 
@@ -445,7 +453,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
     for (uint256 i = 0; i < len; i++) {
       consensusAddrs[i] = currentValidatorSet[i].consensusAddress;
-      voteAddrs[i] = currentValidatorSet[i].voteAddr;
+      voteAddrs[i] = exMap[consensusAddrs[i]].voteAddr;
     }
 
     return (consensusAddrs, voteAddrs);
@@ -504,6 +512,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     address operateAddress = currentValidatorSet[index].operateAddress;
     emit validatorFelony(operateAddress, income);
     delete currentValidatorSetMap[validator];
+    delete exMap[validator];
     // It is ok that the validatorSet is not in order.
     if (index != currentValidatorSet.length - 1) {
       currentValidatorSet[index] = currentValidatorSet[currentValidatorSet.length - 1];
@@ -612,8 +621,10 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   function getWorkingCount() public view returns (uint256) {
     uint256 len = currentValidatorSet.length;
     uint256 working;
+    address consensusAddress;
     for (uint256 i; i < len; ++i) {
-      if (currentValidatorSet[i].enterMaintenanceHeight == 0) {
+      consensusAddress = currentValidatorSet[i].consensusAddress;
+      if (exMap[consensusAddress].enterMaintenanceHeight == 0) {
         ++working;
       }
     }
@@ -625,9 +636,11 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     uint256 working = getWorkingCount();
     address[] memory workingValidators = new address[](working);
     uint256 j;
+    address consensusAddress;
     for (uint256 i ; i < len; ++i) {
-      if (currentValidatorSet[i].enterMaintenanceHeight == 0) {
-        workingValidators[j++] = currentValidatorSet[i].consensusAddress;
+      consensusAddress = currentValidatorSet[i].consensusAddress;
+      if (exMap[consensusAddress].enterMaintenanceHeight == 0) {
+        workingValidators[j++] = consensusAddress;
       }
     }
     return workingValidators;
@@ -643,22 +656,23 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   }
 
   //rlp encode & decode function
-  function decodeValidatorSet(bytes memory msgBytes) internal pure returns (Validator[] memory, bool) {
+  function decodeValidatorSet(bytes memory msgBytes) internal returns (bool) {
     RLPDecode.RLPItem[] memory items = msgBytes.toRLPItem().toList();
     uint256 itemSize = items.length;
-    Validator[] memory validatorSet = new Validator[](itemSize);
-    for (uint256 j = 0; j < itemSize; j++) {
-      (Validator memory val, bool ok) = decodeValidator(items[j]);
+    for (uint256 i = 0; i < itemSize; i++) {
+      (Validator memory val, bytes memory voteAddr, bool ok) = decodeValidator(items[i]);
       if (!ok) {
-        return (validatorSet, false);
+        return false;
       }
-      validatorSet[j] = val;
+      currentValidatorSet.push(val);
+      currentValidatorSetMap[val.consensusAddress] = i + 1;
+      exMap[val.consensusAddress].voteAddr = voteAddr;
     }
     bool success = itemSize != 0;
-    return (validatorSet, success);
+    return success;
   }
 
-  function decodeValidator(RLPDecode.RLPItem memory itemValidator) internal pure returns (Validator memory, bool) {
+  function decodeValidator(RLPDecode.RLPItem memory itemValidator) internal pure returns (Validator memory, bytes memory voteAddr, bool) {
     Validator memory validator;
     RLPDecode.Iterator memory iter = itemValidator.iterator();
     bool success = iter.hasNext();
@@ -666,30 +680,30 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
       validator.consensusAddress = iter.next().toAddress();
       validator.feeAddress = payable(iter.next().toAddress());
       validator.operateAddress = validator.feeAddress;
-      validator.voteAddr = iter.next().toBytes();
+      voteAddr = iter.next().toBytes();
       validator.commissionThousandths = 1000;
-      if (validator.voteAddr.length != 48) {
+      if (voteAddr.length != 48) {
         success = false;
       }
     }
 
-    return (validator, success);
+    return (validator, voteAddr, success);
   }
 
-  function _enterMaintenance(address validator, uint256 index) internal {
-    currentValidatorSet[index-1].enterMaintenanceHeight = block.number;
+  function _enterMaintenance(address validator) internal {
+    exMap[validator].enterMaintenanceHeight = block.number;
     emit validatorEnterMaintenance(validator);
   }
 
-  function _exitMaintenance(address validator, uint256 index) internal {
+  function _exitMaintenance(address validator) internal {
     uint256 working = currentValidatorSet.length;
     if (working > validatorCount) {
       working = validatorCount;
     }
-    uint256 slashCount = (block.number - currentValidatorSet[index-1].enterMaintenanceHeight) / working * maintainSlashPercent / 100;
+    uint256 slashCount = (block.number - exMap[validator].enterMaintenanceHeight) / working * maintainSlashPercent / 100;
 
-    currentValidatorSet[index-1].enterMaintenanceHeight = 0;
-    
+    exMap[validator].enterMaintenanceHeight = 0;
+
     if (slashCount != 0) {
       ISlashIndicator(SLASH_CONTRACT_ADDR).exitMaintenanceSlash(validator, slashCount);
     }

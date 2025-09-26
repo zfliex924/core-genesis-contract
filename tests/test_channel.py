@@ -6,6 +6,7 @@ from brownie.network.transaction import Status
 from eth_abi import encode
 from web3 import Web3
 from .constant import Utils
+from .utils import random_address
 from .common import execute_proposal, register_candidate, turn_round
 from .delegate import delegate_btc_success, StakeManager, delegate_power_success, delegate_coin_success
 
@@ -78,10 +79,20 @@ def set_channel_partner(channel, required_margin):
     return partner, fee_address, partner_id, core_commission_rate, btc_commission_rate
 
 
+@pytest.fixture
+def set_channel(channel, required_margin):
+    def register_channel(partner, fee_address=None, core_commission_rate=1000, btc_commission_rate=1500):
+        if fee_address is None:
+            fee_address = random_address()
+        channel.register(fee_address, core_commission_rate, btc_commission_rate, {'from': partner, 'value': required_margin})
+        return partner, fee_address, channel.partnerIdMap(partner), core_commission_rate, btc_commission_rate
+    return register_channel
+
+
 def test_init(channel):
     assert channel.alreadyInit() is True
     assert channel.requiredMargin() == channel.INIT_REQUIRED_MARGIN()
-    assert channel.dues() == 0
+    assert channel.dues() == channel.INIT_DUES()
     assert channel.commissionLimit() == channel.DEFAULT_COMMISSION_LIMIT()
 
 
@@ -272,7 +283,25 @@ def test_reset_commission_zero_commission(channel, set_channel_partner, stake_hu
 
 def test_reset_commission_nonexistent_partner(channel, stake_hub):
     non_existent_partner = accounts[99]
-    channel.resetCommission(non_existent_partner, {'from': stake_hub})
+    commission, _ = channel.resetCommission.call(non_existent_partner, {'from': stake_hub})
+    assert commission == 0
+
+
+def test_reset_commission_with_unregistered_partner(channel, stake_hub, btc_stake, set_channel_partner):
+    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
+
+    reward = 10000
+    channel.payCommissionById(partner_id, reward, {'from': btc_stake})
+    partner_info = channel.partners(partner_id)
+    assert partner_info[-1] == reward * btc_commission_rate // 10000
+
+    commission, _ = channel.resetCommission.call(partner, {'from': stake_hub})
+    assert commission == reward * btc_commission_rate // 10000
+
+    channel.unregister({'from': partner})
+
+    commission, _ = channel.resetCommission.call(partner, {'from': stake_hub})
+    assert commission == 0
 
 
 def test_reset_commission_unauthorized_caller(channel, set_channel_partner, stake_hub):
@@ -284,7 +313,7 @@ def test_reset_commission_unauthorized_caller(channel, set_channel_partner, stak
 
 
 def test_governance_update_required_margin(channel, gov_hub):
-    new_margin = Wei("15 ether")
+    new_margin = channel.dues() + Wei("15 ether")
 
     execute_proposal(
         channel.address, 0,
@@ -639,125 +668,77 @@ def test_delegate_coin_invalid_channel_id(channel, required_margin):
         )
 
 
-def test_undelegate_coin_success(channel, required_margin, core_agent):
-    partner = accounts[1]
-    fee_address = accounts[2]
-    delegator = accounts[3]
-    operator = accounts[4]
+@pytest.mark.parametrize("_type", ["zero", "partial", "all", "above"])
+def test_on_undelegate_coin(channel, core_agent, _type, set_channel):
+    operator = accounts[1]
     register_candidate(operator=operator)
-    candidate = operator
-    core_commission_rate = 1000
-    btc_commission_rate = 1500
-    delegate_amount = Wei("10 ether")
-    undelegate_amount = Wei("3 ether")
-    
-    channel.register(
-        fee_address, core_commission_rate, btc_commission_rate,
-        {'from': partner, 'value': required_margin}
-    )
-    partner_id = channel.partnerIdMap(partner)
-    
-    channel.delegateCoin(
-        candidate, partner_id,
-        {'from': delegator, 'value': delegate_amount}
-    )
-    
-    initial_balance = delegator.balance()
-    channel.undelegateCoin(
-        candidate, undelegate_amount, partner_id,
-        {'from': delegator}
-    )
-    
-    remaining_amount = channel.getDelegatorAmount(partner_id, delegator)
-    assert remaining_amount == delegate_amount - undelegate_amount
-    
-    assert delegator.balance() > initial_balance
+
+    partner1, partner2, partner3 = accounts[2:5]
+    _,_, partner1_id,_,_ = set_channel(partner1)
+    _,_, partner2_id,_,_ = set_channel(partner2)
+    _,_, partner3_id,_,_ = set_channel(partner3)
+
+    delegator = accounts[0]
+    delegate_amount = 1000
+
+    channel.delegateCoin(operator, partner1_id, {'from': delegator, 'value': delegate_amount})
+    channel.delegateCoin(operator, partner2_id, {'from': delegator, 'value': delegate_amount})
+    channel.delegateCoin(operator, partner3_id, {'from': delegator, 'value': delegate_amount})
+
+    all_ids = channel.getIds(delegator)
+    for _id in (partner1_id, partner2_id, partner3_id):
+        assert _id in all_ids
+
+    if _type == "zero":
+        channel.onUndelegateCoin(delegator, 0, {'from': core_agent})
+        all_ids = channel.getIds(delegator)
+        for _id in (partner1_id, partner2_id, partner3_id):
+            assert _id in all_ids
+            assert channel.getDelegatorAmount(_id, delegator) == delegate_amount
+    elif _type == "partial":
+        channel.onUndelegateCoin(delegator, delegate_amount + delegate_amount // 2, {'from': core_agent})
+        all_ids = channel.getIds(delegator)
+        assert len(all_ids) == 2
+        assert partner2_id in all_ids
+        assert partner1_id in all_ids
+        assert channel.getDelegatorAmount(partner1_id, delegator) == delegate_amount
+        assert channel.getDelegatorAmount(partner2_id, delegator) == delegate_amount // 2
+        assert channel.getDelegatorAmount(partner3_id, delegator) == 0
+    elif _type == "all":
+        channel.onUndelegateCoin(delegator, delegate_amount * 3, {'from': core_agent})
+        all_ids = channel.getIds(delegator)
+        assert all_ids == []
+        for _id in (partner1_id, partner2_id, partner3_id):
+            assert channel.getDelegatorAmount(_id, delegator) == 0
+    elif _type == "above":
+        channel.onUndelegateCoin(delegator, delegate_amount * 3 + 1, {'from': core_agent})
+        all_ids = channel.getIds(delegator)
+        assert all_ids == []
+        for _id in (partner1_id, partner2_id, partner3_id):
+            assert channel.getDelegatorAmount(_id, delegator) == 0
 
 
-def test_undelegate_coin_insufficient_amount(channel, required_margin):
-    partner = accounts[1]
-    fee_address = accounts[2]
-    delegator = accounts[3]
-    operator = accounts[4]
-    register_candidate(operator=operator)
-    candidate = operator
-    core_commission_rate = 1000
-    btc_commission_rate = 1500
-    delegate_amount = Wei("10 ether")
-    undelegate_amount = Wei("15 ether")
-    
-    channel.register(
-        fee_address, core_commission_rate, btc_commission_rate,
-        {'from': partner, 'value': required_margin}
+def test_pay_commission_by_id_with_invalid_id(channel, btc_stake):
+    partner_id = 999
+    reward_amount = 100
+
+    reward = channel.payCommissionById.call(
+        partner_id, reward_amount,
+        {'from': btc_stake.address}
     )
-    partner_id = channel.partnerIdMap(partner)
-    
-    channel.delegateCoin(
-        candidate, partner_id,
-        {'from': delegator, 'value': delegate_amount}
-    )
-    
-    with brownie.reverts(f"InsufficientAmount: {undelegate_amount}, {delegate_amount}"):
-        channel.undelegateCoin(
-            candidate, undelegate_amount, partner_id,
-            {'from': delegator}
-        )
+    assert reward == reward_amount
 
 
-def test_undelegate_coin_complete_removal(channel, required_margin, core_agent):
-    partner = accounts[1]
-    fee_address = accounts[2]
-    delegator = accounts[3]
-    operator = accounts[4]
-    register_candidate(operator=operator)
-    candidate = operator
-    core_commission_rate = 1000
-    btc_commission_rate = 1500
-    delegate_amount = Wei("10 ether")
-    
-    channel.register(
-        fee_address, core_commission_rate, btc_commission_rate,
-        {'from': partner, 'value': required_margin}
-    )
-    partner_id = channel.partnerIdMap(partner)
-    
-    channel.delegateCoin(
-        candidate, partner_id,
-        {'from': delegator, 'value': delegate_amount}
-    )
-    
-    channel_ids = channel.getIds(delegator)
-    assert partner_id in channel_ids
-    
-    channel.undelegateCoin(
-        candidate, delegate_amount, partner_id,
-        {'from': delegator}
-    )
-    
-    channel_ids = channel.getIds(delegator)
-    assert partner_id not in channel_ids
-    
-    delegator_amount = channel.getDelegatorAmount(partner_id, delegator)
-    assert delegator_amount == 0
-    
-    delegator_map = core_agent.getDelegatorMap(delegator)
-    assert delegator_map[2] == 0
+def test_pay_commission_by_id_with_unregistered_partner(channel, btc_stake, set_channel_partner):
+    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
+    channel.unregister({'from': partner})
 
-
-def test_undelegate_coin_invalid_channel_id(channel, required_margin):
-    delegator = accounts[3]
-    operator = accounts[4]
-    register_candidate(operator=operator)
-    candidate = operator
-    undelegate_amount = Wei("3 ether")
-    invalid_channel_id = 999
-
-    initial_balance = delegator.balance()
-    channel.undelegateCoin(
-        candidate, undelegate_amount, invalid_channel_id,
-        {'from': delegator}
+    reward_amount = 100
+    reward = channel.payCommissionById.call(
+        partner_id, reward_amount,
+        {'from': btc_stake.address}
     )
-    assert delegator.balance() == initial_balance
+    assert reward == reward_amount
 
 
 def test_pay_commission_by_id_success(channel, required_margin, btc_stake):
@@ -824,6 +805,55 @@ def test_pay_commission_by_id_unauthorized_caller(channel, required_margin):
             partner_id, reward_amount,
             {'from': accounts[5]}
         )
+
+
+def test_pay_commission_with_unregistered_partner(channel, set_channel_partner, core_agent, required_margin):
+    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
+
+    partner2 = accounts[3]
+    fee_address2 = accounts[4]
+    core_commission_rate = 1000
+    btc_commission_rate = 1500
+    channel.register(
+        fee_address2, core_commission_rate, btc_commission_rate,
+        {'from': partner2, 'value': required_margin}
+    )
+    partner_id2 = channel.partnerIdMap(partner2)
+
+    delegator = accounts[5]
+    candidate = accounts[6]
+    delegate_amount = 1000
+
+    register_candidate(operator=candidate)
+
+    channel.delegateCoin(
+        candidate, partner_id,
+        {'from': delegator, 'value': delegate_amount}
+    )
+    channel.delegateCoin(
+        candidate, partner_id2,
+        {'from': delegator, 'value': delegate_amount}
+    )
+    channel.unregister({'from': partner2})
+
+    reward_amount = 5000
+
+    total_delegate_amount = delegate_amount * 2
+    expected_commission = (delegate_amount * core_commission_rate // 10000) * reward_amount // total_delegate_amount
+    expected_remaining = reward_amount - expected_commission
+
+    remaining_reward = channel.payCommissions.call(
+        delegator, total_delegate_amount, reward_amount,
+        {'from': core_agent.address}
+    )
+    assert remaining_reward == expected_remaining
+
+    channel.payCommissions(
+        delegator, total_delegate_amount, reward_amount,
+        {'from': core_agent.address}
+    )
+    assert channel.partners(partner_id2)[-1] == 0
+    assert channel.partners(partner_id)[-1] == expected_commission
 
 
 def test_pay_commissions_success(channel, required_margin, core_agent):
@@ -980,51 +1010,68 @@ def test_delegate_coin_integration_with_core_agent(channel, required_margin, cor
     assert partner_id in channel_ids
 
 
-def test_undelegate_coin_integration_with_core_agent(channel, required_margin, core_agent):
-    partner = accounts[1]
-    fee_address = accounts[2]
-    delegator = accounts[3]
-    operator = accounts[4]
+@pytest.mark.parametrize("_type", ["partial", "all", "above"])
+def test_undelegate_coin_integration_with_core_agent(channel, core_agent, _type, set_channel):
+    operator = accounts[1]
     register_candidate(operator=operator)
-    candidate = operator
-    core_commission_rate = 1000
-    btc_commission_rate = 1500
-    delegate_amount = Wei("10 ether")
-    undelegate_amount = Wei("3 ether")
-    
-    channel.register(
-        fee_address, core_commission_rate, btc_commission_rate,
-        {'from': partner, 'value': required_margin}
-    )
-    partner_id = channel.partnerIdMap(partner)
-    
-    channel.delegateCoin(
-        candidate, partner_id,
-        {'from': delegator, 'value': delegate_amount}
-    )
-    
-    initial_balance = delegator.balance()
-    initial_channel_delegation = channel.getDelegatorAmount(partner_id, delegator)
-    initial_channel_amount = core_agent.getDelegatorMap(delegator)[2]
-    
-    tx = channel.undelegateCoin(
-        candidate, undelegate_amount, partner_id,
-        {'from': delegator}
-    )
-    
-    assert tx.status == 1
-    
-    final_balance = delegator.balance()
-    assert final_balance > initial_balance
-    
-    final_channel_delegation = channel.getDelegatorAmount(partner_id, delegator)
-    assert final_channel_delegation == initial_channel_delegation - undelegate_amount
-    
-    channel_ids = channel.getIds(delegator)
-    assert partner_id in channel_ids
-    
-    final_channel_amount = core_agent.getDelegatorMap(delegator)[2]
-    assert final_channel_amount == initial_channel_amount - undelegate_amount
+
+    partner1, partner2, partner3 = accounts[2:5]
+    _,_, partner1_id,_,_ = set_channel(partner1)
+    _,_, partner2_id,_,_ = set_channel(partner2)
+    _,_, partner3_id,_,_ = set_channel(partner3)
+
+    delegator = accounts[0]
+    delegate_amount = 1000
+
+    channel.delegateCoin(operator, partner1_id, {'from': delegator, 'value': delegate_amount})
+    channel.delegateCoin(operator, partner2_id, {'from': delegator, 'value': delegate_amount})
+    channel.delegateCoin(operator, partner3_id, {'from': delegator, 'value': delegate_amount})
+    core_agent.delegateCoin(operator, {'from': delegator, 'value': delegate_amount})
+    total_channel_amount = delegate_amount * 3
+    total_amount = total_channel_amount + delegate_amount
+
+    all_ids = channel.getIds(delegator)
+    for _id in (partner1_id, partner2_id, partner3_id):
+        assert _id in all_ids
+
+    if _type == "partial":
+        undelegate_amount = delegate_amount + delegate_amount // 2
+        core_agent.undelegateCoin(operator, undelegate_amount, {'from': delegator})
+        delegator_info = core_agent.delegatorMap(delegator)
+        _amount, _channel_amount = delegator_info
+        assert _amount == total_amount - undelegate_amount
+        assert _channel_amount == total_channel_amount - undelegate_amount
+
+        all_ids = channel.getIds(delegator)
+        assert len(all_ids) == 2
+        assert partner2_id in all_ids
+        assert partner1_id in all_ids
+        assert channel.getDelegatorAmount(partner1_id, delegator) == delegate_amount
+        assert channel.getDelegatorAmount(partner2_id, delegator) == delegate_amount // 2
+        assert channel.getDelegatorAmount(partner3_id, delegator) == 0
+    elif _type == "all":
+        core_agent.undelegateCoin(operator, 0, {'from': delegator})
+        delegator_info = core_agent.delegatorMap(delegator)
+        _amount, _channel_amount = delegator_info
+        assert _amount == 0
+        assert _channel_amount == 0
+
+        all_ids = channel.getIds(delegator)
+        assert all_ids == []
+        for _id in (partner1_id, partner2_id, partner3_id):
+            assert channel.getDelegatorAmount(_id, delegator) == 0
+    elif _type == "above":
+        undelegate_amount = total_channel_amount + delegate_amount // 2
+        core_agent.undelegateCoin(operator, undelegate_amount, {'from': delegator})
+        delegator_info = core_agent.delegatorMap(delegator)
+        _amount, _channel_amount = delegator_info
+        assert _amount == total_amount - undelegate_amount
+        assert _channel_amount == 0
+
+        all_ids = channel.getIds(delegator)
+        assert all_ids == []
+        for _id in (partner1_id, partner2_id, partner3_id):
+            assert channel.getDelegatorAmount(_id, delegator) == 0
 
 
 def test_delegate_coin_multiple_delegations(channel, required_margin, core_agent):
@@ -1193,11 +1240,8 @@ def test_undelegate_coin_mixed_delegation_scenario(channel, required_margin, cor
     
     undelegate_channel_amount = Wei("3 ether")
     initial_balance = delegator.balance()
-    
-    channel.undelegateCoin(
-        candidate, undelegate_channel_amount, partner_id,
-        {'from': delegator}
-    )
+
+    core_agent.undelegateCoin(candidate, undelegate_channel_amount, {'from': delegator})
     
     remaining_channel_amount = channel.getDelegatorAmount(partner_id, delegator)
     assert remaining_channel_amount == channel_amount - undelegate_channel_amount
@@ -1592,12 +1636,8 @@ def test_core_agent_channel_amount_tracking(channel, required_margin, core_agent
     assert delegator_map[1] == expected_total_amount
     
     undelegate_amount = Wei("2 ether")
+    core_agent.undelegateCoin(candidate, undelegate_amount, {'from': delegator})
 
-    channel.undelegateCoin(
-        candidate, undelegate_amount, partner_id,
-        {'from': delegator}
-    )
-    
     delegator_map = core_agent.getDelegatorMap(delegator)
     final_channel_amount = expected_channel_amount - undelegate_amount
     final_total_amount = expected_total_amount - undelegate_amount
@@ -1605,10 +1645,7 @@ def test_core_agent_channel_amount_tracking(channel, required_margin, core_agent
     assert delegator_map[1] == final_total_amount
     
     remaining_channel_amount = final_channel_amount
-    channel.undelegateCoin(
-        candidate, remaining_channel_amount, partner_id,
-        {'from': delegator}
-    )
+    core_agent.undelegateCoin(candidate, remaining_channel_amount, {'from': delegator})
     
     delegator_map = core_agent.getDelegatorMap(delegator)
     assert delegator_map[2] == 0

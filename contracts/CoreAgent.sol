@@ -261,45 +261,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     revert NotImplemented();
   }
 
-  /*********************** Receive data from PledgeAgent ***************************/
-  /// move staking data for a candidate/delegator pair from PledgeAgent
-  /// @param candidate the validator candidate address
-  /// @param delegator the delegator address
-  /// @param stakedAmount the staked amount of last round snapshot
-  /// @param transferredAmount the transferred out amount counted in reward calculation
-  /// @param round data of the round
-  function moveData(address candidate, address delegator, uint256 stakedAmount, uint256 transferredAmount, uint256 round) external payable onlyInternalCall {
-    uint256 realtimeAmount = msg.value;
-    require(stakedAmount <= realtimeAmount, "require stakedAmount <= realtimeAmount");
-    Candidate storage a = candidateMap[candidate];
-    CoinDelegator storage cd = a.cDelegatorMap[delegator];
-    uint256 changeRound = cd.changeRound;
-    if (changeRound == 0) {
-      cd.changeRound = roundTag;
-      delegatorMap[delegator].candidates.push(candidate);
-    } else if (changeRound != roundTag) {
-      (uint256 reward, ,) = _collectRewardFromCandidate(candidate, cd);
-      if (reward != 0) {
-        rewardMap[delegator].reward += reward;
-        emit storedReward(candidate, delegator, reward, 0);
-      }
-    }
-    if (round < roundTag) {
-      (, uint256 reward, ,) = _collectReward(candidate, stakedAmount, realtimeAmount, transferredAmount, round);
-      stakedAmount = realtimeAmount;
-      cd.changeRound = roundTag;
-      if (reward != 0) {
-        rewardMap[delegator].reward += reward;
-        emit storedReward(candidate, delegator, reward, 0);
-      }
-    } else {
-      cd.transferredAmount += transferredAmount;
-    }
-    cd.stakedAmount += stakedAmount;
-    cd.realtimeAmount += realtimeAmount;
-    delegatorMap[delegator].amount += realtimeAmount;
-  }
-
   /// for backward compatibility - allow users to unstake through PledgeAgent
   /// support channel from v1.0.20
   /// @param candidate the validator candidate address
@@ -509,34 +470,12 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     uint256 stakedAmount = cd.stakedAmount;
     uint256 realtimeAmount = cd.realtimeAmount;
     uint256 transferredAmount = cd.transferredAmount;
-    bool changed;
-    (changed, reward, stakedAmount1, stakedAmount2) = _collectReward(candidate, stakedAmount, realtimeAmount, transferredAmount, cd.changeRound);
-    if (changed) {
-      if (transferredAmount != 0) {
-        cd.transferredAmount = 0;
-      }
-      if (realtimeAmount != stakedAmount) {
-        cd.stakedAmount = realtimeAmount;
-      }
-      cd.changeRound = roundTag;
-    }
-  }
 
-  /// collect rewards on a candidate with full parameters
-  /// @param candidate the candidate to collect reward from
-  /// @param stakedAmount CORE amount of last turn round snapshot
-  /// @param realtimeAmount realtime staked CORE amount
-  /// @param transferredAmount transferred in CORE amount, also eligible for rewards
-  /// @param changeRound the last round when the delegator acted
-  /// @return changed whether the changedRound value should be updated
-  /// @return reward the amount of rewards
-  /// @return stakedAmount1 the staked amount in the change round
-  /// @return stakedAmount2 the staked amount in the last round
-  function _collectReward(address candidate, uint256 stakedAmount, uint256 realtimeAmount, uint256 transferredAmount, uint256 changeRound) internal returns (bool changed, uint256 reward, uint256 stakedAmount1, uint256 stakedAmount2) {
+    uint256 changeRound = cd.changeRound;
     require(changeRound != 0, "invalid delegator");
     uint256 lastRound = roundTag - 1;
-    changed = changeRound <= lastRound;
-    if (changed) {
+
+    if (changeRound <= lastRound) {
       uint256 changeRoundReward = _getRoundAccruedReward(candidate, changeRound);
       uint256 lastChangeRoundReward = _getRoundAccruedReward(candidate, changeRound - 1);
       stakedAmount1 = stakedAmount + transferredAmount;
@@ -549,6 +488,14 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       } else {
         stakedAmount2 = stakedAmount1;
       }
+
+      if (transferredAmount != 0) {
+        cd.transferredAmount = 0;
+      }
+      if (realtimeAmount != stakedAmount) {
+        cd.stakedAmount = realtimeAmount;
+      }
+      cd.changeRound = roundTag;
     }
   }
 

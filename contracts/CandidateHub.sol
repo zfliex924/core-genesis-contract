@@ -63,6 +63,9 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   uint256 public maxAlternateCount;
 
   mapping(address => uint256) public agentMap;
+  // Key is operate address.
+  // Value is CandidateEx
+  mapping(address => CandidateEx) public exMap;
   
   struct Candidate {
     address operateAddr;
@@ -73,16 +76,11 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     uint256 status;
     uint256 commissionLastChangeRound;
     uint256 commissionLastRoundValue;
-    bytes voteAddr;
-    address agent;
-    Description description;
   }
 
-  struct Description {
-    string moniker;
-    string identity;
-    string website;
-    string details;
+  struct CandidateEx {
+    address agent;
+    bytes voteAddr;
   }
 
   modifier onlyOperator() {
@@ -102,7 +100,6 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   event ConsensusAddressEdited(address indexed operateAddr, address newConsensusAddr);
   event CommissionRateEdited(address indexed operateAddr, uint256 newRate);
   event VoteAddressEdited(address indexed operateAddr, bytes newVoteAddr);
-  event DescriptionEdited(address indexed operateAddr, string moniker, string identity, string website, string details);
   event FeeAddressEdited(address indexed operateAddr, address newFeeAddr);
 
   /*********************** init **************************/
@@ -237,7 +234,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       Candidate storage c = candidateSet[index - 1];
       consensusAddrList[i] = c.consensusAddr;
       feeAddrList[i] = c.feeAddr;
-      voteAddrList[i] = c.voteAddr;
+      voteAddrList[i] = exMap[validatorList[i]].voteAddr;
       if (scores[i] == 0) {
         commissionThousandthsList[i] = 1000;
       } else {
@@ -294,7 +291,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
 
     require(voteAddr.length == 48, "vote address length should be 48");
     for (uint256 i = 0; i < candidateSize; i++) {
-      require(!BytesLib.equal(candidateSet[i].voteAddr, voteAddr), "vote address already exists");
+      require(!BytesLib.equal(exMap[candidateSet[i].operateAddr].voteAddr, voteAddr), "vote address already exists");
     }
 
     uint256 status = SET_CANDIDATE;
@@ -306,11 +303,12 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       msg.value,
       status,
       roundTag,
-      commissionThousandths,
-      voteAddr,
-      address(0),
-      Description("", "", "", "")
+      commissionThousandths
     ));
+    exMap[msg.sender] = CandidateEx(
+      address(0),
+      voteAddr
+    );
     operateMap[msg.sender] = candidateSize + 1;
     consensusMap[consensusAddr] = candidateSize + 1;
 
@@ -336,41 +334,41 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   }
 
   function updateAgent(address newAgent) external onlyOperator {
-    uint256 index = operateMap[msg.sender];
-    Candidate storage c = candidateSet[index - 1];
+    address operateAddr = msg.sender;
+    uint256 index = operateMap[operateAddr];
     require(newAgent != address(0), "agent address cannot be zero");
     require(agentMap[newAgent] == 0, "agent address already exists");
 
-    if (c.agent != address(0)) {
-        delete agentMap[c.agent];
+    address oldAgent = exMap[operateAddr].agent;
+    if (oldAgent != address(0)) {
+      delete agentMap[oldAgent];
     }
 
     agentMap[newAgent] = index;
-    c.agent = newAgent;
-    emit AgentUpdated(msg.sender, newAgent);
+    exMap[operateAddr].agent = newAgent;
+    emit AgentUpdated(operateAddr, newAgent);
   }
 
-  function removeAgent() external onlyOperator { 
-    uint256 index = operateMap[msg.sender];
-    Candidate storage c = candidateSet[index - 1];
-    require(c.agent != address(0), "agent address does not exist");
-    delete agentMap[c.agent];
-    c.agent = address(0);
+  function removeAgent() external onlyOperator {
+    address operateAddr = msg.sender;
+    require(exMap[operateAddr].agent != address(0), "agent address does not exist");
+    delete agentMap[exMap[operateAddr].agent];
+    exMap[operateAddr].agent = address(0);
   }
 
   function editConsensusAddress(address newConsensusAddr) external {
-    (uint256 index, Candidate storage c) = getCandidate();
-    
+    Candidate storage c = getCandidate();
+
     require(consensusMap[newConsensusAddr] == 0, "consensus already exists");
+    consensusMap[newConsensusAddr] = consensusMap[c.consensusAddr];
     delete consensusMap[c.consensusAddr];
     c.consensusAddr = newConsensusAddr;
-    consensusMap[newConsensusAddr] = index;
 
-    emit ConsensusAddressEdited(msg.sender, newConsensusAddr);
+    emit ConsensusAddressEdited(c.operateAddr, newConsensusAddr);
   }
 
   function editCommissionRate(uint32 newRate) external {
-    (, Candidate storage c) = getCandidate();
+    Candidate storage c = getCandidate();
 
     require(newRate != 0 && newRate < 1000, "commissionThousandths should in range (0, 1000)");
     
@@ -387,31 +385,23 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       c.commissionLastRoundValue = c.commissionThousandths;
     }
     c.commissionThousandths = newRate;
-    emit CommissionRateEdited(msg.sender, newRate);
+    emit CommissionRateEdited(c.operateAddr, newRate);
   }
 
   function editVoteAddress(bytes calldata voteAddr) external {
-    (, Candidate storage c) = getCandidate();
-
+    Candidate storage c = getCandidate();
     require(voteAddr.length == 48, "vote address length should be 48");
-    
+
     uint256 candidateSize = candidateSet.length;
     for (uint256 i = 0; i < candidateSize; i++) {
-      require(!BytesLib.equal(candidateSet[i].voteAddr, voteAddr), "vote address already exists");
+      require(!BytesLib.equal(exMap[candidateSet[i].operateAddr].voteAddr, voteAddr), "vote address already exists");
     }
-    c.voteAddr = voteAddr;
-    emit VoteAddressEdited(msg.sender, voteAddr);
-  }
-
-  function editDescription(string calldata moniker, string calldata identity, string calldata website, string calldata details) external {
-    (, Candidate storage c) = getCandidate();
-    
-    c.description = Description(moniker, identity, website, details);
-    emit DescriptionEdited(msg.sender, moniker, identity, website, details);
+    exMap[c.operateAddr].voteAddr = voteAddr;
+    emit VoteAddressEdited(c.operateAddr, voteAddr);
   }
 
   function editFeeAddress(address payable newFeeAddr) external onlyOperator {
-    (, Candidate storage c) = getCandidate();
+    Candidate storage c = getCandidate();
 
     require(newFeeAddr != address(0), "fee address cannot be zero");
     c.feeAddr = newFeeAddr;
@@ -453,14 +443,14 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
 
   /*************************** internal methods ******************************/
 
-  function getCandidate() internal view returns (uint256, Candidate storage) {
+  function getCandidate() internal view returns (Candidate storage) {
       uint256 index = operateMap[msg.sender];
       if (index == 0) {
           // Check if sender is agent
           index = agentMap[msg.sender];
           require(index != 0, "candidate does not exist");
       }
-      return (index, candidateSet[index - 1]);
+      return candidateSet[index - 1];
   }
 
   function changeStatus(Candidate storage c, uint256 newStatus) internal {
@@ -476,19 +466,20 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
 
     emit unregistered(c.operateAddr, c.consensusAddr);
 
-    if (c.agent != address(0)) {
-        delete agentMap[c.agent];
+    if (exMap[c.operateAddr].agent != address(0)) {
+        delete agentMap[exMap[c.operateAddr].agent];
     }
 
     delete operateMap[c.operateAddr];
     delete consensusMap[c.consensusAddr];
+    delete exMap[c.operateAddr];
 
     if (index != candidateSet.length) {
       candidateSet[index-1] = candidateSet[candidateSet.length - 1];
-      operateMap[candidateSet[index-1].operateAddr] = index;
-      consensusMap[candidateSet[index-1].consensusAddr] = index;
-      if (candidateSet[index-1].agent != address(0)) {
-        agentMap[candidateSet[index-1].agent] = index; 
+      operateMap[c.operateAddr] = index;
+      consensusMap[c.consensusAddr] = index;
+      if (exMap[c.operateAddr].agent != address(0)) {
+        agentMap[exMap[c.operateAddr].agent] = index;
       }
     }
     candidateSet.pop();

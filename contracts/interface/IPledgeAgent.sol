@@ -8,5 +8,4 @@ interface IPledgeAgent {
   function transferCoin(address sourceAgent, address targetAgent) external;
   function transferCoin(address sourceAgent, address targetAgent, uint256 amount) external;
   function claimReward(address[] calldata agentList) external returns (uint256, bool);
-  function calculateReward(address[] calldata agentList, address delegator) external returns (uint256);
 }

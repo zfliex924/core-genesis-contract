@@ -43,3 +43,4 @@ const templateString = fs.readFileSync(program.template).toString();
 const resultString = nunjucks.renderString(templateString, data);
 fs.writeFileSync(program.output, resultString);
 console.log("ValidatorSet file updated.");
+
