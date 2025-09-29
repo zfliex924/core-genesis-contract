@@ -78,10 +78,10 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   struct BtcTx {
     uint64 amount;
     uint32 outputIndex;
-    uint32 channelId;
     uint64 blockTimestamp;
     uint32 lockTime;
     uint32 usedHeight;
+    uint32 channelId;
   }
 
   struct Delegator {
