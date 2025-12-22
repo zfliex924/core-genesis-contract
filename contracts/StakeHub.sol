@@ -391,7 +391,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   function _calculateReward(address delegator) internal {
     Delegator storage d = delegatorMap[delegator];
     uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
-    if (d.changeRound != currentRound) {
+    if (d.changeRound == currentRound) {
       return;
     }
     uint256 lastRound = currentRound - 1;
