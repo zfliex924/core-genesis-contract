@@ -9,11 +9,9 @@ import "./interface/ILightClient.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/IRelayerHub.sol";
 import "./interface/IStakeHub.sol";
-import "./lib/BytesLib.sol";
 import "./lib/Memory.sol";
 import "./lib/BitcoinHelper.sol";
 import "./lib/SatoshiPlusHelper.sol";
-import "./lib/RLPDecode.sol";
 import "./System.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
@@ -23,11 +21,6 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuard {
   using BitcoinHelper for *;
   using TypedMemView for *;
-  using BytesLib for *;
-  using SafeCast for uint256;
-  using RLPDecode for bytes;
-  using RLPDecode for RLPDecode.Iterator;
-  using RLPDecode for RLPDecode.RLPItem;
 
   // This field records each btc staking tx, and it will never be cleared.
   // key: bitcoin tx id
@@ -70,9 +63,11 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   // value: expire info of exch round
   mapping(uint256 => ExpireInfo) round2expireInfoMap;
 
+  // Deprecated in V-1.0.23 and all data cleaned.
   // Time grading applied to BTC stakers
   LockLengthGrade[] public grades;
 
+  // Deprecated in V-1.0.23 and all data cleaned.
   // whether the time grading is enabled
   bool public gradeActive;
 
@@ -478,52 +473,12 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// @param value the new value set to the parameter
   function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (Memory.compareStrings(key, "grades")) {
-      uint256 lastLength = grades.length;
-
-      RLPDecode.RLPItem[] memory items = value.toRLPItem().toList();
-      uint256 currentLength = items.length;
-
-      for (uint256 i = currentLength; i < lastLength; i++) {
+      uint256 length = grades.length;
+      for (uint256 i = 0; i < length; i++) {
         grades.pop();
       }
-      uint256 lockDuration;
-      uint256 percentage;
-      for (uint256 i = 0; i < currentLength; i++) {
-        RLPDecode.RLPItem[] memory itemArray = items[i].toList();
-        lockDuration = RLPDecode.toUint(itemArray[0]);
-        // limit lockDuration 4000 rounds.
-        if (lockDuration > 4000) {
-          revert OutOfBounds('lockDuration', percentage, 0, 4000);
-        }
-        percentage = RLPDecode.toUint(itemArray[1]);
-        if (percentage == 0 || percentage > SatoshiPlusHelper.DENOMINATOR) {
-          revert OutOfBounds('percentage', percentage, 1, SatoshiPlusHelper.DENOMINATOR);
-        }
-
-        lockDuration *= SatoshiPlusHelper.ROUND_INTERVAL;
-        if (i >= lastLength) {
-          grades.push(LockLengthGrade(uint64(lockDuration), uint32(percentage)));
-        } else {
-          grades[i] = LockLengthGrade(uint64(lockDuration), uint32(percentage));
-        }
-      }
-      // check lockDuration & percentage in order.
-      for (uint256 i = 1; i < currentLength; i++) {
-        require(grades[i-1].lockDuration < grades[i].lockDuration, "lockDuration disorder");
-        require(grades[i-1].percentage < grades[i].percentage, "percentage disorder");
-      }
-      if (currentLength != 0) {
-        require(grades[0].lockDuration == 0, "lowest lockDuration must be zero");
-      }
     } else if (Memory.compareStrings(key, "gradeActive")) {
-      if (value.length != 1) {
-        revert MismatchParamLength(key);
-      }
-      uint8 newGradeActive = value.toUint8(0);
-      if (newGradeActive > 1) {
-        revert OutOfBounds(key, newGradeActive, 0, 1);
-      }
-      gradeActive = newGradeActive == 1;
+      gradeActive = false;
     } else {
       revert UnsupportedGovParam(key);
     }
@@ -701,18 +656,6 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     }
   }
 
-  function _applyDualStaking(uint256 coreAmount, uint256 btcAmount) internal view returns (uint256, uint256) {
-    uint256 dsPercentage;
-    uint256 stakeRate = coreAmount / btcAmount;
-    (dsPercentage, stakeRate) = IBtcAgent(BTC_AGENT_ADDR).getGrade(stakeRate);
-    uint256 dualAmount = stakeRate * btcAmount;
-    if (coreAmount > dualAmount) {
-      coreAmount -= dualAmount;
-    } else {
-      coreAmount = 0;
-    }
-    return (coreAmount, dsPercentage);
-  }
 
   /// collect rewards for a given BTC stake transaction & time grading is applied
   /// @param txid the BTC stake transaction id
@@ -759,30 +702,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   }
 
   function _calculateFloatReward(BtcTx storage bt, uint256 initReward, uint256 coreAmount) internal view returns (uint256 reward, int256 floatReward, uint256 remainingCoreAmount, uint256 ldPercentage, uint256 dsPercentage) {
-    reward = initReward;
-    if (reward != 0) {
-      uint256 pReward;
-      // apply time grading to BTC rewards
-      if (gradeActive && grades.length != 0) {
-        uint64 lockDuration = bt.lockTime - bt.blockTimestamp;
-        ldPercentage = grades[0].percentage;
-        for (uint256 j = grades.length - 1; j != 0; j--) {
-          if (lockDuration >= grades[j].lockDuration) {
-            ldPercentage = grades[j].percentage;
-            break;
-          }
-        }
-        pReward = reward * ldPercentage / SatoshiPlusHelper.DENOMINATOR;
-        floatReward = pReward.toInt256() - reward.toInt256();
-        reward = pReward;
-      }
-      (remainingCoreAmount, dsPercentage) = _applyDualStaking(coreAmount, bt.amount);
-      pReward = reward * dsPercentage / SatoshiPlusHelper.DENOMINATOR;
-      floatReward += pReward.toInt256() - reward.toInt256();
-      reward = pReward;
-    } else {
-      remainingCoreAmount = coreAmount;
-    }
+    (reward, floatReward, remainingCoreAmount, ldPercentage, dsPercentage) = IBtcAgent(BTC_AGENT_ADDR).calculateFloatReward(bt.lockTime, bt.blockTimestamp, bt.amount, initReward, coreAmount);
   }
 
   function _calculateStakeWeightReward(bytes32 txid, uint256 settleRound, uint256 amount) internal view returns (uint256 reward) {
