@@ -269,7 +269,9 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
 
     emit transferredCoin(stx.candidate, targetCandidate, msg.sender, stx.amount, 0);
 
+    candidateMap[stx.candidate].realtimeAmount -= amount;
     stx.candidate = targetCandidate;
+    candidateMap[targetCandidate].realtimeAmount += amount;
     stx.skipReward = true;
   }
 
@@ -514,15 +516,16 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       delegatorMap[delegator].amount += amount;
     }
 
+    Candidate storage a = candidateMap[candidate];
+    a.realtimeAmount += amount;
+
     if (!IStakeHub(STAKE_HUB_ADDR).isStakeWeight(delegator)) {
-      Candidate storage a = candidateMap[candidate];
       CoinDelegator storage cd = a.cDelegatorMap[delegator];
       uint256 changeRound = cd.changeRound;
       if (changeRound == 0) {
         cd.changeRound = roundTag;
         delegatorMap[delegator].candidates.push(candidate);
       }
-      a.realtimeAmount += amount;
       cd.realtimeAmount += amount;
 
       return cd.realtimeAmount;

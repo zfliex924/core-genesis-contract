@@ -65,8 +65,7 @@ contract BitcoinAgent is IBtcAgent, System, IParamSubscriber {
   /// @param rewardList List of reward amount
   /// @param stakeWeight the weight of stake asset
   function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 /*round*/, uint256 stakeWeight) external override onlyStakeHub returns (uint256) {
-    IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validators, rewardList, stakeWeight);
-    return 0;
+    return IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validators, rewardList, stakeWeight);
   }
 
   /// Get staked BTC amount

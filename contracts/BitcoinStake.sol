@@ -207,28 +207,28 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// @param nodes part of the Merkle tree from the tx to the root in LE form (called Merkle proof)
   /// @param index index of the tx in Merkle tree
   function undelegate(bytes calldata btcTx, uint32 blockHeight, bytes32[] memory nodes, uint256 index) external override nonReentrant {
-    // bytes32 txid = btcTx.calculateTxId();
-    // bool txChecked = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
-    // require(txChecked, "btc tx isn't confirmed");
-    // (,bytes29 _vinView, ,) = btcTx.extractTx();
+    bytes32 txid = btcTx.calculateTxId();
+    bool txChecked = ILightClient(LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, btcConfirmBlock, nodes, index);
+    require(txChecked, "btc tx isn't confirmed");
+    (,bytes29 _vinView, ,) = btcTx.extractTx();
 
-    // // parse vinView and update btcTxMap
-    // _vinView.assertType(uint40(BitcoinHelper.BTCTypes.Vin));
-    // // Finds total number of outputs
-    // uint _numberOfInputs = uint256(_vinView.indexCompactInt(0));
-    // uint256 count;
-    // uint32 _outpointIndex;
-    // bytes32 _outpointHash;
-    // for (uint i = 0; i < _numberOfInputs; ++i) {
-    //   (_outpointHash, _outpointIndex) = _vinView.extractOutpoint(i);
-    //   BtcTx storage bt = btcTxMap[_outpointHash];
-    //   if (bt.amount != 0 && bt.outputIndex == _outpointIndex) {
-    //     require(bt.usedHeight == 0, "btc output is already undelegated.");
-    //     bt.usedHeight = blockHeight;
-    //     ++count;
-    //     emit undelegated(_outpointHash, _outpointIndex, txid);      }
-    // }
-    // require(count != 0, "no btc tx undelegated.");
+    // parse vinView and update btcTxMap
+    _vinView.assertType(uint40(BitcoinHelper.BTCTypes.Vin));
+    // Finds total number of outputs
+    uint _numberOfInputs = uint256(_vinView.indexCompactInt(0));
+    uint256 count;
+    uint32 _outpointIndex;
+    bytes32 _outpointHash;
+    for (uint i = 0; i < _numberOfInputs; ++i) {
+      (_outpointHash, _outpointIndex) = _vinView.extractOutpoint(i);
+      BtcTx storage bt = btcTxMap[_outpointHash];
+      if (bt.amount != 0 && bt.outputIndex == _outpointIndex) {
+        require(bt.usedHeight == 0, "btc output is already undelegated.");
+        bt.usedHeight = blockHeight;
+        ++count;
+        emit undelegated(_outpointHash, _outpointIndex, txid);      }
+    }
+    require(count != 0, "no btc tx undelegated.");
   }
 
   /// Receive round rewards from BitcoinAgent. It is triggered at the beginning of turn round.
@@ -363,7 +363,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       for (uint256 j = l; j != 0; --j) {
         candidate = expireInfo.candidateList[j - 1];
         expireAmount = (expireInfo.amountMap[candidate] - 1);
-        candidateMap[candidate].undelegateAmount -= expireAmount;
+        candidateMap[candidate].undelegateAmount += expireAmount;
         candidateMap[candidate].realtimeAmount -= expireAmount;
         expireInfo.candidateList.pop();
         delete expireInfo.amountMap[candidate];
@@ -590,10 +590,10 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// @param candidate validator candidate address
   /// @param round the round to calculate rewards
   /// @return reward the amount of rewards
-  function _getRoundAccruedReward(address candidate, uint256 round) internal view returns (uint256 reward, bool cached) {
+  function _getRoundAccruedReward(address candidate, uint256 round) internal view returns (uint256 reward) {
     reward = accruedRewardPerBTCMap[candidate][round];
     if (reward != 0) {
-      return (reward, true);
+      return reward;
     }
 
     // there might be no rewards for a candidate on a given round if it is unelected or jailed, etc
@@ -603,7 +603,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     Candidate storage c = candidateMap[candidate];
     uint256 b = c.continuousRewardEndRounds.length;
     if (b == 0) {
-      return (0, false);
+      return 0;
     }
     b -= 1;
     uint256 a;
@@ -617,7 +617,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
         targetRound = t;
         a = m + 1;
       } else if (m == 0) {
-        return (0, false);
+        return 0;
       } else {
         b = m - 1;
       }
@@ -626,7 +626,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     if (targetRound != 0) {
       reward = accruedRewardPerBTCMap[candidate][targetRound];
     }
-    return (reward, false);
+    return reward;
   }
 
   /// Exposed for staking API to do readonly calls.
@@ -693,8 +693,8 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
         reward = _calculateStakeWeightReward(txid, settleRound, bt.amount);
       } else {
         // full reward
-        (uint256 settleRoundReward,) = _getRoundAccruedReward(dr.candidate, settleRound);
-        (uint256 drRoundReward, ) = _getRoundAccruedReward(dr.candidate, dr.round);
+        uint256 settleRoundReward = _getRoundAccruedReward(dr.candidate, settleRound);
+        uint256 drRoundReward = _getRoundAccruedReward(dr.candidate, dr.round);
         reward = (settleRoundReward - drRoundReward) * bt.amount / SatoshiPlusHelper.BTC_DECIMAL;
       }
     }
@@ -713,14 +713,14 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       address candidate = dr.candidate;
       uint256 firstRound = dr.stakeRound;
 
-      (uint256 headReward, ) = _getRoundAccruedReward(candidate, firstRound);
-      (uint256 tailReward, ) = _getRoundAccruedReward(candidate, lastRound);
+      uint256 headReward = _getRoundAccruedReward(candidate, firstRound);
+      uint256 tailReward = _getRoundAccruedReward(candidate, lastRound);
       uint256 swMaxReward;
       uint256 duration = lastRound - firstRound;
       if (duration <= SatoshiPlusHelper.STAKE_WEIGHT_ROUND_MAX) {
         reward = _shortStakeFormula(headReward, tailReward, amount, duration);
       } else {
-        (swMaxReward, ) = _getRoundAccruedReward(candidate, firstRound + SatoshiPlusHelper.STAKE_WEIGHT_ROUND_MAX);
+        swMaxReward = _getRoundAccruedReward(candidate, firstRound + SatoshiPlusHelper.STAKE_WEIGHT_ROUND_MAX);
         reward = _longStakeFormula(headReward, swMaxReward, tailReward, amount);
       }
 
@@ -729,7 +729,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       }
       if (changeRound - 1 > firstRound) {
         duration = changeRound - 1 - firstRound;
-        (tailReward, ) = _getRoundAccruedReward(candidate, changeRound);
+        tailReward = _getRoundAccruedReward(candidate, changeRound);
         uint256 calculatedReward;
         if (duration <= SatoshiPlusHelper.STAKE_WEIGHT_ROUND_MAX) {
           calculatedReward = _shortStakeFormula(headReward, tailReward, amount, duration);
