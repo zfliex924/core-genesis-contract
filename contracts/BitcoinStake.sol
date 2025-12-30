@@ -82,7 +82,6 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
 
   struct Delegator {
     bytes32[] txids;
-    uint256 reward;
   }
 
   struct DepositReceipt {
@@ -92,6 +91,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     uint256 reward;
     uint256 stakeRound; 
     bool    skipReward;
+    bool    expired;
   }
 
   struct Candidate {
@@ -123,6 +123,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   );
   event btcExpired(bytes32 indexed txid, address indexed delegator);
   event storedRewardBtcTx(bytes32 indexed txid, uint256 reward, bool expired, uint256 lockLengthRate, uint256 dualStakingRate);
+  event claimBTCReward(address indexed delegator, uint256 reward, bytes32 txId);
 
   /// The validator candidate is inactive, it is expected to be active
   /// @param candidate Address of the validator candidate
@@ -196,6 +197,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
     dr.round = roundTag;
     dr.stakeRound = roundTag;
     dr.skipReward = false;
+    dr.expired = false;
 
     _addExpire(dr, lockTime, btcAmount);
   }
@@ -305,13 +307,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       }
       floatReward += floatRewardPerTx;
       if (expired) {
-        emit btcExpired(txid, receiptMap[txid].delegator);
-        delegatorMap[delegator].reward += receiptMap[txid].reward;
-        delete receiptMap[txid];
-        if (i != txids.length) {
-          txids[i - 1] = txids[txids.length - 1];
-        }
-        txids.pop();
+        receiptMap[txid].expired = true;
       }
     }
   }
@@ -337,7 +333,17 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       if (psize == 0 || bclaim) {
         DepositReceipt storage dr = receiptMap[txid];
         reward += dr.reward;
-        dr.reward = 0;
+        emit claimBTCReward(delegator, dr.reward, txid);
+        if (dr.expired) {
+          emit btcExpired(txid, receiptMap[txid].delegator);
+          delete receiptMap[txid];
+          if (i != dtxids.length) {
+            dtxids[i - 1] = dtxids[dtxids.length - 1];
+          }
+          dtxids.pop();
+        } else {
+          dr.reward = 0;
+        }
       }
     }
   }
@@ -420,6 +426,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   function transfer(bytes32 txid, address targetCandidate) external nonReentrant {
     BtcTx storage bt = btcTxMap[txid];
     DepositReceipt storage dr = receiptMap[txid];
+    require(!dr.expired, "btc is expired");
     uint64 amount = bt.amount;
     require(amount != 0, "btc tx not found");
     require(dr.delegator == msg.sender, "not the delegator of this btc receipt");
