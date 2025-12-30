@@ -96,10 +96,8 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     uint256 amount,
     uint256 realtimeAmount
   );
-  event claimedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
-  event storedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
-  event storedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount, bytes32 txid);
-  event claimedReward(address indexed candidate, address indexed delegator, uint256 reward, bytes32 txid);
+  event claimedCoinReward(address indexed delegator, bytes32[] txids, uint256 amount);
+  event storedReward(address indexed candidate, address indexed delegator, bytes32 indexed txid, uint256 reward);
 
   modifier onlyInternalCall() {
     require(msg.sender == PLEDGE_AGENT_ADDR || msg.sender == CHANNEL_ADDR, "the sender must be PledgeAgent or Channel contracts");
@@ -333,7 +331,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       }
 
       if (reward != 0) {
-        emit storedReward(candidate, delegator, reward, 0, txid);
+        emit storedReward(candidate, delegator, txid, reward);
         rewardSum += reward;
       }
       stakedAmount1 += s1;
@@ -342,7 +340,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
 
     if (rewardSum != 0) {
       rewardSum = IChannel(CHANNEL_ADDR).payCommissions(delegator, d.amount, rewardSum);
-      emit storedCoinReward(delegator, rewardSum, 0);
     }
 
     // handle historical reward
@@ -386,12 +383,11 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         if (stx.stakeRound != roundTag) {
           stx.stakeRound = roundTag - 1;
         }
-        emit claimedReward(stx.candidate, delegator, stx.reward, txid);
       }
     }
 
     if (reward != 0) {
-      emit claimedCoinReward(delegator, reward, 0);
+      emit claimedCoinReward(delegator, txIds, reward);
     }
   }
 
