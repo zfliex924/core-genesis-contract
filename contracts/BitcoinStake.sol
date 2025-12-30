@@ -319,18 +319,18 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   function claimReward(address delegator, bytes32[] calldata btcIds) external override onlyCaller(BTC_AGENT_ADDR) returns (uint256 reward) {
     uint256 psize = btcIds.length;
     bytes32[] storage dtxids = delegatorMap[delegator].txids;
-    bool bclaim;
+    bool befound;
     bytes32 txid;
     for (uint256 i = dtxids.length; i != 0; i--) {
       txid = dtxids[i-1];
-      bclaim = false;
+      befound = false;
       for (uint256 j = 0; j < psize; ++j) {
         if (btcIds[j] == txid) {
-          bclaim = true;
+          befound = true;
           break;
         }
       }
-      if (psize == 0 || bclaim) {
+      if (psize == 0 || befound) {
         DepositReceipt storage dr = receiptMap[txid];
         reward += dr.reward;
         emit claimBtcReward(delegator, dr.reward, txid);

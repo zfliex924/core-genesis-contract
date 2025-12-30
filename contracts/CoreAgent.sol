@@ -273,6 +273,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     stx.candidate = targetCandidate;
     candidateMap[targetCandidate].realtimeAmount += amount;
     stx.skipReward = true;
+
   }
 
   /// Claim reward for delegator
@@ -359,17 +360,28 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     reward = d.reward;
     d.reward = 0;
 
-    // TODO loop txIds
-    uint256 txSize = d.stakeIds.length;
-    for (uint256 i = txSize; i != 0; --i) {
-      StakeTx storage stx = d.stakeTxMap[d.stakeIds[i-1]];
-      // claim reward and reset stake tx
-      if (stx.reward != 0) {
-        reward += stx.reward;
-        stx.reward = 0;
+    bool befound;
+    bytes32 txid;
+    uint256 psize = txIds.length;
+    for (uint256 i = d.stakeIds.length; i != 0; i--) {
+      txid = d.stakeIds[i-1];
+      befound = false;
+      for (uint256 j = 0; j < psize; ++j) {
+        if (txIds[j] == txid) {
+          befound = true;
+          break;
+        }
       }
-      if (stx.stakeRound != roundTag) {
-        stx.stakeRound = roundTag - 1;
+      if (psize == 0 || befound) {
+        StakeTx storage stx = d.stakeTxMap[txid];
+        // claim reward and reset stake tx
+        if (stx.reward != 0) {
+          reward += stx.reward;
+          stx.reward = 0;
+        }
+        if (stx.stakeRound != roundTag) {
+          stx.stakeRound = roundTag - 1;
+        }
       }
     }
 
