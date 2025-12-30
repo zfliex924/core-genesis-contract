@@ -98,7 +98,8 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   );
   event claimedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
   event storedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
-  event storedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
+  event storedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount, bytes32 txid);
+  event claimedReward(address indexed candidate, address indexed delegator, uint256 reward, bytes32 txid);
 
   modifier onlyInternalCall() {
     require(msg.sender == PLEDGE_AGENT_ADDR || msg.sender == CHANNEL_ADDR, "the sender must be PledgeAgent or Channel contracts");
@@ -299,8 +300,10 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     }
 
     for (uint256 i = size; i != 0; --i) {
+      bytes32 txid;
       if (isStakeWeight) {
-        StakeTx storage stakeTx = d.stakeTxMap[d.stakeIds[i - 1]];
+        txid = d.stakeIds[i - 1];
+        StakeTx storage stakeTx = d.stakeTxMap[txid];
         s2 = stakeTx.amount;
         s1 = (stakeTx.stakeRound == changeRound) ? 0 : s2;
         reward = _calculateStakeTxReward(stakeTx, changeRound);
@@ -310,6 +313,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         stakeTx.reward += reward;
         candidate = stakeTx.candidate;
       } else {
+        txid = bytes32(0);
         candidate = d.candidates[i - 1];
         CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
         (reward, s1, s2, ret) = _calculateCandidateReward(candidate, cd);
@@ -329,7 +333,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       }
 
       if (reward != 0) {
-        emit storedReward(candidate, delegator, reward, 0);
+        emit storedReward(candidate, delegator, reward, 0, txid);
         rewardSum += reward;
       }
       stakedAmount1 += s1;
@@ -382,6 +386,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         if (stx.stakeRound != roundTag) {
           stx.stakeRound = roundTag - 1;
         }
+        emit claimedReward(stx.candidate, delegator, stx.reward, txid);
       }
     }
 

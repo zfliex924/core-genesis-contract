@@ -51,6 +51,7 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
     // and distribute rewards to them
     uint256 minerSize;
     uint256 avgReward;
+    uint256 actureReward;
     uint256 totalReward;
     uint256 distributedReward;
     for (uint256 i = 0; i < validators.length; ++i) {
@@ -68,7 +69,7 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
         }
         for (uint256 j = 0; j < minerSize; ++j) {
           Reward storage r = rewardMap[miners[j]];
-          uint256 tempReward = avgReward;
+          actureReward = avgReward;
           if (r.stakeWeight != 0) {
             if (r.round < round) {
               uint256 weight = r.stakeWeight + SatoshiPlusHelper.STAKE_WEIGHT_PER_ROUND;
@@ -78,12 +79,12 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
               r.stakeWeight = weight;
               r.round = round;
             }
-            tempReward = avgReward * r.stakeWeight / SatoshiPlusHelper.DENOMINATOR;
+            actureReward = avgReward * r.stakeWeight / SatoshiPlusHelper.DENOMINATOR;
           }
-          distributedReward += tempReward;
-          rewardMap[miners[j]].reward += tempReward;
+          distributedReward += actureReward;
+          rewardMap[miners[j]].reward += actureReward;
         }
-        emit validatorAvgReward(validators[i], avgReward);
+        emit validatorAvgReward(validators[i], actureReward);
       }
     }
     destoryAmount = totalReward - distributedReward;

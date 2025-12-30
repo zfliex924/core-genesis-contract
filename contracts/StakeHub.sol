@@ -248,7 +248,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   /// Claim reward for delegator
   /// @return rewards Amounts claimed
-  function claimReward() external returns (uint256[] memory rewards) {
+  function claimReward() public returns (uint256[] memory rewards) {
     bytes32[] memory emptyIds;
     (rewards,) = _claimReward(msg.sender, FLAG_STAKE_ALL, emptyIds);
   }
@@ -349,8 +349,8 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     Delegator storage d = delegatorMap[delegator];
     require((d.flag & FLAG_STAKE_WEIGHT) == 0, "already stake weight");
 
-    // calculate reward for the delegator
-    calculateReward(delegator);
+    // claim reward for the delegator
+    claimReward();
 
     // Enable stake weight
     for (uint256 i = 0; i < assets.length; i++) {
@@ -367,8 +367,8 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     Delegator storage d = delegatorMap[delegator];
     require((d.flag & FLAG_STAKE_WEIGHT)== 1, "not stake weight");
 
-    // Calculate stake weight reward for the delegator
-    calculateReward(delegator);
+    // claim reward for the delegator
+    claimReward();
 
     // Disable stake weight
     for (uint256 i = 0; i < assets.length; i++) {
