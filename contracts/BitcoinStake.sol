@@ -268,6 +268,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
 
       if (c.undelegateAmount != 0) {
         burnAmount += rewardList[i] * c.undelegateAmount / c.stakedAmount;
+        c.undelegateAmount = 0;
       }
     }
   }
