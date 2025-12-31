@@ -27,7 +27,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
   struct Reward {
     uint256 reward;
-    uint256 accStakedAmount; // TODO remove this field.
     uint256 round;
     uint256 stakeWeight;
   }
@@ -49,7 +48,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
     // fetch BTC miners who delegated hash power in the about to end round; 
     // and distribute rewards to them
-    uint256 minerSize;
     uint256 avgReward;
     uint256 actureReward;
     uint256 totalReward;
@@ -61,13 +59,12 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
       }
       address[] memory miners = ILightClient(LIGHT_CLIENT_ADDR).getRoundMiners(round-7, validators[i]);
       // distribute rewards to every miner
-      minerSize = miners.length;
-      if (minerSize != 0) {
-        avgReward = rewardList[i] / minerSize * SatoshiPlusHelper.DENOMINATOR / stakeWeight;
+      if (miners.length != 0) {
+        avgReward = rewardList[i] / miners.length * SatoshiPlusHelper.DENOMINATOR / stakeWeight;
         if (totalRoundAmount != 0) {
           avgReward = avgReward * stakedRoundAmount / totalRoundAmount;
         }
-        for (uint256 j = 0; j < minerSize; ++j) {
+        for (uint256 j = 0; j < miners.length; ++j) {
           Reward storage r = rewardMap[miners[j]];
           actureReward = avgReward;
           if (r.stakeWeight != 0) {

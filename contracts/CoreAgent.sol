@@ -298,10 +298,8 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     }
 
     for (uint256 i = size; i != 0; --i) {
-      bytes32 txid;
       if (isStakeWeight) {
-        txid = d.stakeIds[i - 1];
-        StakeTx storage stakeTx = d.stakeTxMap[txid];
+        StakeTx storage stakeTx = d.stakeTxMap[d.stakeIds[i - 1]];
         s2 = stakeTx.amount;
         s1 = (stakeTx.stakeRound == changeRound) ? 0 : s2;
         reward = _calculateStakeTxReward(stakeTx, changeRound);
@@ -311,7 +309,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         stakeTx.reward += reward;
         candidate = stakeTx.candidate;
       } else {
-        txid = bytes32(0);
         candidate = d.candidates[i - 1];
         CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
         (reward, s1, s2, ret) = _calculateCandidateReward(candidate, cd);
@@ -331,7 +328,11 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       }
 
       if (reward != 0) {
-        emit storedReward(candidate, delegator, txid, reward);
+        if (isStakeWeight) {
+           emit storedReward(candidate, delegator, d.stakeIds[i - 1], reward);
+        } else {
+           emit storedReward(candidate, delegator, bytes32(0), reward);
+        }
         rewardSum += reward;
       }
       stakedAmount1 += s1;
