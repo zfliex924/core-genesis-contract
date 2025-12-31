@@ -102,6 +102,7 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
     for (uint256 i = amounts.length; i != 0; --i) {
       totalAmount += amounts[i-1];
     }
+    stakedRoundAmount = totalAmount;
     if (totalRoundAmount < totalAmount) {
       totalRoundAmount = totalAmount;
     }
