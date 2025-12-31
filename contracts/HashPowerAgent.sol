@@ -23,7 +23,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /*********************** events **************************/
   event claimedHashReward(address indexed delegator, uint256 amount);
   event validatorAvgReward(address indexed validator, uint256 avgReward);
-  event storedHashReward(address indexed delegator, uint256 amount);
 
   struct Reward {
     uint256 reward;
