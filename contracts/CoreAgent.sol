@@ -69,6 +69,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     uint256 reward; // stored reward of delegator
     bytes32[] stakeIds;
     mapping(bytes32 => StakeTx) stakeTxMap;
+    mapping(bytes32 => TransferRecord) transferRecordMap;
   }
 
   struct Reward {
@@ -82,6 +83,12 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     uint256 reward; // stored reward of stake tx
     address candidate;
     bool    skipReward;
+  }
+
+  struct TransferRecord {
+    uint256 amount;
+    uint256 transferRound;
+    address candidate;
   }
 
   error InsufficientTokens(uint32 channelId);
@@ -214,6 +221,10 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
 
     emit undelegatedCoin(stx.candidate, delegator, amount);
 
+    TransferRecord storage transferRecord = d.transferRecordMap[stakeId];
+    if (transferRecord.amount != 0) {
+      delete d.transferRecordMap[stakeId];
+    }
     delete d.stakeTxMap[stakeId];
     for (uint256 i = d.stakeIds.length; i != 0; --i) {
       if (d.stakeIds[i-1] == stakeId) {
@@ -268,11 +279,17 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
 
     emit transferredCoin(stx.candidate, targetCandidate, msg.sender, stx.amount, 0);
 
+    TransferRecord storage transferRecord = d.transferRecordMap[stakeId];
+    if (transferRecord.amount == 0) {
+      transferRecord.amount = amount;
+      transferRecord.transferRound = roundTag;
+      transferRecord.candidate = stx.candidate;
+    }
+
     candidateMap[stx.candidate].realtimeAmount -= amount;
     stx.candidate = targetCandidate;
     candidateMap[targetCandidate].realtimeAmount += amount;
     stx.skipReward = true;
-
   }
 
   /// Claim reward for delegator
@@ -289,7 +306,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     uint256 s1;
     uint256 s2;
     address candidate;
-    bool ret;
 
     if (isStakeWeight) {
       size = d.stakeIds.length;
@@ -300,17 +316,32 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     for (uint256 i = size; i != 0; --i) {
       if (isStakeWeight) {
         StakeTx storage stakeTx = d.stakeTxMap[d.stakeIds[i - 1]];
+        candidate = stakeTx.candidate;
         s2 = stakeTx.amount;
         s1 = (stakeTx.stakeRound == changeRound) ? 0 : s2;
         reward = _calculateStakeTxReward(stakeTx, changeRound);
+        if (reward != 0) {
+          emit storedReward(candidate, delegator, d.stakeIds[i - 1], reward);
+        }
+
+        TransferRecord storage transferRecord = d.transferRecordMap[d.stakeIds[i - 1]];
+        if (transferRecord.amount != 0 && transferRecord.transferRound < roundTag) {
+          uint256 transferredReward = _calculateTransferredReward(transferRecord, stakeTx.stakeRound);
+          if (transferredReward != 0) {
+            emit storedReward(transferRecord.candidate, delegator, d.stakeIds[i - 1], transferredReward);
+          }
+          reward += transferredReward;
+          delete d.transferRecordMap[d.stakeIds[i - 1]];
+        }
+
         if (stakeTx.skipReward) {
           stakeTx.skipReward = false;
         }
         stakeTx.reward += reward;
-        candidate = stakeTx.candidate;
       } else {
         candidate = d.candidates[i - 1];
         CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
+        bool ret;
         (reward, s1, s2, ret) = _calculateCandidateReward(candidate, cd);
         if (ret) {
           if (cd.transferredAmount != 0) {
@@ -325,14 +356,12 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
           }
         }
         d.reward += reward;
+        if (reward != 0) {
+          emit storedReward(candidate, delegator, bytes32(0), reward);
+        }
       }
 
       if (reward != 0) {
-        if (isStakeWeight) {
-           emit storedReward(candidate, delegator, d.stakeIds[i - 1], reward);
-        } else {
-           emit storedReward(candidate, delegator, bytes32(0), reward);
-        }
         rewardSum += reward;
       }
       stakedAmount1 += s1;
@@ -482,6 +511,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     for (uint256 i = d.stakeIds.length; i != 0; --i) {
       bytes32 stakeId = d.stakeIds[i-1];
       StakeTx storage stakeTx = d.stakeTxMap[stakeId];
+      TransferRecord storage transferRecord = d.transferRecordMap[stakeId];
       Candidate storage a = candidateMap[stakeTx.candidate];
       CoinDelegator storage cd = a.cDelegatorMap[delegator];
       uint256 changeRound = cd.changeRound;
@@ -497,6 +527,9 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       d.reward += stakeTx.reward;
 
       delete d.stakeTxMap[stakeId];
+      if (transferRecord.amount != 0) {
+        delete d.transferRecordMap[stakeId];
+      }
       d.stakeIds.pop();
     }
   }
@@ -670,13 +703,14 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   /// @return stakedAmount2 the staked amount in the last round
   function calculateRewards(address delegator, uint256 changeRound) external view returns (address[] memory candidates, uint256[] memory rewards, uint256 stakedAmount1, uint256 stakedAmount2) {
     Delegator storage d = delegatorMap[delegator];
-    uint256 size = d.candidates.length + d.stakeIds.length;
+    uint256 size = d.candidates.length + d.stakeIds.length * 2;
     candidates = new address[](size);
     rewards = new uint256[](size);
     uint256 s1;
     uint256 s2;
     if (d.candidates.length != 0) {
-      for (uint256 i = 0; i < size; ++i) {
+      uint256 candidateSize = d.candidates.length;
+      for (uint256 i = 0; i < candidateSize; ++i) {
         candidates[i] = d.candidates[i];
         CoinDelegator storage cd = candidateMap[candidates[i]].cDelegatorMap[delegator];
         (rewards[i], s1, s2, ) = _calculateCandidateReward(candidates[i], cd);
@@ -684,7 +718,8 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         stakedAmount2 += s2;
       }
     } else {
-      for (uint256 i = 0; i < d.stakeIds.length; ++i) {
+      uint256 stakeTxSize = d.stakeIds.length;
+      for (uint256 i = 0; i < stakeTxSize; ++i) {
         StakeTx storage stakeTx = d.stakeTxMap[d.stakeIds[i]];
         candidates[i] = stakeTx.candidate;
         s2 = stakeTx.amount;
@@ -692,6 +727,12 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         rewards[i] = _calculateStakeTxReward(stakeTx, changeRound);
         stakedAmount1 += s1;
         stakedAmount2 += s2;
+
+        TransferRecord storage transferRecord = d.transferRecordMap[d.stakeIds[i]];
+        if (transferRecord.amount != 0) {
+          candidates[i + stakeTxSize] = transferRecord.candidate;
+          rewards[i + stakeTxSize] = _calculateTransferredReward(transferRecord, stakeTx.stakeRound);
+        }
       }
     }
     return (candidates, rewards, stakedAmount1, stakedAmount2);
@@ -735,11 +776,18 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   /// @return reward the amount of rewards collected
   function _calculateStakeTxReward(StakeTx storage stakeTx, uint256 changeRound) internal view returns (uint256 reward) {
     uint256 lastRound = roundTag - 1;
-    if (changeRound <= lastRound) {
-      uint256 amount = stakeTx.amount;
-      address candidate = stakeTx.candidate;
-      uint256 firstRound = stakeTx.stakeRound;
+    return _calculateStakeWeightReward(stakeTx.amount, stakeTx.candidate, stakeTx.stakeRound, stakeTx.skipReward, changeRound, lastRound);
+  }
 
+  /// collect reward from a transfer record
+  /// @param transferRecord the structure stores user CORE transfer information
+  /// @return reward the amount of rewards collected
+  function _calculateTransferredReward(TransferRecord storage transferRecord, uint256 stakeRound) internal view returns (uint256 reward) {
+    return _calculateStakeWeightReward(transferRecord.amount, transferRecord.candidate, stakeRound, false, transferRecord.transferRound - 1, transferRecord.transferRound);
+  }
+
+  function _calculateStakeWeightReward(uint256 amount, address candidate, uint256 firstRound, bool skipReward, uint256 changeRound, uint256 lastRound) internal view returns (uint256 reward){
+    if (changeRound <= lastRound) {
       uint256 headReward = _getRoundAccruedReward(candidate, firstRound);
       uint256 tailReward = _getRoundAccruedReward(candidate, lastRound);
       uint256 swMaxReward;
@@ -751,7 +799,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         reward = _longStakeFormula(headReward, swMaxReward, tailReward, amount);
       }
 
-      if (stakeTx.skipReward) {
+      if (skipReward) {
         changeRound++;
       }
       if (changeRound - 1 > firstRound) {
