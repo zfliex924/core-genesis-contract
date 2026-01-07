@@ -88,7 +88,7 @@ contract Configuration is System {
      * @param key The parameter key to update.
      * @param value The encoded value for the parameter.
      */
-    function updateParam(string calldata key, bytes calldata value) external onlyInit onlyGov {
+    function updateParam(string calldata key, bytes calldata value) external onlyInit onlyCaller(GOV_HUB_ADDR) {
         if (Memory.compareStrings(key, "addConfig")) {
             RLPDecode.RLPItem[] memory items = value.toRLPItem().toList();
             if (items.length != 3) revert MismatchParamLength(key); // Updated length check
@@ -383,7 +383,7 @@ contract Configuration is System {
      * @dev Internal function to validate that total reward percentages don't exceed 100%.
      * @param rewards Array of rewards to validate.
      */
-    function _validateRewardPercentages(Reward[] memory rewards) internal view {
+    function _validateRewardPercentages(Reward[] memory rewards) internal pure {
         uint256 totalPercentage = 0;
         for (uint i; i < rewards.length; i++) {
             totalPercentage += rewards[i].rewardPercentage;

@@ -3,12 +3,7 @@ pragma solidity 0.8.4;
 
 import "./interface/ICoreAgent.sol";
 import "./interface/IPledgeAgent.sol";
-import "./interface/IParamSubscriber.sol";
-import "./interface/ISystemReward.sol";
 import "./lib/Address.sol";
-import "./lib/TypedMemView.sol";
-import "./lib/Memory.sol";
-import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 
 /// This contract manages user delegate, also known as stake
@@ -25,8 +20,7 @@ import "./System.sol";
 /// It's role is replaced by StakeHub and 3 agent contracts to handle different types of staking assets separately
 /// It is kept in the codebase for backward compatibiliy
 
-contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
-  using TypedMemView for *;
+contract PledgeAgent is IPledgeAgent, System {
 
   // Deprecated in V-1.0.13
   // minimal CORE require to stake
@@ -146,7 +140,6 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   event received(address indexed from, uint256 amount);
 
   function init() external onlyNotInit {
-    roundTag = block.timestamp / SatoshiPlusHelper.ROUND_INTERVAL;
     alreadyInit = true;
   }
 
@@ -157,11 +150,21 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
     reentrantLocked = false;
   }
 
+  modifier onlyContract() {
+    uint256 codeSize;
+    address delegator = msg.sender;
+    assembly {
+      codeSize := extcodesize(delegator)
+    }
+    require(codeSize != 0, "Only support agent contract");
+    _;
+  }
+
   /*********************** External methods ***************************/
   /// Delegate coin to a validator
   /// @param agent The operator address of validator
   /// HARDFORK V-1.0.12 Deprecated, the method is kept here for backward compatibility
-  function delegateCoin(address agent) external payable override noReentrant{
+  function delegateCoin(address agent) external payable override noReentrant onlyContract {
     ICoreAgent(CORE_AGENT_ADDR).proxyDelegate{value: msg.value}(agent, msg.sender, 0);
   }
 
@@ -176,7 +179,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param agent The operator address of validator
   /// @param amount The amount of CORE to undelegate
   /// HARDFORK V-1.0.12 Deprecated, the method is kept here for backward compatibility
-  function undelegateCoin(address agent, uint256 amount) public override noReentrant{
+  function undelegateCoin(address agent, uint256 amount) public override noReentrant onlyContract {
     uint256 undelegateAmount = ICoreAgent(CORE_AGENT_ADDR).proxyUnDelegate(agent, msg.sender, amount);
     Address.sendValue(payable(msg.sender), undelegateAmount);
   }
@@ -194,7 +197,7 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param targetAgent The validator to transfer coin stake to
   /// @param amount The amount of CORE to transfer
   // HARDFORK V-1.0.12 Deprecated, the method is kept here for backward compatibility
-  function transferCoin(address sourceAgent, address targetAgent, uint256 amount) public override noReentrant{
+  function transferCoin(address sourceAgent, address targetAgent, uint256 amount) public override noReentrant onlyContract {
     (bool success, ) = CORE_AGENT_ADDR.call(abi.encodeWithSignature("proxyTransfer(address,address,address,uint256)", sourceAgent, targetAgent, msg.sender, amount));
     require (success, "call CORE_AGENT_ADDR.proxyTransfer() failed");
   }
@@ -202,53 +205,22 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// Claim rewards for delegator
   /// @return (Amount claimed, Are all rewards claimed)
   function claimReward(address[] calldata) external override noReentrant returns (uint256, bool) {
-    uint256 rewardSum = rewardMap[msg.sender];
-
-    (bool success, bytes memory data) = STAKE_HUB_ADDR.call(abi.encodeWithSignature("proxyClaimReward(address)", msg.sender));
-    require (success, "call STAKE_HUB_ADDR.proxyClaimReward() failed");
-    uint256 proxyRewardSum =  abi.decode(data, (uint256));
-
-    if (proxyRewardSum != 0) {
-      rewardMap[msg.sender] += proxyRewardSum;
-    }
-
-    _distributeReward(msg.sender);
-
-    return (rewardSum + proxyRewardSum, true);
-  }
-
-  /*********************** Internal methods ***************************/
-  /// send rewards to delegator and clear the record in rewardMap
-  /// @param delegator the delegator address
-  function _distributeReward(address delegator) internal {
+    address delegator = msg.sender;
     uint256 reward = rewardMap[delegator];
     if (reward != 0) {
       rewardMap[delegator] = 0;
-      Address.sendValue(payable(delegator), reward);
-      emit claimedReward(delegator, msg.sender, reward, true);
     }
-  }
 
-  /*********************** Governance ********************************/
-  /// Update parameters through governance vote
-  /// @param key The name of the parameter
-  /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
-    if (value.length != 32) {
-      revert MismatchParamLength(key);
+    (bool success, bytes memory data) = STAKE_HUB_ADDR.call(abi.encodeWithSignature("proxyClaimReward(address)", delegator));
+    require (success, "call STAKE_HUB_ADDR.proxyClaimReward() failed");
+    uint256 proxyRewardSum =  abi.decode(data, (uint256));
+    reward += proxyRewardSum;
+    if (reward != 0) {
+      Address.sendValue(payable(delegator), reward);
+      emit claimedReward(delegator, delegator, reward, true);
     }
-    if (Memory.compareStrings(key, "clearDeprecatedMembers")) {
-      requiredCoinDeposit = 0;
-      powerFactor = 0;
-      btcFactor = 0;
-      minBtcLockRound = 0;
-      btcConfirmBlock = 0;
-      minBtcValue = 0;
-      delegateBtcGasPrice = 0;
-    } else {
-      revert UnsupportedGovParam(key);
-    }
-    emit paramChange(key, value);
+
+    return (reward, true);
   }
 
   /*********************** Public view ********************************/
@@ -257,7 +229,6 @@ contract PledgeAgent is IPledgeAgent, System, IParamSubscriber {
   /// @param delegator The delegator address
   /// @return cd CoinDelegator Information of the delegator
   function getDelegator(address agent, address delegator) external view returns (CoinDelegator memory cd) {
-      cd = agentsMap[agent].cDelegatorMap[delegator];
       (bool success, bytes memory result) = CORE_AGENT_ADDR.staticcall(abi.encodeWithSignature("getDelegator(address,address)", agent, delegator));
       require (success, "call CORE_AGENT_ADDR.getDelegator() failed");
       (uint256 stakedAmount, uint256 realtimeAmount, uint256 transferredAmount, uint256 changeRound) = abi.decode(result, (uint256,uint256,uint256,uint256));

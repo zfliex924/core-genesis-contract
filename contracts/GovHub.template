@@ -264,7 +264,7 @@ contract GovHub is System, IParamSubscriber {
 
   /// Add a member
   /// @param member The new member address
-  function addMember(address member) external onlyInit onlyGov {
+  function addMember(address member) external onlyInit onlyCaller(GOV_HUB_ADDR) {
     require(members[member] == 0, "member already exists");
     memberSet.push(member);
     members[member] = memberSet.length;
@@ -273,7 +273,7 @@ contract GovHub is System, IParamSubscriber {
 
   /// Remove a member
   /// @param member The address of the member to remove
-  function removeMember(address member) external onlyInit onlyGov {
+  function removeMember(address member) external onlyInit onlyCaller(GOV_HUB_ADDR) {
     require(memberSet.length > 5, "at least five members in DAO");
     uint256 index = members[member];
     require(index != 0, "member does not exist");
@@ -296,7 +296,7 @@ contract GovHub is System, IParamSubscriber {
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }

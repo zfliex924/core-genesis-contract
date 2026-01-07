@@ -6,6 +6,7 @@ import "./lib/BytesToTypes.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./interface/ILightClient.sol";
 import "./interface/ICandidateHub.sol";
+import "./interface/IRelayerHub.sol";
 import "./interface/ISystemReward.sol";
 import "./interface/IParamSubscriber.sol";
 import "./System.sol";
@@ -73,6 +74,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     address[] candidates;
     // Key is candidate address
     mapping(address => CandidatePower) powerMap;
+    uint256 blockCount;
   }
   mapping(uint256 => RoundPower) roundPowerMap;
 
@@ -87,6 +89,11 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   uint256 public storeBlockGasPrice;
 
   mapping(uint32 => bytes32) public height2HashMap;
+
+  modifier onlyRelayer() {
+    require(IRelayerHub(RELAYER_HUB_ADDR).isRelayer(msg.sender), "the msg sender is not a relayer");
+    _;
+  }
 
   /*********************** events **************************/
   event StoreHeaderFailed(bytes32 indexed blockHash, int256 indexed returnCode);
@@ -241,16 +248,19 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     // and there is no need to continue staking, otherwise it may disrupt the reward 
     // distribution mechanism
     uint256 frozenRoundTag = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag() - POWER_ROUND_GAP;
-    if (candidate != address(0) && blockRoundTag > frozenRoundTag) {
-      address miner = getRewardAddress(blockHash);
+    if (blockRoundTag > frozenRoundTag) {
       RoundPower storage r = roundPowerMap[blockRoundTag];
-      uint256 power = r.powerMap[candidate].miners.length;
-      if (power == 0) {
-        r.candidates.push(candidate);
+      r.blockCount ++;
+      if (candidate != address(0)) {
+        address miner = getRewardAddress(blockHash);
+        uint256 power = r.powerMap[candidate].miners.length;
+        if (power == 0) {
+          r.candidates.push(candidate);
+        }
+        r.powerMap[candidate].miners.push(miner);
+        r.powerMap[candidate].btcBlocks.push(blockHash);
+        emit AddMinerPower(blockHash, candidate, miner);
       }
-      r.powerMap[candidate].miners.push(miner);
-      r.powerMap[candidate].btcBlocks.push(blockHash);
-      emit AddMinerPower(blockHash, candidate, miner);
     }
   }
 
@@ -654,7 +664,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov{
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }
@@ -726,6 +736,9 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     for (uint256 i = 0; i < count; ++i){
       powers[i] = r.powerMap[candidates[i]].miners.length;
       totalPower += powers[i];
+    }
+    if (r.blockCount > totalPower) {
+      totalPower = r.blockCount;
     }
     return (powers, totalPower);
   }

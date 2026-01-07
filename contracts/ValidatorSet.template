@@ -39,9 +39,14 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
 
   uint256 public voteRewardPercent;
 
+  // Base value used for validator selection weight calculation.
+  uint256 public weightBase;
+
   uint256 public maintainSlashPercent;
 
   uint256 public validatorCount;
+
+  // it is only used to store the verifier results during the election, and has no other purpose
   address[] public rankedValidatorList;
 
   uint256 public turnLength;
@@ -318,7 +323,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     _enterMaintenance(currentValidatorSet[index-1].consensusAddress);
   }
 
-  function enterMaintenance(address val) external override onlySlash {
+  function enterMaintenance(address val) external override onlyCaller(SLASH_CONTRACT_ADDR) {
     uint256 index = currentValidatorSetMap[val];
     if (index == 0) {
       return;
@@ -363,32 +368,19 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   /// Get list of validators and list of voting addressess in the current round
   /// @return (List of validator consensus addresses, List of voting addresses)
   function getValidatorsAndVoteAddresses() external override view returns (address[] memory, bytes[] memory) {
-    uint256 validatorSize = currentValidatorSet.length;
     uint256 workingRankedValidatorLen;
     address[] memory workingRankedValidatorList;
-    if (validatorCount == 0) {
-      workingRankedValidatorList = getWorkingValidators();
-      workingRankedValidatorLen = workingRankedValidatorList.length;
-      validatorSize = workingRankedValidatorLen;
-    } else {
-      uint256 len = rankedValidatorList.length;
-      for (uint256 i = 0; i < len; ++i) {
-        uint256 index = currentValidatorSetMap[rankedValidatorList[i]];
-        if (index != 0 && exMap[rankedValidatorList[i]].enterMaintenanceHeight == 0) {
-          ++workingRankedValidatorLen;
-        }
+    
+    uint256 len = currentValidatorSet.length;
+    workingRankedValidatorList = new address[](len);
+    for (uint256 i = 0; i < len; ++i) {
+      address consensusAddress = currentValidatorSet[i].consensusAddress;
+      if (exMap[consensusAddress].enterMaintenanceHeight == 0) {
+        workingRankedValidatorList[workingRankedValidatorLen++] = consensusAddress;
       }
-      workingRankedValidatorList = new address[](workingRankedValidatorLen);
-      uint256 j = 0;
-      for (uint256 i = 0; i < len; ++i) {
-        uint256 index = currentValidatorSetMap[rankedValidatorList[i]];
-        if (index != 0 && exMap[rankedValidatorList[i]].enterMaintenanceHeight == 0) {
-          workingRankedValidatorList[j++] = currentValidatorSet[index-1].consensusAddress;
-        }
-      }
-      validatorSize = validatorCount;
     }
 
+    uint256 validatorSize = validatorCount == 0 ? workingRankedValidatorLen : validatorCount;
     if (validatorSize > workingRankedValidatorLen) {
       validatorSize = workingRankedValidatorLen;
     }
@@ -396,14 +388,42 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     address[] memory consensusAddrs = new address[](validatorSize);
     bytes[] memory voteAddrs = new bytes[](validatorSize);
 
-    uint256 pushedCount;
-    address consensusAddress;
-    for (uint256 i; pushedCount < validatorSize && i < workingRankedValidatorLen; ++i) {
-      uint256 index = currentValidatorSetMap[workingRankedValidatorList[i]];
-      consensusAddress = currentValidatorSet[index-1].consensusAddress;
-      consensusAddrs[pushedCount] = consensusAddress;
-      voteAddrs[pushedCount] = exMap[consensusAddress].voteAddr;
-      ++pushedCount;
+    uint256[] memory weightList = new uint256[](workingRankedValidatorLen);
+    uint256 weightSum = 0;
+    uint256 base = weightBase;
+    for (uint256 i = 0; i < workingRankedValidatorLen; ++i) {
+      uint256 commission = currentValidatorSet[currentValidatorSetMap[workingRankedValidatorList[i]]-1].commissionThousandths / 10;
+      uint256 weight = base <= commission ? 1 : base - commission;
+      weightList[i] = weight;
+      weightSum += weight;
+    }
+
+    // randomly sample `validatorSize` validators from `workingRankedValidatorList` with weighted probability.
+    uint256 entropy = block.number / 200;
+    for (uint256 i = 0; i < validatorSize; ++i) {
+      // derive next random value from block number
+      uint256 rand = uint256(keccak256(abi.encodePacked(entropy, i))) % weightSum;
+
+      uint256 accWeight = 0;
+      uint256 j = i;
+      for (; j < workingRankedValidatorLen; ++j) {
+        accWeight += weightList[j];
+        if (rand < accWeight) {
+          break;
+        }
+      }
+
+      address consensusAddress = workingRankedValidatorList[j];
+      workingRankedValidatorList[j] = workingRankedValidatorList[i];
+      workingRankedValidatorList[i] = consensusAddress;
+
+      uint256 w = weightList[j];
+      weightList[j] = weightList[i];
+      weightList[i] = w;
+      weightSum -= w;
+
+      consensusAddrs[i] = consensusAddress;
+      voteAddrs[i] = exMap[consensusAddress].voteAddr;
     }
 
     return (consensusAddrs, voteAddrs);
@@ -462,7 +482,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   /*********************** For slash **************************/
   /// Slash the validator for misdemeanor behaviors
   /// @param validator The validator to slash
-  function misdemeanor(address validator) external override onlySlash {
+  function misdemeanor(address validator) external override onlyCaller(SLASH_CONTRACT_ADDR) {
     uint256 index = currentValidatorSetMap[validator];
     if (index == 0) {
       return;
@@ -494,7 +514,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   /// @param validator The validator to slash
   /// @param felonyRound The number of rounds to jail
   /// @param felonyDeposit The amount of deposits to slash
-  function felony(address validator, uint256 felonyRound, uint256 felonyDeposit) external override onlySlash {
+  function felony(address validator, uint256 felonyRound, uint256 felonyDeposit) external override onlyCaller(SLASH_CONTRACT_ADDR) {
     uint256 index = currentValidatorSetMap[validator];
     if (index == 0) {
       return;
@@ -533,7 +553,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }
@@ -549,6 +569,12 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
         revert OutOfBounds(key, newVoteRewardPercent, 0, 100);
       }
       voteRewardPercent = newVoteRewardPercent;
+    } else if (Memory.compareStrings(key, "weightBase")) {
+      uint256 newWeightBase = BytesToTypes.bytesToUint256(32, value);
+      if (newWeightBase > 1e5) {
+        revert OutOfBounds(key, newWeightBase, 0, 1e5);
+      }
+      weightBase = newWeightBase;
     } else if (Memory.compareStrings(key, "maintainSlashPercent")) {
       uint256 newMaintainSlashPercent = BytesToTypes.bytesToUint256(32, value);
       if (newMaintainSlashPercent > 100) {

@@ -20,4 +20,9 @@ library SatoshiPlusHelper {
   // (hrp) followed by '1'. For Bitcoin mainnet the hrp is "bc"(0x6263), and for
   // testnet it is "tb"(0x7462).
   uint256 public constant BECH32_HRP_SEGWIT = 0x6263;
+
+  uint256 public constant STAKE_WEIGHT_PER_ROUND = 10;
+  uint256 public constant STAKE_WEIGHT_UPPER_BOUND = 12000;
+  uint256 public constant AVG_STAKE_WEIGHT_UPPER_BOUND = 11000;
+  uint256 public constant STAKE_WEIGHT_ROUND_MAX = 200;
 }

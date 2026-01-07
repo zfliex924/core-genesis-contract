@@ -113,7 +113,7 @@ contract Channel is IChannel, System, IParamSubscriber {
   /// @param partner the channel partner
   /// @return commission the Amount of commission
   /// @return feeAddress the fee address
-  function resetCommission(address partner) external override onlyCaller(STAKE_HUB_ADDR) returns (uint256 commission, address feeAddress) {
+  function resetCommission(address partner) external override onlyStakeHub returns (uint256 commission, address feeAddress) {
     uint32 id = partnerIdMap[partner];
     if (id != 0 && partners[id].status != 0) {
       feeAddress = partners[id].feeAddress;

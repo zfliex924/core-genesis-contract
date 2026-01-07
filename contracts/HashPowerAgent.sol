@@ -4,6 +4,7 @@ pragma solidity 0.8.4;
 import "./interface/IAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/ILightClient.sol";
+import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 
 /// This contract handles Bitcoin hash power staking (measured in BTC blocks).
@@ -15,6 +16,10 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   // value: amount of CORE tokens claimable
   mapping(address => Reward) public rewardMap;
 
+  // The number of staked blocks & total blocks.
+  uint256 stakedRoundAmount;
+  uint256 totalRoundAmount;
+
   /*********************** events **************************/
   event claimedHashReward(address indexed delegator, uint256 amount);
   event validatorAvgReward(address indexed validator, uint256 avgReward);
@@ -22,7 +27,9 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
   struct Reward {
     uint256 reward;
-    uint256 accStakedAmount;
+    uint256 accStakedAmount; // TODO remove this field.
+    uint256 round;
+    uint256 stakeWeight;
   }
 
   /*********************** Init ********************************/
@@ -35,15 +42,19 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
   /// @param round The round tag
-  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external override onlyStakeHub {
-    uint256 validatorSize = validators.length;
-    require(validatorSize == rewardList.length, "the length of validatorList and rewardList should be equal");
+  /// @param stakeWeight the weight of stake asset
+  /// @return destoryAmount the amount of destory reward
+  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round, uint256 stakeWeight) external override onlyStakeHub returns (uint256 destoryAmount) {
+    require(validators.length == rewardList.length, "the length of validatorList and rewardList should be equal");
 
     // fetch BTC miners who delegated hash power in the about to end round; 
     // and distribute rewards to them
     uint256 minerSize;
     uint256 avgReward;
-    for (uint256 i = 0; i < validatorSize; ++i) {
+    uint256 totalReward;
+    uint256 distributedReward;
+    for (uint256 i = 0; i < validators.length; ++i) {
+      totalReward += rewardList[i];
       if (rewardList[i] == 0) {
         continue;
       }
@@ -51,56 +62,90 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
       // distribute rewards to every miner
       minerSize = miners.length;
       if (minerSize != 0) {
-        avgReward = rewardList[i] / minerSize;
+        avgReward = rewardList[i] / minerSize * SatoshiPlusHelper.DENOMINATOR / stakeWeight;
+        if (totalRoundAmount != 0) {
+          avgReward = avgReward * stakedRoundAmount / totalRoundAmount;
+        }
         for (uint256 j = 0; j < minerSize; ++j) {
-          rewardMap[miners[j]].reward += avgReward;
+          Reward storage r = rewardMap[miners[j]];
+          uint256 tempReward = avgReward;
+          if (r.stakeWeight != 0) {
+            if (r.round < round) {
+              uint256 weight = r.stakeWeight + SatoshiPlusHelper.STAKE_WEIGHT_PER_ROUND;
+              if (weight > SatoshiPlusHelper.STAKE_WEIGHT_UPPER_BOUND) {
+                weight = SatoshiPlusHelper.STAKE_WEIGHT_UPPER_BOUND;
+              }
+              r.stakeWeight = weight;
+              r.round = round;
+            }
+            tempReward = avgReward * r.stakeWeight / SatoshiPlusHelper.DENOMINATOR;
+          }
+          distributedReward += tempReward;
+          rewardMap[miners[j]].reward += tempReward;
         }
         emit validatorAvgReward(validators[i], avgReward);
       }
     }
+    destoryAmount = totalReward - distributedReward;
   }
 
   /// Get staked BTC hash value
   /// @param candidates List of candidate operator addresses
-  /// @param roundTag The new round tag
+  /// @param round The new round tag
   /// @return amounts List of staked BTC hash values on all candidates in the round
   /// @return totalAmount Total staked BTC hash values on all candidates in the round
-  function getStakeAmounts(address[] calldata candidates, uint256 roundTag) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
+  function getStakeAmounts(address[] calldata candidates, uint256 round) external override onlyStakeHub returns (uint256[] memory amounts, uint256 totalAmount) {
     // fetch hash power delegated on list of candidates
     // which is used to calculate hybrid score for validators in the new round
-    (amounts, totalAmount) = ILightClient(LIGHT_CLIENT_ADDR).getRoundPowers(roundTag-2, candidates);
+    (amounts, totalRoundAmount) = ILightClient(LIGHT_CLIENT_ADDR).getRoundPowers(round-2, candidates);
+    for (uint256 i = amounts.length; i != 0; --i) {
+      totalAmount += amounts[i-1];
+    }
+    if (totalRoundAmount < totalAmount) {
+      totalRoundAmount = totalAmount;
+    }
   }
 
   /// Start new round, this is called by the StakeHub contract
   /// @param validators List of elected validators in this round
   /// @param round The new round tag
   function setNewRound(address[] calldata validators, uint256 round) external override onlyStakeHub {
-
   }
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
-  /// @param claim claim or store claim
   /// @return reward Amount claimed
-  /// @return floatReward floating reward amount
-  function claimReward(address delegator, uint256 /*coreAmount*/, uint256 /*settleRound*/, bool claim) external override onlyStakeHub returns (uint256 reward, int256 floatReward) {
+  function claimReward(address delegator, bytes32[] memory /*txIds*/) external override onlyStakeHub returns (uint256 reward) {
     reward = rewardMap[delegator].reward;
     if (reward != 0) {
-      delete rewardMap[delegator];
-      if (claim) {
-        emit claimedHashReward(delegator, reward);
+      if (rewardMap[delegator].stakeWeight == 0) {
+        delete rewardMap[delegator];
       } else {
-        emit storedHashReward(delegator, reward);
+        rewardMap[delegator].stakeWeight = SatoshiPlusHelper.DENOMINATOR - SatoshiPlusHelper.STAKE_WEIGHT_PER_ROUND;
+        delete rewardMap[delegator].reward;
       }
+      emit claimedHashReward(delegator, reward);
     }
-    return (reward, 0);
+  }
+
+  /// Enable stake weight.
+  /// @param delegator the delegator address
+  function enableStakeWeight(address delegator) external override onlyStakeHub {
+    rewardMap[delegator].stakeWeight = SatoshiPlusHelper.DENOMINATOR - SatoshiPlusHelper.STAKE_WEIGHT_PER_ROUND;
+  }
+
+  /// Disable stake weight.
+  /// @param delegator the delegator address
+  function disableStakeWeight(address delegator) external override onlyStakeHub {
+    rewardMap[delegator].stakeWeight = 0;
+    rewardMap[delegator].round = 0;
   }
 
   /*********************** Governance ********************************/
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov view {
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) view {
     revert UnsupportedGovParam(key);
   }
 }

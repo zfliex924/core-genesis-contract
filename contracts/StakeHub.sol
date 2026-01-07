@@ -9,6 +9,7 @@ import "./interface/IBitcoinStake.sol";
 import "./interface/IValidatorSet.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/IChannel.sol";
+import "./interface/IBtcAgent.sol";
 import "./interface/ICoreAgent.sol";
 import "./System.sol";
 import "./lib/Address.sol";
@@ -24,6 +25,12 @@ import "./lib/SafeCast.sol";
 contract StakeHub is IStakeHub, System, IParamSubscriber {
   using BytesLib for *;
   using SafeCast for *;
+
+  uint32 public constant FLAG_STAKE_WEIGHT = 1;
+  uint32 public constant FLAG_STAKE_CORE = 2;
+  uint32 public constant FLAG_STAKE_HASHPOWER = 4;
+  uint32 public constant FLAG_STAKE_BTC = 8;
+  uint32 public constant FLAG_STAKE_ALL = FLAG_STAKE_CORE|FLAG_STAKE_HASHPOWER|FLAG_STAKE_BTC;
 
   // Supported asset types
   //  - CORE
@@ -55,6 +62,10 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   // value:  delegator's reward based on assert
   mapping(address => Delegator) public delegatorMap;
 
+  // The count of stake weight rounds
+  // It is initialized to 1.
+  uint256 public stakeWeight;
+
   struct Asset {
     string  name;
     address agent;
@@ -69,6 +80,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   struct Delegator {
     uint256 changeRound;
     uint256[] rewards;
+    uint256 flag;
   }
 
   /*********************** events **************************/
@@ -76,6 +88,8 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   event claimedReward(address indexed delegator, uint256[] amounts);
   event claimedRelayerReward(address indexed relayer, uint256 amount);
   event received(address indexed from, uint256 amount);
+  event StakeWeightEnable(address indexed delegator);
+  event StakeWeightDisable(address indexed delegator);
 
   modifier onlyPledgeAgent() {
     require(msg.sender == PLEDGE_AGENT_ADDR, "the sender must be pledge agent contract");
@@ -134,7 +148,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     address[] calldata validators,
     uint256[] calldata rewardList,
     uint256 roundTag
-  ) external payable override onlyValidator
+  ) external payable override onlyCaller(VALIDATOR_CONTRACT_ADDR)
   {
     uint256 validatorSize = validators.length;
     require(validatorSize == rewardList.length, "the length of validators and rewardList should be equal");
@@ -142,6 +156,10 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
     uint256 burnReward;
     uint256 assetSize = assets.length;
+
+    if (stakeWeight == 0) {
+      stakeWeight = SatoshiPlusHelper.DENOMINATOR;
+    }
     for (uint256 i = 0; i < assetSize; ++i) {
       for (uint256 j = 0; j < validatorSize; ++ j) {
         address validator = validators[j];
@@ -157,11 +175,15 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         rewards[j] = rewardList[j] * candidateScoresMap[validator][i+1] / totalScore;
       }
       emit roundReward(assets[i].name, roundTag, validators, rewards);
-      IAgent(assets[i].agent).distributeReward(validators, rewards, roundTag);
+      burnReward += IAgent(assets[i].agent).distributeReward(validators, rewards, roundTag, stakeWeight);
     }
     // burn rewards after initial setup, should reach only if running a new chain from genesis
     if (burnReward != 0) {
       ISystemReward(SYSTEM_REWARD_ADDR).receiveRewards{ value: burnReward }();
+    }
+    uint256 weight = stakeWeight + SatoshiPlusHelper.STAKE_WEIGHT_PER_ROUND;
+    if (weight <= SatoshiPlusHelper.STAKE_WEIGHT_UPPER_BOUND) {
+      stakeWeight = weight;
     }
   }
 
@@ -176,7 +198,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     address[] calldata candidates,
     uint256 round
   ) external override onlyCandidate returns (uint256[] memory scores) {
-    IBitcoinStake(BTC_STAKE_ADDR).prepare(round);
     uint256 candidateSize = candidates.length;
     uint256 assetSize = assets.length;
 
@@ -228,25 +249,58 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// Claim reward for delegator
   /// @return rewards Amounts claimed
   function claimReward() external returns (uint256[] memory rewards) {
-    address delegator = msg.sender;
-    rewards = _calculateReward(delegator, true);
+    bytes32[] memory emptyIds;
+    (rewards,) = _claimReward(msg.sender, FLAG_STAKE_ALL, emptyIds);
+  }
 
-    Delegator storage d  = delegatorMap[delegator];
-    for (uint256 i = 0; i < d.rewards.length; i++) {
-      rewards[i] += d.rewards[i];
-    }
-    uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
-    if (d.changeRound != currentRound) {
-      d.changeRound = currentRound;
-    }
-    delete delegatorMap[delegator].rewards;
+  /// Claim Core reward for delegator
+  /// @param txIds the given id list to claim. If the list is empty, it means all.
+  /// @return reward Amounts claimed
+  function claimCoreReward(bytes32[] memory txIds) public returns (uint256 reward) {
+    (, reward) = _claimReward(msg.sender, FLAG_STAKE_CORE, txIds);
+  }
 
-    uint256 reward;
+  /// Claim hash power reward for delegator
+  /// @return reward Amounts claimed
+  function claimHashReward() public returns (uint256 reward) {
+    bytes32[] memory emptyIds;
+    (, reward) = _claimReward(msg.sender, FLAG_STAKE_HASHPOWER, emptyIds);
+  }
+
+  /// Claim btc reward for delegator
+  /// @param txIds the given id list to claim. If the list is empty, it means all.
+  /// @return reward Amounts claimed
+  function claimBtcReward(bytes32[] memory txIds) public returns (uint256 reward) {
+    (, reward) = _claimReward(msg.sender, FLAG_STAKE_BTC, txIds);
+  }
+
+  function _claimReward(address delegator, uint256 flag, bytes32[] memory txIds) internal returns (uint256[] memory rewards, uint256 totalReward) {
+    rewards = new uint256[](3);
+    _calculateReward(delegator);
+
+    if (FLAG_STAKE_CORE == (flag & FLAG_STAKE_CORE)) {
+      rewards[0] = IAgent(assets[0].agent).claimReward(delegator, txIds);
+    }
+    if (FLAG_STAKE_HASHPOWER == (flag & FLAG_STAKE_HASHPOWER)) {
+      rewards[1] = IAgent(assets[1].agent).claimReward(delegator, txIds);
+    }
+    if (FLAG_STAKE_BTC == (flag & FLAG_STAKE_BTC)) {
+      rewards[2] = IAgent(assets[2].agent).claimReward(delegator, txIds);
+    }
+
+    Delegator storage d = delegatorMap[delegator];
+    if (d.rewards.length != 0) {
+      for (uint256 i = 0; i < d.rewards.length; i++) {
+        rewards[i] += d.rewards[i];
+      }
+      delete delegatorMap[delegator].rewards;
+    }
+
     for (uint256 i = 0; i < rewards.length; i++) {
-      reward += rewards[i];
+      totalReward += rewards[i];
     }
-    if (reward != 0) {
-      Address.sendValue(payable(delegator), reward);
+    if (totalReward != 0) {
+      Address.sendValue(payable(msg.sender), totalReward);
       emit claimedReward(delegator, rewards);
     }
   }
@@ -255,76 +309,107 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// @param delegator delegator address
   /// @return reward Amounts claimed
   function proxyClaimReward(address delegator) external onlyPledgeAgent returns (uint256 reward) {
-    uint256[] memory rewards = _calculateReward(delegator, true);
-
-    Delegator storage d  = delegatorMap[delegator];
-    for (uint256 i = 0; i < d.rewards.length; i++) {
-      rewards[i] += d.rewards[i];
-    }
-    uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
-    if (d.changeRound != currentRound) {
-      d.changeRound = currentRound;
-    }
-    delete delegatorMap[delegator].rewards;
-
-
-    for (uint256 i = 0; i < rewards.length; i++) {
-      reward += rewards[i];
-    }
-    if (reward != 0) {
-      Address.sendValue(payable(PLEDGE_AGENT_ADDR), reward);
-    }
+    bytes32[] memory emptyIds;
+    (, reward) = _claimReward(delegator, FLAG_STAKE_ALL, emptyIds);
   }
 
   /// This method is invoked whenever user CORE/BTC stake changes.
   /// @param delegator delegator address
   function onStakeChange(address delegator) override external {
-    calculateReward(delegator);
+    if (msg.sender == CORE_AGENT_ADDR) {
+      setFlag(delegator, FLAG_STAKE_CORE);
+      calculateReward(delegator);
+    } else if (msg.sender == BTC_STAKE_ADDR) {
+      setFlag(delegator, FLAG_STAKE_BTC);
+      calculateReward(delegator);
+    } else if (msg.sender == HASH_AGENT_ADDR) {
+      setFlag(delegator, FLAG_STAKE_HASHPOWER);
+    } else {
+      setFlag(delegator, FLAG_STAKE_CORE | FLAG_STAKE_BTC| FLAG_STAKE_HASHPOWER);
+      calculateReward(delegator);
+    }
+  }
+
+  function setFlag(address delegator, uint256 flag) internal {
+    uint256 dflag = delegatorMap[delegator].flag;
+    if ((dflag & flag) != flag) {
+      delegatorMap[delegator].flag = (dflag | flag);
+    }
   }
 
   // Calculate reward for delegator.
   /// @param delegator delegator address
   function calculateReward(address delegator) public {
+    _calculateReward(delegator);
+  }
+
+  // Set stake weight
+  function setStakeWeight() external {
+    address delegator = msg.sender;
     Delegator storage d = delegatorMap[delegator];
-    uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
-    if (d.changeRound != currentRound) {
-      uint256[] memory rewards = _calculateReward(delegator, false);
-      for (uint256 i = 0; i < rewards.length; i++) {
-        if (d.rewards.length == i) {
-          d.rewards.push(rewards[i]);
-        } else {
-          d.rewards[i] += rewards[i];
-        }
-      }
-      d.changeRound = currentRound;
+    require((d.flag & FLAG_STAKE_WEIGHT) == 0, "already stake weight");
+
+    // calculate reward for the delegator
+    calculateReward(delegator);
+
+    // Enable stake weight
+    for (uint256 i = 0; i < assets.length; i++) {
+      IAgent(assets[i].agent).enableStakeWeight(delegator);
     }
+
+    d.flag = (d.flag | FLAG_STAKE_WEIGHT);
+    emit StakeWeightEnable(delegator);
+  }
+
+  // Cancel stake weight
+  function cancelStakeWeight() external {
+    address delegator = msg.sender;
+    Delegator storage d = delegatorMap[delegator];
+    require((d.flag & FLAG_STAKE_WEIGHT)== 1, "not stake weight");
+
+    // Calculate stake weight reward for the delegator
+    calculateReward(delegator);
+
+    // Disable stake weight
+    for (uint256 i = 0; i < assets.length; i++) {
+      IAgent(assets[i].agent).disableStakeWeight(delegator);
+    }
+
+    d.flag -= FLAG_STAKE_WEIGHT;
+    emit StakeWeightDisable(delegator);
+  }
+
+  // Check if delegator is stake weight
+  // @param delegator the delegator
+  // @return whether the delegator's stakeweight flag is enable or not
+  function isStakeWeight(address delegator) override public view returns(bool) {
+    return (delegatorMap[delegator].flag & FLAG_STAKE_WEIGHT) == FLAG_STAKE_WEIGHT;
   }
 
   /// Calculate reward for delegator
   /// @param delegator delegator address
-  /// @param claim claim or store claim
-  /// @return rewards Amounts claimed
-  function _calculateReward(address delegator, bool claim) internal returns (uint256[] memory rewards) {
-    uint256 lastRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag() - 1;
+  function _calculateReward(address delegator) internal {
     Delegator storage d = delegatorMap[delegator];
+    uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
+    if (d.changeRound != currentRound) {
+      return;
+    }
+    uint256 lastRound = currentRound - 1;
 
-    uint256 assetSize = assets.length;
-    rewards = new uint256[](assetSize);
     int256 totalFloatReward;
     uint256 stakedCoreAmount1;
     uint256 stakedCoreAmount2;
-    (rewards[0], stakedCoreAmount1, stakedCoreAmount2) = ICoreAgent(assets[0].agent).claimReward(delegator, claim);
-
-    (rewards[1],) = IAgent(assets[1].agent).claimReward(delegator, 0, lastRound, claim);
+    bool _isStakeWeight = isStakeWeight(delegator);
+    (stakedCoreAmount1, stakedCoreAmount2) = ICoreAgent(assets[0].agent).liquidationReward(_isStakeWeight, delegator, d.changeRound);
 
     if (stakedCoreAmount1 != stakedCoreAmount2) {
-      (rewards[2], totalFloatReward) = IAgent(assets[2].agent).claimReward(delegator, stakedCoreAmount1, d.changeRound, claim);
+      totalFloatReward = IBtcAgent(assets[2].agent).liquidationReward(_isStakeWeight, delegator, stakedCoreAmount1, d.changeRound);
     }
     if (d.changeRound < lastRound || stakedCoreAmount1 == stakedCoreAmount2) {
-      (uint256 reward, int256 floatReward) = IAgent(assets[2].agent).claimReward(delegator, stakedCoreAmount2, lastRound, claim);
-      rewards[2] += reward;
+      int256 floatReward = IBtcAgent(assets[2].agent).liquidationReward(_isStakeWeight, delegator, stakedCoreAmount2, lastRound);
       totalFloatReward += floatReward;
     }
+    d.changeRound = currentRound;
 
     if (totalFloatReward > surplus.toInt256()) {
       uint256 claimAmount = totalFloatReward.toUint256() - surplus;
@@ -345,7 +430,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }

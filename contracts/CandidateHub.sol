@@ -22,6 +22,8 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   uint256 public constant INIT_VALIDATOR_COUNT = 21;
   uint256 public constant MAX_COMMISSION_CHANGE = 10;
   uint256 public constant CANDIDATE_COUNT_LIMIT = 1000;
+  uint256 public constant MAX_NODEIDS_LIMIT = 100;
+  uint256 public constant INIT_MAX_NODEIDS = 5;
 
   uint256 public constant SET_CANDIDATE = 1;
   uint256 public constant SET_INACTIVE = 2;
@@ -66,6 +68,11 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   // Key is operate address.
   // Value is CandidateEx
   mapping(address => CandidateEx) public exMap;
+  // Use INIT_MAX_NODEIDS as the default when maxNodeIDs == 0.
+  uint256 public maxNodeIDs;
+  // Key is operate address.
+  // Value is nodeIDs list.
+  mapping(address => bytes32[]) public nodeIDsMap;
   
   struct Candidate {
     address operateAddr;
@@ -101,6 +108,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   event CommissionRateEdited(address indexed operateAddr, uint256 newRate);
   event VoteAddressEdited(address indexed operateAddr, bytes newVoteAddr);
   event FeeAddressEdited(address indexed operateAddr, address newFeeAddr);
+  event NodeIDsEdited(address indexed operateAddr, bytes32[] nodeIDs);
 
   /*********************** init **************************/
   function init() external onlyNotInit {
@@ -148,7 +156,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   /// @param operateAddress The operator address of the validator
   /// @param round The number of rounds to jail
   /// @param fine The amount of deposits to slash
-  function jailValidator(address operateAddress, uint256 round, uint256 fine) external override onlyValidator {
+  function jailValidator(address operateAddress, uint256 round, uint256 fine) external override onlyCaller(VALIDATOR_CONTRACT_ADDR) {
     uint256 index = operateMap[operateAddress];
     if (index == 0) return;
 
@@ -220,8 +228,8 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     // choose top ones to form the validator set of the new round
     (uint256[] memory scores) =
       IStakeHub(STAKE_HUB_ADDR).getHybridScore(candidates, roundTag);
-    uint256 sortedCount = getAlternateCount(maxAlternateCount, validatorCount, candidates.length);
-    address[] memory validatorList = getValidators(candidates, scores, validatorCount + sortedCount, sortedCount);
+    
+    address[] memory validatorList = getValidators(candidates, scores, maxAlternateCount + validatorCount);
 
     // prepare arguments, and notify ValidatorSet contract
     address[] memory consensusAddrList = new address[](validatorList.length);
@@ -408,6 +416,25 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     emit FeeAddressEdited(c.operateAddr, newFeeAddr);
   }
 
+  function updateNodeIDs(bytes32[] calldata nodeIDs) external onlyInit {
+    Candidate storage c = getCandidate();
+    uint256 len = nodeIDs.length;
+    require(len <= _effectiveMaxNodeIDs(), "too many nodeIDs");
+    for (uint256 i = 0; i < len; i++) {
+      bytes32 nodeID = nodeIDs[i];
+      require(nodeID != bytes32(0), "nodeID cannot be zero");
+      for (uint256 j = 0; j < i; j++) {
+        require(nodeIDs[j] != nodeID, "duplicate nodeID");
+      }
+    }
+
+    delete nodeIDsMap[c.operateAddr];
+    for (uint256 i = 0; i < len; i++) {
+      nodeIDsMap[c.operateAddr].push(nodeIDs[i]);
+    }
+    emit NodeIDsEdited(c.operateAddr, nodeIDs);
+  }
+
   /// Refuse to accept delegate from others
   /// @dev Candidate will not be elected in this state
   function refuseDelegate() external onlyInit onlyOperator {
@@ -453,6 +480,11 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       return candidateSet[index - 1];
   }
 
+  function _effectiveMaxNodeIDs() internal view returns (uint256) {
+    uint256 v = maxNodeIDs;
+    return v == 0 ? INIT_MAX_NODEIDS : v;
+  }
+
   function changeStatus(Candidate storage c, uint256 newStatus) internal {
     uint256 oldStatus = c.status;
     if (oldStatus != newStatus) {
@@ -473,6 +505,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     delete operateMap[c.operateAddr];
     delete consensusMap[c.consensusAddr];
     delete exMap[c.operateAddr];
+    delete nodeIDsMap[c.operateAddr];
 
     if (index != candidateSet.length) {
       candidateSet[index-1] = candidateSet[candidateSet.length - 1];
@@ -486,8 +519,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   }
 
   /// Rank validator candidates on hybrid score using quicksort
-  function getValidators(address[] memory candidateList, uint256[] memory scoreList, uint256 count, uint256 sortedCount) internal pure returns (address[] memory validatorList){
-    require(count > sortedCount, "count should be greater than sortedCount");
+  function getValidators(address[] memory candidateList, uint256[] memory scoreList, uint256 count) internal pure returns (address[] memory validatorList){
     uint256 candidateSize = candidateList.length;
     if (candidateSize == 0) {
       return validatorList;
@@ -531,20 +563,6 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       }
     }
 
-    // select top sortedCount
-    for (uint256 i = count - 1; i >= count - sortedCount; i--) {
-      uint256 minIndex;
-      for (uint256 j = 1; j <= i; j++) {
-        if (scoreList[j] < scoreList[minIndex]) {
-            minIndex = j;
-        }
-      }
-      if (minIndex != i) {
-          (candidateList[i], candidateList[minIndex]) = (candidateList[minIndex], candidateList[i]);
-          (scoreList[i], scoreList[minIndex]) = (scoreList[minIndex], scoreList[i]);
-      }
-    }
-
     uint256 d = candidateSize - count;
     if (d != 0) {
       assembly {
@@ -564,7 +582,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }
@@ -582,12 +600,8 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       dues = newDues;
     } else if (Memory.compareStrings(key, "validatorCount")) {
       uint256 newValidatorCount = BytesToTypes.bytesToUint256(32, value);
-      if (newValidatorCount <= 5 || newValidatorCount >= 42) {
-        revert OutOfBounds(key, newValidatorCount, 6, 41);
-      }
-      // Check if the current maxAlternateCount would violate the constraint with the new validatorCount
-      if (maxAlternateCount > newValidatorCount / 3) {
-        revert OutOfBounds("maxAlternateCount", maxAlternateCount, 0, newValidatorCount / 3);
+      if (newValidatorCount <= 5 || maxAlternateCount + newValidatorCount > 41) {
+        revert OutOfBounds(key, newValidatorCount, 6, 41 - maxAlternateCount);
       }
       validatorCount = newValidatorCount;
     } else if (Memory.compareStrings(key, "maxCommissionChange")) {
@@ -598,14 +612,45 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       maxCommissionChange = newMaxCommissionChange;
     } else if (Memory.compareStrings(key, "maxAlternateCount")) {
       uint256 newAlternateValidatorCount = BytesToTypes.bytesToUint256(32, value);
-      if (newAlternateValidatorCount > validatorCount / 3) {
-        revert OutOfBounds(key, newAlternateValidatorCount, 0, validatorCount / 3);
+      if (newAlternateValidatorCount + validatorCount > 41) {
+        revert OutOfBounds(key, newAlternateValidatorCount, 0, 41 - validatorCount);
       }
       maxAlternateCount = newAlternateValidatorCount;
+    } else if (Memory.compareStrings(key, "maxNodeIDs")) {
+      uint256 newMaxNodeIDs = BytesToTypes.bytesToUint256(32, value);
+      if (newMaxNodeIDs > MAX_NODEIDS_LIMIT) {
+        revert OutOfBounds(key, newMaxNodeIDs, 0, MAX_NODEIDS_LIMIT);
+      }
+      maxNodeIDs = newMaxNodeIDs;
     } else {
       revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
+  }
+
+  function getNodeIDs(
+    address[] calldata validatorsToQuery
+  ) external view returns (address[] memory consensusAddresses, bytes32[][] memory nodeIDsList) {
+    uint256 len = validatorsToQuery.length;
+    consensusAddresses = new address[](len);
+    nodeIDsList = new bytes32[][](len);
+    for (uint256 i = 0; i < len; i++) {
+      address operateAddr = validatorsToQuery[i];
+      uint256 index = operateMap[operateAddr];
+      if (index == 0) {
+        consensusAddresses[i] = address(0);
+        nodeIDsList[i] = new bytes32[](0);
+        continue;
+      }
+      consensusAddresses[i] = candidateSet[index - 1].consensusAddr;
+      bytes32[] storage s = nodeIDsMap[operateAddr];
+      uint256 n = s.length;
+      bytes32[] memory m = new bytes32[](n);
+      for (uint256 j = 0; j < n; j++) {
+        m[j] = s[j];
+      }
+      nodeIDsList[i] = m;
+    }
   }
 
   /// Get list of validator candidates 
@@ -639,12 +684,4 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     return SatoshiPlusHelper.ROUND_INTERVAL;
   }
 
-  function getAlternateCount(uint256 _maxAlternateCount, uint256 _validatorCount, uint256 _candidateSize) internal pure returns (uint256) {
-    if (_candidateSize <= _validatorCount) {
-      _maxAlternateCount = 0;
-    } else if (_candidateSize < _validatorCount + _maxAlternateCount) {
-      _maxAlternateCount = _candidateSize - _validatorCount;
-    }
-    return _maxAlternateCount;
-  }
 }

@@ -105,7 +105,7 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
     emit validatorSlashed(validator);
   }
 
-  function exitMaintenanceSlash(address validator, uint256 blockCount) external override onlyValidator {
+  function exitMaintenanceSlash(address validator, uint256 blockCount) external override onlyCaller(VALIDATOR_CONTRACT_ADDR) {
     slashWithBlockCount(validator, blockCount);
     Indicator storage indicator = indicators[validator];
     if (indicator.count >= felonyThreshold) {
@@ -233,7 +233,7 @@ contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov{
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }

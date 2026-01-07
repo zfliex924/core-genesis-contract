@@ -124,7 +124,7 @@ contract SystemReward is System, ISystemReward, IParamSubscriber {
   /// Update parameters through governance vote
   /// @param key The name of the parameter
   /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyCaller(GOV_HUB_ADDR) {
     if (Memory.compareStrings(key, "incentiveBalanceCap")) {
       if (value.length != 32) {
         revert MismatchParamLength(key);
