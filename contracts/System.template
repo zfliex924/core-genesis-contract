@@ -126,7 +126,7 @@ contract System {
 
   modifier onlyStakeHub() {
     if (msg.sender != STAKE_HUB_ADDR) {
-      revert NotPermissionalCaller(CANDIDATE_HUB_ADDR, msg.sender);
+      revert NotPermissionalCaller(STAKE_HUB_ADDR, msg.sender);
     }
     _;
   }

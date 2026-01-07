@@ -23,11 +23,9 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /*********************** events **************************/
   event claimedHashReward(address indexed delegator, uint256 amount);
   event validatorAvgReward(address indexed validator, uint256 avgReward);
-  event storedHashReward(address indexed delegator, uint256 amount);
 
   struct Reward {
     uint256 reward;
-    uint256 accStakedAmount; // TODO remove this field.
     uint256 round;
     uint256 stakeWeight;
   }
@@ -49,8 +47,8 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
     // fetch BTC miners who delegated hash power in the about to end round; 
     // and distribute rewards to them
-    uint256 minerSize;
     uint256 avgReward;
+    uint256 actureReward;
     uint256 totalReward;
     uint256 distributedReward;
     for (uint256 i = 0; i < validators.length; ++i) {
@@ -60,15 +58,14 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
       }
       address[] memory miners = ILightClient(LIGHT_CLIENT_ADDR).getRoundMiners(round-2, validators[i]);
       // distribute rewards to every miner
-      minerSize = miners.length;
-      if (minerSize != 0) {
-        avgReward = rewardList[i] / minerSize * SatoshiPlusHelper.DENOMINATOR / stakeWeight;
+      if (miners.length != 0) {
+        avgReward = rewardList[i] / miners.length * SatoshiPlusHelper.DENOMINATOR / stakeWeight;
         if (totalRoundAmount != 0) {
           avgReward = avgReward * stakedRoundAmount / totalRoundAmount;
         }
-        for (uint256 j = 0; j < minerSize; ++j) {
+        for (uint256 j = 0; j < miners.length; ++j) {
           Reward storage r = rewardMap[miners[j]];
-          uint256 tempReward = avgReward;
+          actureReward = avgReward;
           if (r.stakeWeight != 0) {
             if (r.round < round) {
               uint256 weight = r.stakeWeight + SatoshiPlusHelper.STAKE_WEIGHT_PER_ROUND;
@@ -78,12 +75,12 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
               r.stakeWeight = weight;
               r.round = round;
             }
-            tempReward = avgReward * r.stakeWeight / SatoshiPlusHelper.DENOMINATOR;
+            actureReward = avgReward * r.stakeWeight / SatoshiPlusHelper.DENOMINATOR;
           }
-          distributedReward += tempReward;
-          rewardMap[miners[j]].reward += tempReward;
+          distributedReward += actureReward;
+          rewardMap[miners[j]].reward += actureReward;
         }
-        emit validatorAvgReward(validators[i], avgReward);
+        emit validatorAvgReward(validators[i], actureReward);
       }
     }
     destoryAmount = totalReward - distributedReward;
@@ -101,6 +98,7 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
     for (uint256 i = amounts.length; i != 0; --i) {
       totalAmount += amounts[i-1];
     }
+    stakedRoundAmount = totalAmount;
     if (totalRoundAmount < totalAmount) {
       totalRoundAmount = totalAmount;
     }
