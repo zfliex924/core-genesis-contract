@@ -283,21 +283,20 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
 
   /*********************** Dual Staking **************************/
 
-  /// Add dual stake: lock Native Tokens paired with an existing ZEC stake
-  /// The Native Token amount is recorded in the DepositReceipt
+  /// Add or increase dual stake: lock Native Tokens paired with an existing ZEC stake
+  /// Can be called multiple times to increase the dual stake amount
   /// @param txid The ZEC staking transaction ID to pair with
   function dualStake(bytes32 txid) external payable nonReentrant {
     require(msg.value > 0, "zero dual stake amount");
     DepositReceipt storage dr = receiptMap[txid];
     require(dr.delegator != address(0), "receipt not found");
     require(dr.delegator == msg.sender, "not the delegator");
-    require(dr.dualStakeAmount == 0, "already dual staked");
 
     ZecTx storage ztx = zecTxMap[txid];
     require(ztx.amount > 0, "zec tx not found");
     require(ztx.status == STATUS_FIXED, "only fixed-term stakes can dual stake");
 
-    dr.dualStakeAmount = msg.value;
+    dr.dualStakeAmount += msg.value;
 
     emit dualStaked(txid, msg.sender, msg.value);
   }
