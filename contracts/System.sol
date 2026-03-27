@@ -27,6 +27,7 @@ contract System {
   address public CONFIGURATION_ADDR;
   address public CHANNEL_ADDR;
   address public ZEC_LIGHT_CLIENT_ADDR;
+  address public ZEC_AGENT_ADDR;
 
   struct SystemContractAddr {
     address validator;
@@ -46,6 +47,7 @@ contract System {
     address configurationContract;
     address channel;
     address zecLightClient;
+    address zecAgent;
   }
 
   function updateContractAddr(bytes memory _systemContractAddr) external {
@@ -67,6 +69,7 @@ contract System {
     CONFIGURATION_ADDR = systemContractAddr.configurationContract;
     CHANNEL_ADDR = systemContractAddr.channel;
     ZEC_LIGHT_CLIENT_ADDR = systemContractAddr.zecLightClient;
+    ZEC_AGENT_ADDR = systemContractAddr.zecAgent;
   }
   
   function setAlreadyInit(bool value) external {
