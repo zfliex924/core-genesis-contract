@@ -122,6 +122,9 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       validator = validators[i];
       mapping(uint256 => uint256) storage m = accruedRewardMap[validator];
       Candidate storage c = candidateMap[validator];
+      if (c.amount == 0) {
+        continue;
+      }
       l = c.continuousRewardEndRounds.length;
       if (l != 0) {
         lastRewardRound = c.continuousRewardEndRounds[l - 1];
