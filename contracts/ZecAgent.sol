@@ -12,6 +12,7 @@ import "./interface/ILightClient.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/IStakeHub.sol";
 import "./interface/IParamSubscriber.sol";
+import "./lib/Address.sol";
 import "./System.sol";
 
 /// ZecAgent — ZEC staking + orchestration contract (combined BitcoinAgent + BitcoinStake)
@@ -66,6 +67,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
     address candidate;       // Validator candidate
     address delegator;       // Delegator EVM address
     uint256 round;           // Round when deposit was recorded
+    uint256 dualStakeAmount; // Native Token amount for dual staking (0 = no dual stake)
   }
 
   /// @dev Per-candidate staking state
@@ -113,11 +115,21 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
   uint256 public fixedRatePercentage;   // reward percentage for fixed-term stakes
   uint256 public demandRatePercentage;  // reward percentage for demand stakes (after early spend)
 
+  // Dual staking weight grades
+  // multiplier based on nativeToken / zecAmount ratio
+  struct DualStakingGrade {
+    uint256 ratio;        // nativeToken / zecAmount threshold (scaled by 1e18)
+    uint256 multiplier;   // weight multiplier (DENOMINATOR = 10000 = 1.0x)
+  }
+  DualStakingGrade[] public dualStakingGrades;
+
   /*********************** events **************************/
   event delegated(bytes32 indexed txid, address indexed candidate, address indexed delegator, uint64 amount, uint32 stakeDuration);
   event spentReported(bytes32 indexed txid, uint8 newStatus);
   event rewardCollected(bytes32 indexed txid, address indexed delegator, uint256 reward, bool expired, uint256 ratePercentage);
   event claimedReward(address indexed delegator, uint256 amount);
+  event dualStaked(bytes32 indexed txid, address indexed delegator, uint256 nativeAmount);
+  event dualUnstaked(bytes32 indexed txid, address indexed delegator, uint256 nativeAmount);
 
   /*********************** Init **************************/
   function init() external onlyNotInit {
@@ -126,6 +138,15 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
     fixedRatePercentage = INIT_FIXED_RATE_PERCENTAGE;
     demandRatePercentage = INIT_DEMAND_RATE_PERCENTAGE;
     roundTag = 1;
+
+    // Default dual staking grades (ratio threshold, multiplier)
+    // ratio = nativeToken * 1e18 / zecAmount
+    // No dual stake: 1.0x (DENOMINATOR)
+    dualStakingGrades.push(DualStakingGrade(0, 10000));       // 0: 1.0x base
+    dualStakingGrades.push(DualStakingGrade(1e17, 11000));    // 0.1: 1.1x
+    dualStakingGrades.push(DualStakingGrade(2e17, 13000));    // 0.2: 1.3x
+    dualStakingGrades.push(DualStakingGrade(5e17, 15000));    // 0.5: 1.5x
+
     alreadyInit = true;
   }
 
@@ -191,7 +212,8 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
     receiptMap[txid] = DepositReceipt({
       candidate: candidate,
       delegator: delegator,
-      round: roundTag
+      round: roundTag,
+      dualStakeAmount: 0
     });
 
     // Update delegator and candidate state
@@ -257,6 +279,44 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
       emit spentReported(prevTxid, ztx.status);
     }
     require(count > 0, "no staked UTXO found in inputs");
+  }
+
+  /*********************** Dual Staking **************************/
+
+  /// Add dual stake: lock Native Tokens paired with an existing ZEC stake
+  /// The Native Token amount is recorded in the DepositReceipt
+  /// @param txid The ZEC staking transaction ID to pair with
+  function dualStake(bytes32 txid) external payable nonReentrant {
+    require(msg.value > 0, "zero dual stake amount");
+    DepositReceipt storage dr = receiptMap[txid];
+    require(dr.delegator != address(0), "receipt not found");
+    require(dr.delegator == msg.sender, "not the delegator");
+    require(dr.dualStakeAmount == 0, "already dual staked");
+
+    ZecTx storage ztx = zecTxMap[txid];
+    require(ztx.amount > 0, "zec tx not found");
+    require(ztx.status == STATUS_FIXED, "only fixed-term stakes can dual stake");
+
+    dr.dualStakeAmount = msg.value;
+
+    emit dualStaked(txid, msg.sender, msg.value);
+  }
+
+  /// Remove dual stake: unlock Native Tokens from a ZEC stake
+  /// Can be called at any time; the Native Tokens are returned to the delegator
+  /// @param txid The ZEC staking transaction ID to unpair
+  function dualUnstake(bytes32 txid) external nonReentrant {
+    DepositReceipt storage dr = receiptMap[txid];
+    require(dr.delegator != address(0), "receipt not found");
+    require(dr.delegator == msg.sender, "not the delegator");
+    require(dr.dualStakeAmount > 0, "no dual stake");
+
+    uint256 amount = dr.dualStakeAmount;
+    dr.dualStakeAmount = 0;
+
+    Address.sendValue(payable(msg.sender), amount);
+
+    emit dualUnstaked(txid, msg.sender, amount);
   }
 
   /*********************** IAgent Implementation **************************/
@@ -359,12 +419,19 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
       // Calculate reward
       DepositReceipt storage dr = receiptMap[txid];
       (uint256 txReward, bool expired) = _collectReward(
-        txid, dr.candidate, dr.round, settleRound, ztx
+        txid, dr.candidate, dr.round, settleRound, ztx, dr.dualStakeAmount
       );
       totalReward += txReward;
 
       // Clean up fully expired and claimed stakes
       if (expired && ztx.usedHeight != 0) {
+        // Refund dual stake if exists
+        if (dr.dualStakeAmount > 0) {
+          uint256 refund = dr.dualStakeAmount;
+          dr.dualStakeAmount = 0;
+          Address.sendValue(payable(dr.delegator), refund);
+          emit dualUnstaked(txid, dr.delegator, refund);
+        }
         delete receiptMap[txid];
         txids[i - 1] = txids[txids.length - 1];
         txids.pop();
@@ -435,44 +502,54 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
     address candidate,
     uint256 drRound,
     uint256 settleRound,
-    ZecTx storage ztx
+    ZecTx storage ztx,
+    uint256 dualStakeAmount
   ) internal returns (uint256 reward, bool expired) {
-    // Determine the calculate round (when rewards stop accruing)
-    uint256 calculateRound;
     uint256 expireRound = (uint256(ztx.blockTimestamp) + uint256(ztx.stakeDuration)) / SatoshiPlusHelper.ROUND_INTERVAL;
-
-    if (expireRound <= settleRound) {
-      calculateRound = expireRound > 0 ? expireRound - 1 : 0;
-      expired = true;
-    } else {
-      calculateRound = settleRound;
-      expired = false;
-    }
+    expired = (expireRound <= settleRound);
+    uint256 calculateRound = expired ? (expireRound > 0 ? expireRound - 1 : 0) : settleRound;
 
     if (calculateRound <= drRound) return (0, expired);
 
-    // Get accrued rewards for the period
+    reward = _calcBaseReward(candidate, drRound, calculateRound, ztx);
+    if (reward == 0) return (0, expired);
+
+    // Apply dual staking multiplier
+    reward = reward * _getDualStakingMultiplier(dualStakeAmount, ztx.amount) / DENOMINATOR;
+
+    emit rewardCollected(txid, receiptMap[txid].delegator, reward, expired,
+      ztx.status == STATUS_DEMAND ? demandRatePercentage : fixedRatePercentage);
+  }
+
+  function _calcBaseReward(
+    address candidate,
+    uint256 drRound,
+    uint256 calculateRound,
+    ZecTx storage ztx
+  ) internal view returns (uint256) {
     uint256 accruedAtSettle = _getAccruedReward(candidate, calculateRound);
     uint256 accruedAtStart = _getAccruedReward(candidate, drRound);
+    if (accruedAtSettle <= accruedAtStart) return 0;
 
-    if (accruedAtSettle <= accruedAtStart) return (0, expired);
-
-    // Base reward
     uint256 baseReward = (accruedAtSettle - accruedAtStart) * ztx.amount / ZEC_DECIMAL;
+    uint256 ratePercentage = ztx.status == STATUS_DEMAND ? demandRatePercentage : fixedRatePercentage;
+    return baseReward * ratePercentage / DENOMINATOR;
+  }
 
-    // Apply rate based on status
-    uint256 ratePercentage;
-    if (ztx.status == STATUS_DEMAND) {
-      ratePercentage = demandRatePercentage;
-    } else {
-      // STATUS_EXPIRED — full fixed rate
-      ratePercentage = fixedRatePercentage;
+  /// Get dual staking weight multiplier based on nativeToken/ZEC ratio
+  function _getDualStakingMultiplier(uint256 nativeAmount, uint64 zecAmount) internal view returns (uint256) {
+    if (nativeAmount == 0 || zecAmount == 0) return DENOMINATOR;
+
+    uint256 ratio = nativeAmount * 1e18 / zecAmount;
+    uint256 multiplier = DENOMINATOR; // default 1.0x
+
+    for (uint256 i = dualStakingGrades.length; i > 0; --i) {
+      if (ratio >= dualStakingGrades[i - 1].ratio) {
+        multiplier = dualStakingGrades[i - 1].multiplier;
+        break;
+      }
     }
-
-    reward = baseReward * ratePercentage / DENOMINATOR;
-
-    emit rewardCollected(txid, receiptMap[txid].delegator, reward, expired, ratePercentage);
-    return (reward, expired);
+    return multiplier;
   }
 
   /// Get accrued reward for a candidate at a given round
@@ -539,5 +616,15 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
   /// Get candidate's continuous reward end rounds
   function getContinuousRewardEndRounds(address candidate) external view returns (uint256[] memory) {
     return candidateMap[candidate].continuousRewardEndRounds;
+  }
+
+  /// Get dual staking grades
+  function getDualStakingGrades() external view returns (DualStakingGrade[] memory) {
+    return dualStakingGrades;
+  }
+
+  /// Get dual staking multiplier for a given nativeToken/zecAmount
+  function getDualStakingMultiplier(uint256 nativeAmount, uint64 zecAmount) external view returns (uint256) {
+    return _getDualStakingMultiplier(nativeAmount, zecAmount);
   }
 }
