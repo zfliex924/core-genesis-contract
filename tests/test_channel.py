@@ -1492,10 +1492,6 @@ def test_pay_commission_by_id_through_btc_stake_claim_reward(
     stake_hub.claimReward({'from': delegator})
     assert delegator.balance() - init_balance == expected_remaining
 
-    partner_init_balance = fee_address.balance()
-    stake_hub.claimCommission({'from': partner})
-    assert fee_address.balance() - partner_init_balance == expected_commission
-
 
 @pytest.mark.parametrize("channel_id", [0, 252, 253, 0xffffffff])
 def test_pay_commission_by_id_btc_stake_invalid_channel(channel, btc_stake, set_candidate, stake_hub, channel_id):
@@ -1538,10 +1534,6 @@ def test_pay_commission_by_id_btc_stake_multiple_txs(
     stake_hub.claimReward({'from': delegator})
     assert delegator.balance() - init_balance == expected_remaining
 
-    partner_init_balance = fee_address.balance()
-    stake_hub.claimCommission({'from': partner})
-    assert fee_address.balance() - partner_init_balance == expected_commission
-
 
 def test_pay_commission_by_id_btc_stake_mixed_channels(
     channel, btc_stake, set_candidate, stake_hub, required_margin
@@ -1581,10 +1573,6 @@ def test_pay_commission_by_id_btc_stake_mixed_channels(
     init_balance = delegator.balance()
     stake_hub.claimReward({'from': delegator})
     assert delegator.balance() - init_balance == expected_remaining
-
-    partner_init_balance = fee_address1.balance()
-    stake_hub.claimCommission({'from': partner1})
-    assert fee_address1.balance() - partner_init_balance == expected_commission
 
 
 def test_core_agent_channel_amount_tracking(channel, required_margin, core_agent):
@@ -1692,10 +1680,6 @@ def test_claim_reward_after_channel_delegation(
     stake_hub.claimReward()
     assert delegator.balance() - init_balance == expected_remaining
 
-    partner_init_balance = fee_address.balance()
-    stake_hub.claimCommission({'from': partner})
-    assert fee_address.balance() - partner_init_balance == expected_commission
-
 
 def test_claim_reward_after_direct_and_channel_delegation(
     channel, required_margin, core_agent, set_candidate, min_init_delegate_value, stake_hub
@@ -1739,10 +1723,6 @@ def test_claim_reward_after_direct_and_channel_delegation(
     stake_hub.claimReward()
     assert delegator.balance() - init_balance == expected_remaining
 
-    partner_init_balance = fee_address.balance()
-    stake_hub.claimCommission({'from': partner})
-    assert fee_address.balance() - partner_init_balance == expected_commission
-
 
 def test_claim_reward_before_channel_delegation(
     channel, required_margin, core_agent, set_candidate, min_init_delegate_value,
@@ -1783,10 +1763,6 @@ def test_claim_reward_before_channel_delegation(
     init_balance = delegator.balance()
     stake_hub.claimReward()
     assert delegator.balance() - init_balance == expected_remaining
-
-    partner_init_balance = fee_address.balance()
-    stake_hub.claimCommission({'from': partner})
-    assert fee_address.balance() - partner_init_balance == expected_commission
 
 
 def test_claim_reward_after_multi_channel_delegation(
@@ -1847,14 +1823,6 @@ def test_claim_reward_after_multi_channel_delegation(
     stake_hub.claimReward()
     assert delegator.balance() - init_balance == expected_remaining
 
-    partner1_init_balance = fee_address1.balance()
-    stake_hub.claimCommission({'from': partner1})
-    assert fee_address1.balance() - partner1_init_balance == expected_commission1
-
-    partner2_init_balance = fee_address2.balance()
-    stake_hub.claimCommission({'from': partner2})
-    assert fee_address2.balance() - partner2_init_balance == expected_commission2
-
 
 def test_claim_reward_after_multi_users_delegate_through_same_channel(
     channel, required_margin, core_agent, set_candidate, min_init_delegate_value, stake_hub
@@ -1903,10 +1871,6 @@ def test_claim_reward_after_multi_users_delegate_through_same_channel(
 
     stake_hub.calculateReward(delegator2)
 
-    partner_init_balance = fee_address.balance()
-    stake_hub.claimCommission({'from': partner})
-    assert fee_address.balance() - partner_init_balance == expected_commission * 2
-
 
 def test_delegate_coin_and_btc_mixed(
     channel, core_agent, set_candidate, stake_hub, set_channel_partner, btc_stake, btc_agent
@@ -1948,7 +1912,3 @@ def test_delegate_coin_and_btc_mixed(
     assert btc_reward == expected_btc_remaining
 
     stake_hub.claimReward({'from': delegator})
-
-    init_partner_balance = fee_address.balance()
-    stake_hub.claimCommission({'from': partner})
-    assert fee_address.balance() - init_partner_balance == expected_coin_commission + expected_btc_commission

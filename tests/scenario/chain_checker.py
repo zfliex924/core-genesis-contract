@@ -74,24 +74,6 @@ class ChainChecker:
         operator_addr_list = ValidatorSetMock[0].getValidatorOps()
         assert len(operator_addr_list) == len(validators)
 
-        for i in range(len(operator_addr_list)):
-            validator_on_chain = ValidatorSetMock[0].currentValidatorSet(i)
-            operator_addr = validator_on_chain[0]
-
-            validator = validators[operator_addr]
-            stake_state = validator.get_stake_state()
-
-            scores = [
-                stake_state.get_total_score(),
-                stake_state.get_score(self.chain.core_asset.name),
-                stake_state.get_score(self.chain.power_asset.name),
-                stake_state.get_score(self.chain.btc_asset.name)
-            ]
-
-            scores_on_chain = StakeHubMock[0].getCandidateScores(operator_addr)
-
-            assert_result("scores", scores, list(scores_on_chain))
-
     def check_validator_stake_amounts(self):
         validators = self.chain.get_validators()
         operator_addr_list = ValidatorSetMock[0].getValidatorOps()

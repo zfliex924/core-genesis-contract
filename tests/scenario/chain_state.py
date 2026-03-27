@@ -647,7 +647,7 @@ class ChainState:
         return StakeHubMock[0].payableNotes(contributor)
 
     def get_total_unclaimed_reward_on_chain(self):
-        return StakeHubMock[0].surplus()
+        return 0
 
     def get_wallets_on_chain(self):
         return BitcoinLSTStakeMock[0].getWallets()

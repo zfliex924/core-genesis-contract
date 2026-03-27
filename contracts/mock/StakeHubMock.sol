@@ -20,10 +20,6 @@ contract StakeHubMock is StakeHub {
         operators[delegator] = value;
     }
 
-    function getCandidateScoresMap(address candidate) external view returns (uint256[] memory) {
-        return candidateScoresMap[candidate];
-    }
-
     function getDelegatorMap(address account) external view returns (Delegator memory) {
         Delegator memory DelegatorMap = delegatorMap[account];
         return DelegatorMap;
@@ -34,21 +30,8 @@ contract StakeHubMock is StakeHub {
         delegatorMap[account].rewards = rewards;
     }
 
-
-    function setCandidateScoresMap(address candidate, uint256 core, uint256 power, uint256 btc) external {
-        candidateScoresMap[candidate][0] = (core + power + btc);
-        candidateScoresMap[candidate][1] = core;
-        candidateScoresMap[candidate][2] = power;
-        candidateScoresMap[candidate][3] = btc;
-    }
-
-
     function setStateMapDiscount(address agent, uint256 value, uint256 value1) external {
         stateMap[agent] = AssetState(value, value1);
-    }
-
-    function setSurplus(uint256 value) external {
-        surplus = value;
     }
 
     // for unit test
@@ -59,5 +42,4 @@ contract StakeHubMock is StakeHub {
     function coreAgentDistributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external {
         IAgent(CORE_AGENT_ADDR).distributeReward(validators, rewardList, round);
     }
-
 }
