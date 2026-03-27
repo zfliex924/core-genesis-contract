@@ -107,6 +107,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   /// @param rewardList List of reward amount
   /// @param round The round tag
   function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external override onlyStakeHub
+    returns (uint256 undistributed)
   {
     uint256 validateSize = validators.length;
     require(validateSize == rewardList.length, "the length of validators and rewardList should be equal");
@@ -123,6 +124,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       mapping(uint256 => uint256) storage m = accruedRewardMap[validator];
       Candidate storage c = candidateMap[validator];
       if (c.amount == 0) {
+        undistributed += rewardList[i];
         continue;
       }
       l = c.continuousRewardEndRounds.length;

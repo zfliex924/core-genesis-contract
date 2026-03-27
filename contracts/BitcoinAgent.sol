@@ -59,8 +59,10 @@ contract BitcoinAgent is IBtcAgent, System, IParamSubscriber {
   /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round.
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
-  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 /*round*/) external override onlyStakeHub {
-    IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validators, rewardList);
+  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 /*round*/) external override onlyStakeHub
+    returns (uint256 undistributed)
+  {
+    undistributed = IBitcoinStake(BTC_STAKE_ADDR).distributeReward(validators, rewardList);
   }
 
   /// Get staked BTC amount

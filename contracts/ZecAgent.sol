@@ -292,11 +292,14 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
     address[] calldata validators,
     uint256[] calldata rewardList,
     uint256 round
-  ) external override onlyStakeHub {
+  ) external override onlyStakeHub returns (uint256 undistributed) {
     for (uint256 i = 0; i < validators.length; ++i) {
       if (rewardList[i] == 0) continue;
       CandidateState storage cs = candidateMap[validators[i]];
-      if (cs.stakedAmount == 0) continue;
+      if (cs.stakedAmount == 0) {
+        undistributed += rewardList[i];
+        continue;
+      }
 
       // Calculate accrued reward per ZEC for this round
       uint256 historyReward;

@@ -6,6 +6,7 @@ import "./interface/IStakeHub.sol";
 import "./interface/IAgent.sol";
 import "./interface/ISystemReward.sol";
 import "./interface/IBitcoinStake.sol";
+import "./interface/IBurn.sol";
 import "./interface/IZecAgent.sol";
 import "./interface/IValidatorSet.sol";
 import "./interface/ICandidateHub.sol";
@@ -129,7 +130,11 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
         rewards[j] = rewardList[j] * hardcap / totalHardcap;
       }
       emit roundReward(assets[i].name, roundTag, validators, rewards);
-      IAgent(assets[i].agent).distributeReward(validators, rewards, roundTag);
+      burnReward += IAgent(assets[i].agent).distributeReward(validators, rewards, roundTag);
+    }
+    // Burn undistributed rewards (no stakers on some validators)
+    if (burnReward != 0 && address(this).balance >= burnReward) {
+      IBurn(BURN_ADDR).burn{value: burnReward}();
     }
   }
 

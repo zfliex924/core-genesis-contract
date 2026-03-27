@@ -238,7 +238,9 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
   /// Receive round rewards from BitcoinAgent. It is triggered at the beginning of turn round.
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
-  function distributeReward(address[] calldata validators, uint256[] calldata rewardList) external override onlyBtcAgent {
+  function distributeReward(address[] calldata validators, uint256[] calldata rewardList) external override onlyBtcAgent
+    returns (uint256 undistributed)
+  {
     uint256 length = validators.length;
     uint256 l;
     address validator;
@@ -252,6 +254,7 @@ contract BitcoinStake is IBitcoinStake, System, IParamSubscriber, ReentrancyGuar
       mapping(uint256 => uint256) storage m = accruedRewardPerBTCMap[validator];
       Candidate storage c = candidateMap[validator];
       if (c.stakedAmount == 0) {
+        undistributed += rewardList[i];
         continue;
       }
       l = c.continuousRewardEndRounds.length;

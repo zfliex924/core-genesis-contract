@@ -35,11 +35,13 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
   /// @param round The round tag
-  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external override onlyStakeHub {
+  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external override onlyStakeHub
+    returns (uint256 undistributed)
+  {
     uint256 validatorSize = validators.length;
     require(validatorSize == rewardList.length, "the length of validatorList and rewardList should be equal");
 
-    // fetch BTC miners who delegated hash power in the about to end round; 
+    // fetch BTC miners who delegated hash power in the about to end round;
     // and distribute rewards to them
     uint256 minerSize;
     uint256 avgReward;
@@ -56,6 +58,8 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
           rewardMap[miners[j]].reward += avgReward;
         }
         emit validatorAvgReward(validators[i], avgReward);
+      } else {
+        undistributed += rewardList[i];
       }
     }
   }

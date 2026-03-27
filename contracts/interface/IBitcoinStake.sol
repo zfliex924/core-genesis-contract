@@ -37,7 +37,8 @@ interface IBitcoinStake {
   /// Receive round rewards from BitcoinAgent. It is triggered at the beginning of turn round
   /// @param validators List of validator operator addresses
   /// @param rewardList List of reward amount
-  function distributeReward(address[] calldata validators, uint256[] calldata rewardList) external;
+  /// @return undistributed Amount of rewards not distributed
+  function distributeReward(address[] calldata validators, uint256[] calldata rewardList) external returns (uint256 undistributed);
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
