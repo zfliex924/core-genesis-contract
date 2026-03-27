@@ -214,37 +214,27 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   /// @param delegator the delegator address
   /// @param claim claim or store rewards
   /// @return reward Amount claimed
-  /// @return stakedAmount1 the staked amount in the first round
-  /// @return stakedAmount2 the real amount in the last round
-  function claimReward(address delegator, bool claim) external override onlyStakeHub returns (uint256 reward, uint256 stakedAmount1, uint256 stakedAmount2) {
-    uint256 initAmount = delegatorMap[delegator].amount;
+  function claimReward(address delegator, bool claim) external override onlyStakeHub returns (uint256 reward) {
     address[] storage candidates = delegatorMap[delegator].candidates;
     uint256 candidateSize = candidates.length;
     address candidate;
     uint256 rewardSum;
-    uint256 s1;
-    uint256 s2;
+    uint256 txReward;
     for (uint256 i = candidateSize; i != 0; --i) {
       candidate = candidates[i - 1];
       CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
-      (reward, s1, s2) = _collectRewardFromCandidate(candidate, cd);
-      rewardSum += reward;
-      stakedAmount1 += s1;
-      stakedAmount2 += s2;
-      if (reward != 0) {
+      (txReward, , ) = _collectRewardFromCandidate(candidate, cd);
+      rewardSum += txReward;
+      if (txReward != 0) {
         if (claim) {
-          emit collectedReward(candidate, delegator, reward, 0);
+          emit collectedReward(candidate, delegator, txReward, 0);
         } else {
-          emit storedReward(candidate, delegator, reward, 0);
+          emit storedReward(candidate, delegator, txReward, 0);
         }
       }
       if (cd.realtimeAmount == 0 && cd.transferredAmount == 0) {
         _removeDelegation(delegator, candidate);
       }
-    }
-
-    if (rewardSum != 0) {
-      rewardSum = IChannel(CHANNEL_ADDR).payCommissions(delegator, initAmount, rewardSum);
     }
 
     reward = rewardMap[delegator].reward;
@@ -259,11 +249,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
         emit storedCoinReward(delegator, reward, 0);
       }
     }
-  }
-
-  /// Claim reward for delegator
-  function claimReward(address, uint256, uint256, bool) external override pure returns (uint256, int256) {
-    revert NotImplemented();
   }
 
   /// @param candidate the validator candidate address

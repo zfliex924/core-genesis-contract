@@ -31,10 +31,7 @@ interface IAgent {
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
-  /// @param coreAmount the staked amount of staked CORE.
-  /// @param settleRound the settlement round
   /// @param claim claim or store rewards
   /// @return reward Amount claimed
-  /// @return floatReward floating reward amount
-  function claimReward(address delegator, uint256 coreAmount, uint256 settleRound, bool claim) external returns (uint256 reward, int256 floatReward);
+  function claimReward(address delegator, bool claim) external returns (uint256 reward);
 }

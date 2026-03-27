@@ -10,7 +10,6 @@ import "./interface/IBurn.sol";
 import "./interface/IZecAgent.sol";
 import "./interface/IValidatorSet.sol";
 import "./interface/ICandidateHub.sol";
-import "./interface/ICoreAgent.sol";
 import "./System.sol";
 import "./lib/Address.sol";
 import "./lib/Memory.sol";
@@ -239,17 +238,12 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   /// No more cross-agent dependency (surplus/floatReward removed)
   /// Each agent calculates rewards independently
   function _calculateReward(address delegator, bool claim) internal returns (uint256[] memory rewards) {
-    uint256 lastRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag() - 1;
-
     uint256 assetSize = assets.length;
     rewards = new uint256[](assetSize);
 
-    // CORE agent uses its own claimReward interface
-    (rewards[0], , ) = ICoreAgent(assets[0].agent).claimReward(delegator, claim);
-
-    // All other agents use IAgent.claimReward
-    for (uint256 i = 1; i < assetSize; ++i) {
-      (rewards[i], ) = IAgent(assets[i].agent).claimReward(delegator, 0, lastRound, claim);
+    // All agents use unified IAgent.claimReward (each uses internal roundTag - 1)
+    for (uint256 i = 0; i < assetSize; ++i) {
+      rewards[i] = IAgent(assets[i].agent).claimReward(delegator, claim);
     }
   }
 

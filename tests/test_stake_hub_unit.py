@@ -289,9 +289,9 @@ def test_claim_reward_staked_core_amount_different(stake_hub, btc_agent, core_ag
     tracker = get_tracker(accounts[0])
     tx = stake_hub.claimReward()
     expect_event(tx, 'claimedRewardBtcTx', {
-        'dualStakingRate': Utils.DENOMINATOR // 2
+        'dualStakingRate': 0
     })
-    assert abs(tracker.delta() - (COIN_REWARD + BTC_REWARD // 2)) <= 1
+    assert abs(tracker.delta() - (COIN_REWARD + BTC_REWARD)) <= 1
 
 
 def test_claim_reward_staked_core_amount_different_with_reward(stake_hub, btc_agent, core_agent, set_candidate):
@@ -311,7 +311,7 @@ def test_claim_reward_staked_core_amount_different_with_reward(stake_hub, btc_ag
     actual_rewards = claimed['amounts']
     assert actual_rewards[0] == COIN_REWARD * 4
     assert actual_rewards[1] == 0
-    assert abs(actual_rewards[2] - BTC_REWARD * 3000 // 10000 * 2) <= 1
+    assert abs(actual_rewards[2] - BTC_REWARD * 2) <= 1
     assert actual_rewards[3] == 0
     assert tracker.delta() == sum(actual_rewards)
 
@@ -325,13 +325,11 @@ def test_claim_reward_staked_core_amount_equal(stake_hub, btc_agent, core_agent,
     delegate_btc_success(operators[0], accounts[0], 1, LOCK_SCRIPT)
     delegate_btc_success(operators[1], accounts[0], 1, LOCK_SCRIPT)
     turn_round()
-    # With coreAmount=0 passed to BTC agent, dual staking rate comes from LP rate bracket for 0
-    # LP rates: [[0, 3000], [4000, 5000], [7000, 10000], [10000, 15000]]
-    # coreAmount=0 maps to rate 3000
-    dualStakingRate0 = 3000
-    dualStakingRate1 = 3000
+    # Dual staking removed — dualStakingRate is always 0, BTC reward is full
+    dualStakingRate0 = 0
+    dualStakingRate1 = 0
     coin_reward = COIN_REWARD
-    btc_reward = BTC_REWARD * 3000 // 10000 + BTC_REWARD * 3000 // 10000
+    btc_reward = BTC_REWARD + BTC_REWARD
     if operator == 'tr':
         delegate_coin_success(operators[0], accounts[0], MIN_INIT_DELEGATE_VALUE * 2)
     elif operator == 'de':
@@ -449,13 +447,11 @@ def test_calculate_reward_success(stake_hub, btc_agent, core_agent, btc_stake, h
     turn_round(consensuses)
     accounts[3].transfer(stake_hub, Web3.to_wei(1, 'ether'))
     reward = 10000
-    btc_reward = 6000
-    actual_rewards = [reward, reward, btc_reward, 0]
+    actual_rewards = [reward, reward, reward, 0]
     core_agent.setCoreRewardMap(accounts[0], reward, 0)
     hash_power_agent.setPowerRewardMap(accounts[0], reward, 0)
     round_reward_manager.mock_btc_reward_map(operators[0], get_current_round(), reward, 0)
     btc_agent.setIsActive(True)
-    stake_manager.set_lp_rates([[0, btc_reward]])
     stake_hub.setOperators(accounts[3], True)
     rewards = stake_hub.calculateRewardMock(accounts[0]).return_value
     assert rewards == actual_rewards
@@ -489,9 +485,8 @@ def test_claim_rewards_multiple_grades(stake_hub, core_agent, validator_set, btc
         btc_agent.setLpRates(lp[0], lp[1])
     tx = stake_hub.calculateRewardMock(accounts[0])
     rewards = tx.return_value
-    # With coreAmount=0, BTC reward uses the first LP rate bracket
-    btc_expected = reward * lp_rates[0][1] // 10000
-    actual_rewards = [reward, reward, btc_expected, 0]
+    # Dual staking removed — BTC reward is the full reward (no LP rate reduction)
+    actual_rewards = [reward, reward, reward, 0]
     assert rewards == actual_rewards
 
 
@@ -532,21 +527,21 @@ def test_onStakeChange_success(stake_hub, set_candidate):
     turn_round(consensuses, round_count=2)
     current_round = get_current_round()
     tx = stake_hub.onStakeChange(accounts[0])
-    # With coreAmount=0, LP rate bracket [0, 1000] gives dualStakingRate=1000
-    dual_staking_rate = 1000
+    # Dual staking removed — dualStakingRate is always 0
+    dual_staking_rate = 0
     assert tx.events['storedRewardBtcTx']['dualStakingRate'] == dual_staking_rate
     assert stake_hub.getDelegatorMap(accounts[0])[0] == current_round
     tracker0 = get_tracker(accounts[0])
     stake_hub_claim_reward(accounts[0])
     # CORE reward: COIN_REWARD * 2 (2 rounds of CORE on operators[0])
-    # BTC reward: BTC_REWARD * 1000 // 10000 (1 round with dualStakingRate=1000)
-    actual_reward = COIN_REWARD * 2 + BTC_REWARD * 1000 // 10000
+    # BTC reward: BTC_REWARD (1 round, full reward, no dual staking reduction)
+    actual_reward = COIN_REWARD * 2 + BTC_REWARD
     assert tracker0.delta() == actual_reward
     turn_round(consensuses)
     stake_hub.calculateReward(accounts[0])
     stake_manager.set_lp_rates([[0, 20000]])
     stake_hub_claim_reward(accounts[0])
-    assert tracker0.delta() == COIN_REWARD + BTC_REWARD * 1000 // 10000
+    assert tracker0.delta() == COIN_REWARD + BTC_REWARD
     turn_round(consensuses)
 
 
@@ -585,7 +580,7 @@ def test_calculate_reward_only_btc_stakes(stake_hub, btc_agent, core_agent, set_
     delegator_info = stake_hub.getDelegator(delegator)
     assert delegator_info[0] == get_current_round()
     assert len(delegator_info[1]) == 4
-    assert delegator_info[1][2] == BTC_REWARD // 2
+    assert delegator_info[1][2] == BTC_REWARD
 
 
 def test_calculate_reward_only_core_stakes(stake_hub, btc_agent, core_agent, set_candidate):
@@ -619,13 +614,13 @@ def test_calculate_reward_multiple_btc_and_core_stakes(stake_hub, btc_agent, cor
     stake_manager.set_is_stake_hub_active(True)
 
     tx = stake_hub.calculateReward(delegator, {'from': accounts[1]})
-    # With coreAmount=0, LP rate bracket [0, 3000] gives dualStakingRate=3000 for all BTC
+    # Dual staking removed — dualStakingRate is always 0
     for evt in tx.events['storedRewardBtcTx']:
-        assert evt['dualStakingRate'] == 3000
+        assert evt['dualStakingRate'] == 0
     delegator_info = stake_hub.getDelegator(delegator)
     assert abs(delegator_info[1][0] - COIN_REWARD * 2) <= 3
-    # BTC: 2 validators * 2 rounds * BTC_REWARD * 3000/10000
-    assert abs(delegator_info[1][2] - BTC_REWARD * 3000 // Utils.DENOMINATOR * 4) <= 3
+    # BTC: 2 validators * 2 rounds * BTC_REWARD (no dual staking multiplier)
+    assert abs(delegator_info[1][2] - BTC_REWARD * 4) <= 3
     tracker0 = get_tracker(delegator)
     stake_hub_claim_reward(delegator)
     assert tracker0.delta() == sum(delegator_info[1])
@@ -650,7 +645,7 @@ def test_calculate_reward_various_stake_combinations(stake_hub, btc_agent, core_
     stake_manager.set_lp_rates([[0, 30000]])
     delegator_info = stake_hub.getDelegator(delegator)
     assert abs(delegator_info[1][0] - COIN_REWARD) <= 2
-    assert abs(delegator_info[1][2] - BTC_REWARD * 5000 // Utils.DENOMINATOR * 2) <= 2
+    assert abs(delegator_info[1][2] - BTC_REWARD * 2) <= 2
     tracker0 = get_tracker(delegator)
     stake_hub_claim_reward(delegator)
     assert tracker0.delta() == sum(delegator_info[1])
@@ -853,11 +848,11 @@ def test_stake_hup_get_hybrid_score(stake_hub, validator_set, candidate_hub, cor
 
 @pytest.mark.parametrize('test', [
     {'add_core': 1000000, 'add_btc': 100, 'expect_rewards': (5418, 0, 3612, 0)},
-    # With coreAmount=0 and gradeActive=True, LP rate = grades[0].percentage = 5000
-    {'add_core': 10000, 'add_btc': 1, 'expect_rewards': (5418, 0, 3612 * 5000 // 10000, 0), 'is_active': True},
-    {'add_core': 120000, 'add_btc': 10, 'expect_rewards': (5418, 0, 3612 * 5000 // 10000, 0), 'is_active': True},
-    {'add_core': 5000000, 'add_btc': 1000, 'expect_rewards': (5418, 0, 3612 * 5000 // 10000, 0), 'is_active': True},
-    {'add_core': 5000, 'add_btc': 10, 'expect_rewards': (5418, 0, 3612 * 5000 // 10000, 0), 'is_active': True}
+    # Dual staking removed — BTC reward is full 3612 regardless of LP rates
+    {'add_core': 10000, 'add_btc': 1, 'expect_rewards': (5418, 0, 3612, 0), 'is_active': True},
+    {'add_core': 120000, 'add_btc': 10, 'expect_rewards': (5418, 0, 3612, 0), 'is_active': True},
+    {'add_core': 5000000, 'add_btc': 1000, 'expect_rewards': (5418, 0, 3612, 0), 'is_active': True},
+    {'add_core': 5000, 'add_btc': 10, 'expect_rewards': (5418, 0, 3612, 0), 'is_active': True}
 ])
 def test_stake_hub_calculate_reward(stake_hub, btc_agent, candidate_hub, core_agent, btc_stake, set_candidate, test):
     operators, consensuses = set_candidate

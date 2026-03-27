@@ -381,11 +381,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
   /// Claim reward for a delegator
   function claimReward(
     address delegator,
-    uint256,
-    uint256 settleRound,
     bool claim
-  ) external override onlyStakeHub returns (uint256 reward, int256 floatReward) {
-    uint256 totalReward = _processRewards(delegator, settleRound);
+  ) external override onlyStakeHub returns (uint256 reward) {
+    uint256 totalReward = _processRewards(delegator, roundTag - 1);
 
     if (totalReward > 0) {
       if (claim) {
@@ -396,8 +394,6 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber, ReentrancyGuar
       }
     }
 
-    // floatReward = 0 (no external subsidy in weight model)
-    return (reward, 0);
   }
 
   function _processRewards(address delegator, uint256 settleRound) internal returns (uint256 totalReward) {

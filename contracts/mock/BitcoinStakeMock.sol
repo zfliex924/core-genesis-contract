@@ -90,8 +90,8 @@ contract BitcoinStakeMock is BitcoinStake {
         return agentAddresses;
     }
     // for unit test
-    function collectRewardMock(bytes32 txid, uint256 coreAmount, uint256 drRound, uint256 settleRound, bool claim) external returns (uint256 reward, bool expired, int256 floatReward, uint256 remainingCoreAmount) {
-        return _collectReward(txid, coreAmount, drRound, settleRound, claim);
+    function collectRewardMock(bytes32 txid, uint256 drRound, uint256 settleRound, bool claim) external returns (uint256 reward, bool expired) {
+        return _collectReward(txid, drRound, settleRound, claim);
     }
     function getCalculateRoundMock(bytes32 txid, uint256 settleRound) external view returns (uint calculateRound, bool expired) {
         return _getCalculateRound(txid, settleRound);
