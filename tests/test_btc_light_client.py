@@ -92,19 +92,19 @@ def test_store_duplicate_block(btc_light_client):
             btc_light_client.storeBlockHeader(data)
 
 
-def test_distribute_relayer_reward(btc_light_client, system_reward):
+def test_distribute_relayer_reward(btc_light_client, relay_hub, system_reward):
     chain_tip = btc_light_client.getChainTip()
     idx = btc_light_client.getHeight(chain_tip) - btc_light_client.INIT_CHAIN_HEIGHT()
-    before_reward = btc_light_client.relayerRewardVault(accounts[0])
+    before_reward = relay_hub.relayerRewardVault(accounts[0])
 
     while True:
         btc_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
-        count_in_round = btc_light_client.countInRound()
+        count_in_round = relay_hub.countInRound()
         if count_in_round == 0:
             # already distributed reward
             break
-    after_reward = btc_light_client.relayerRewardVault(accounts[0])
+    after_reward = relay_hub.relayerRewardVault(accounts[0])
     assert after_reward > before_reward
 
     if after_reward > brownie.web3.eth.get_balance(system_reward.address):
@@ -112,7 +112,7 @@ def test_distribute_relayer_reward(btc_light_client, system_reward):
 
     tracker = get_tracker(accounts[0])
     # claim reward
-    tx = btc_light_client.claimRelayerReward(accounts[0], {'from': accounts[1]})
+    tx = relay_hub.claimRelayerReward(accounts[0], {'from': accounts[1]})
     assert tracker.delta(False) == after_reward
     expect_event(tx, "rewardTo", {"to": accounts[0], "amount": after_reward})
 

@@ -160,6 +160,14 @@ def channel(accounts):
     c.init()
     return c
 
+@pytest.fixture(scope="module")
+def zec_light_client(accounts):
+    c = accounts[0].deploy(ZcashLightClientMock)
+    c.init()
+    if is_development:
+        c.developmentInit()
+    return c
+
 # test contract
 @pytest.fixture(scope="module")
 def test_lib_memory(accounts):
@@ -184,11 +192,13 @@ def set_system_contract_address(
         core_agent,
         hash_power_agent,
         configuration,
-        channel
+        channel,
+        zec_light_client
 ):
     contracts = [
         validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
-        burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel
+        burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel,
+        zec_light_client
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
 

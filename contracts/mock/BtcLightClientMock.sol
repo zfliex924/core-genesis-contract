@@ -15,7 +15,6 @@ contract BtcLightClientMock is BtcLightClient {
     }
 
     function developmentInit() external {
-        rewardForSyncHeader = rewardForSyncHeader / 1e16;
     }
 
     function setBlock(bytes32 hash, bytes32 prevHash, address rewardAddr, address candidateAddr) public {

@@ -26,6 +26,7 @@ contract System {
   address public HASH_AGENT_ADDR;
   address public CONFIGURATION_ADDR;
   address public CHANNEL_ADDR;
+  address public ZEC_LIGHT_CLIENT_ADDR;
 
   struct SystemContractAddr {
     address validator;
@@ -44,6 +45,7 @@ contract System {
     address hashAgent;
     address configurationContract;
     address channel;
+    address zecLightClient;
   }
 
   function updateContractAddr(bytes memory _systemContractAddr) external {
@@ -64,6 +66,7 @@ contract System {
     HASH_AGENT_ADDR = systemContractAddr.hashAgent;
     CONFIGURATION_ADDR = systemContractAddr.configurationContract;
     CHANNEL_ADDR = systemContractAddr.channel;
+    ZEC_LIGHT_CLIENT_ADDR = systemContractAddr.zecLightClient;
   }
   
   function setAlreadyInit(bool value) external {

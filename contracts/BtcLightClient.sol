@@ -6,7 +6,7 @@ import "./lib/BytesToTypes.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./interface/ILightClient.sol";
 import "./interface/ICandidateHub.sol";
-import "./interface/ISystemReward.sol";
+import "./interface/IRelayerHub.sol";
 import "./interface/IParamSubscriber.sol";
 import "./System.sol";
 
@@ -37,26 +37,9 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
   bytes32 public heaviestBlock;
   bytes32 public initBlockHash;
 
-  uint256 constant public INIT_REWARD_FOR_SYNC_HEADER = 1e19;
-  uint256 public constant CALLER_COMPENSATION_MOLECULE = 50;
-  uint256 public constant ROUND_SIZE=100;
-  uint256 public constant MAXIMUM_WEIGHT=20;
   uint256 public constant CONFIRM_BLOCK = 6;
   uint256 public constant POWER_ROUND_GAP = 7;
   uint256 public constant INIT_STORE_BLOCK_GAS_PRICE = 35e9;
-
-  uint256 public callerCompensationMolecule;
-  uint256 public rewardForSyncHeader;
-  uint256 public roundSize;
-  uint256 public maxWeight;
-  uint256 public countInRound=0;
-  uint256 public collectedRewardForHeaderRelayer=0;
-  // Expire
-  uint256 public roundInterval;
-
-  address payable[] public headerRelayerAddressRecord;
-  mapping(address => uint256) public headerRelayersSubmitCount;
-  mapping(address => uint256) public relayerRewardVault;
 
   struct CandidatePower {
     // miner is the reward address of BTC miner
@@ -105,10 +88,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     adjustmentHashes[adjustment] = blockHash;
     bytes memory nodeBytes = encode(initBytes, rewardAddr, scoreBlock, INIT_CHAIN_HEIGHT, adjustment, candidateAddr);
     blockChain[blockHash] = nodeBytes;
-    rewardForSyncHeader = INIT_REWARD_FOR_SYNC_HEADER;
-    callerCompensationMolecule=CALLER_COMPENSATION_MOLECULE;
-    roundSize = ROUND_SIZE;
-    maxWeight = MAXIMUM_WEIGHT;
     storeBlockGasPrice = INIT_STORE_BLOCK_GAS_PRICE;
     height2HashMap[INIT_CHAIN_HEIGHT] = blockHash;
     alreadyInit = true;
@@ -159,16 +138,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     blockChain[blockHash] = encode(headerBytes, rewardAddr, scoreBlock, blockHeight, adjustment, candidateAddr);
     submitters[blockHash] = payable(msg.sender);
 
-    collectedRewardForHeaderRelayer += rewardForSyncHeader;
-    if (headerRelayersSubmitCount[msg.sender]==0) {
-      headerRelayerAddressRecord.push(payable(msg.sender));
-    }
-    headerRelayersSubmitCount[msg.sender]++;
-    if (++countInRound >= roundSize) {
-      uint256 callerHeaderReward = distributeRelayerReward();
-      relayerRewardVault[msg.sender] += callerHeaderReward;
-      countInRound = 0;
-    }
+    IRelayerHub(RELAYER_HUB_ADDR).recordHeaderSubmission(msg.sender);
 
     // bindingHash is left for future use
     // BTC miners who add latest Core block hash to their OP_RETURN output 
@@ -229,67 +199,6 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
       r.powerMap[candidate].miners.push(miner);
       r.powerMap[candidate].btcBlocks.push(blockHash);
       emit AddMinerPower(blockHash, candidate, miner);
-    }
-  }
-
-  /// Claim relayer rewards
-  /// @param relayerAddr The relayer address
-  function claimRelayerReward(address relayerAddr) external onlyInit {
-     uint256 reward = relayerRewardVault[relayerAddr];
-     require(reward != 0, "no relayer reward");
-     relayerRewardVault[relayerAddr] = 0;
-     address payable recipient = payable(relayerAddr);
-     ISystemReward(SYSTEM_REWARD_ADDR).claimRewards(recipient, reward);
-  }
-
-  /// Distribute relayer rewards
-  /// @dev This method is triggered once per round, the default round value is set to 100 (BTC blocks)
-  /// @dev And the weight of each relayer is calculated based on the `calculateRelayerWeight` method
-  /// @return The reward for the caller of this method
-  function distributeRelayerReward() internal returns (uint256) {
-    uint256 totalReward = collectedRewardForHeaderRelayer;
-
-    uint256 totalWeight=0;
-    address payable[] memory relayers = headerRelayerAddressRecord;
-    uint256 relayerSize = relayers.length;
-    uint256[] memory relayerWeight = new uint256[](relayerSize);
-    for (uint256 index = 0; index < relayerSize; index++) {
-      address relayer = relayers[index];
-      uint256 weight = calculateRelayerWeight(headerRelayersSubmitCount[relayer]);
-      relayerWeight[index] = weight;
-      totalWeight += weight;
-    }
-
-    uint256 callerReward = totalReward * callerCompensationMolecule / 10000;
-    totalReward -= callerReward;
-    uint256 remainReward = totalReward;
-    for (uint256 index = 1; index < relayerSize; index++) {
-      uint256 reward = relayerWeight[index] * totalReward / totalWeight;
-      relayerRewardVault[relayers[index]] += reward;
-      remainReward -= reward;
-    }
-    relayerRewardVault[relayers[0]] += remainReward;
-
-    collectedRewardForHeaderRelayer = 0;
-    for (uint256 index = 0; index < relayerSize; index++) {
-      delete headerRelayersSubmitCount[relayers[index]];
-    }
-    delete headerRelayerAddressRecord;
-    return callerReward;
-  }
-
-  /// Calculate relayer weight based number of BTC blocks relayed
-  /// @param count The number of BTC blocks relayed by a specific validator
-  /// @return The relayer weight
-  function calculateRelayerWeight(uint256 count) public view returns(uint256) {
-    if (count <= maxWeight) {
-      return count;
-    } else if (maxWeight < count && count <= 2*maxWeight) {
-      return maxWeight;
-    } else if (2*maxWeight < count && count <= (2*maxWeight + 3*maxWeight/4)) {
-      return 3*maxWeight - count;
-    } else {
-      return count/4;
     }
   }
 
@@ -615,31 +524,7 @@ contract BtcLightClient is ILightClient, System, IParamSubscriber{
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }
-    if (Memory.compareStrings(key,"rewardForSyncHeader")) {
-      uint256 newRewardForSyncHeader = BytesToTypes.bytesToUint256(32, value);
-      if (newRewardForSyncHeader == 0 || newRewardForSyncHeader > 1e20) {
-        revert OutOfBounds(key, newRewardForSyncHeader, 1, 1e20);
-      }
-      rewardForSyncHeader = newRewardForSyncHeader;
-    } else if (Memory.compareStrings(key,"callerCompensationMolecule")) {
-      uint256 newCallerCompensationMolecule = BytesToTypes.bytesToUint256(32, value);
-      if (newCallerCompensationMolecule > 10000) {
-        revert OutOfBounds(key, newCallerCompensationMolecule, 0, 10000);
-      }
-      callerCompensationMolecule = newCallerCompensationMolecule;
-    } else if (Memory.compareStrings(key,"roundSize")) {
-      uint256 newRoundSize = BytesToTypes.bytesToUint256(32, value);
-      if (newRoundSize < maxWeight) {
-        revert OutOfBounds(key, newRoundSize, maxWeight, type(uint256).max);
-      }
-      roundSize = newRoundSize;
-    } else if (Memory.compareStrings(key,"maxWeight")) {
-      uint256 newMaxWeight = BytesToTypes.bytesToUint256(32, value);
-      if (newMaxWeight == 0 || newMaxWeight > roundSize) {
-        revert OutOfBounds(key, newMaxWeight, 1, roundSize);
-      }
-      maxWeight = newMaxWeight;
-    } else if (Memory.compareStrings(key,"storeBlockGasPrice")) {
+    if (Memory.compareStrings(key,"storeBlockGasPrice")) {
       uint256 newStoreBlockGasPrice = BytesToTypes.bytesToUint256(32, value);
       if (newStoreBlockGasPrice < 1e9) {
         revert OutOfBounds(key, newStoreBlockGasPrice, 1e9, type(uint256).max);

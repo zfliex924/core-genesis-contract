@@ -7,6 +7,7 @@ contract RelayerHubMock is RelayerHub {
     function developmentInit() external {
         dues = dues / 1e16;
         requiredDeposit = requiredDeposit / 1e16;
+        rewardForSyncHeader = rewardForSyncHeader / 1e16;
     }
 
     function setRelayerRegister(address account, bool value) external {

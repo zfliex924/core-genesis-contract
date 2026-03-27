@@ -36,7 +36,8 @@ contract SystemReward is System, ISystemReward, IParamSubscriber {
   function init() external onlyNotInit {
     operators[LIGHT_CLIENT_ADDR] = true;
     operators[SLASH_CONTRACT_ADDR] = true;
-    numOperator = 2;
+    operators[RELAYER_HUB_ADDR] = true;
+    numOperator = 3;
     incentiveBalanceCap = INCENTIVE_BALANCE_CAP;
     alreadyInit = true;
   }
