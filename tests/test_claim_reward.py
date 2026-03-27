@@ -38,10 +38,10 @@ def init_system_reward_balance(system_reward):
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_block_reward(validator_set, candidate_hub, btc_stake, stake_hub, pledge_agent,
+def set_block_reward(validator_set, candidate_hub, btc_stake, stake_hub,
                      gov_hub, btc_agent, system_reward, core_agent):
     global BLOCK_REWARD, FEE, DELEGATE_VALUE, TOTAL_REWARD, MIN_INIT_DELEGATE_VALUE
-    global BTC_STAKE, STAKE_HUB, CANDIDATE_HUB, PLEDGE_AGENT, block_reward
+    global BTC_STAKE, STAKE_HUB, CANDIDATE_HUB, block_reward
     FEE = FEE * 100
     block_reward = validator_set.blockReward()
     block_reward_incentive_percent = validator_set.blockRewardIncentivePercent()
@@ -62,7 +62,6 @@ def set_block_reward(validator_set, candidate_hub, btc_stake, stake_hub, pledge_
     btc_agent.setInitLpRates(lp_rates_keys, lp_rates_values)
     btc_stake.setIsActive(True)
     btc_agent.setIsActive(True)
-    PLEDGE_AGENT = pledge_agent
     system_reward.setOperator(stake_hub.address)
 
 

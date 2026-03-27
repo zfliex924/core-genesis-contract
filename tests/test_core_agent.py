@@ -1567,63 +1567,38 @@ def test_multi_round_coin_stake_success(core_agent, set_candidate, round):
     reward = core_agent.collectCoinRewardMock(operators[0], accounts[0]).return_value
     assert reward == (TOTAL_REWARD * 2, MIN_INIT_DELEGATE_VALUE, MIN_INIT_DELEGATE_VALUE * 2)
 
-@pytest.mark.parametrize("operate", ['delegateCoin', 'undelegateCoin', 'transferCoin'])
-def test_only_pledge_agent_can_call_proxy(core_agent, validator_set, operate):
+def test_only_channel_can_call_proxy(core_agent, validator_set):
     delegate_amount = required_coin_deposit * 10
     operators, consensuses = __register_candidates(accounts[2:5])
-    error = 'the sender must be PledgeAgent or Channel contracts'
-    if operate == 'delegateCoin':
-        with brownie.reverts(error):
-            core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[2], 'value': delegate_amount})
-    elif operate == 'undelegateCoin':
-        with brownie.reverts(error):
-            core_agent.proxyUnDelegate(operators[0], accounts[0], delegate_amount, {'from': accounts[2]})
-    else:
-        with brownie.reverts(error):
-            core_agent.proxyTransfer(operators[0], operators[1], accounts[0], delegate_amount, {'from': accounts[2]})
+    error = 'the sender must be Channel contract'
+    with brownie.reverts(error):
+        core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[2], 'value': delegate_amount})
 
 
-@pytest.mark.parametrize("operate", ['delegateCoin', 'undelegateCoin', 'transferCoin'])
-def test_successful_proxy_method_call(core_agent, validator_set, operate, pledge_agent):
+def test_successful_proxy_delegate_call(core_agent, validator_set):
     delegate_amount = required_coin_deposit * 10
     operators, consensuses = __register_candidates(accounts[2:5])
-    update_system_contract_address(core_agent, pledge_agent=accounts[1])
+    update_system_contract_address(core_agent, channel=accounts[1])
     tx = core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[1], 'value': delegate_amount})
     assert tx.events['delegatedCoin']['amount'] == delegate_amount
-    coin_reward = TOTAL_REWARD
     turn_round()
-    if operate == 'delegateCoin':
-        core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[1], 'value': delegate_amount})
-    elif operate == 'undelegateCoin':
-        core_agent.proxyUnDelegate(operators[0], accounts[0], delegate_amount, {'from': accounts[1]})
-        coin_reward = 0
-    else:
-        core_agent.proxyTransfer(operators[0], operators[1], accounts[0], delegate_amount, {'from': accounts[1]})
+    core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[1], 'value': delegate_amount})
     turn_round(consensuses)
     tracker0 = get_tracker(accounts[0])
     stake_hub_claim_reward(accounts[0])
-    assert tracker0.delta() == coin_reward
+    assert tracker0.delta() == TOTAL_REWARD
 
-@pytest.mark.parametrize("operate", ['delegateCoin', 'undelegateCoin', 'transferCoin'])
-def test_proxy_operation_with_insufficient_amount_reverts(core_agent, validator_set, operate, pledge_agent):
+def test_proxy_delegate_with_insufficient_amount_reverts(core_agent, validator_set):
     delegate_amount = required_coin_deposit - 1
     operators, consensuses = __register_candidates(accounts[2:5])
     turn_round()
-    update_system_contract_address(core_agent, pledge_agent=accounts[1])
-    core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[1], 'value': delegate_amount * 2})
-    if operate == 'delegateCoin':
-        with brownie.reverts("delegate amount is too small"):
-            core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[1], 'value': delegate_amount})
-    elif operate == 'undelegateCoin':
-        with brownie.reverts("undelegate amount is too small"):
-            core_agent.proxyUnDelegate(operators[0], accounts[0], delegate_amount, {'from': accounts[1]})
-    else:
-        with brownie.reverts("undelegate amount is too small"):
-            core_agent.proxyTransfer(operators[0], operators[1], accounts[0], delegate_amount, {'from': accounts[1]})
+    update_system_contract_address(core_agent, channel=accounts[1])
+    with brownie.reverts("delegate amount is too small"):
+        core_agent.proxyDelegate(operators[0], accounts[0], 0, {'from': accounts[1], 'value': delegate_amount})
 
 
 def test_proxy_delegate2_unregistered_agent(core_agent):
-    update_system_contract_address(core_agent, pledge_agent=accounts[1])
+    update_system_contract_address(core_agent, channel=accounts[1])
     error_msg = encode_args_with_signature("InactiveCandidate(address)", [accounts[5].address])
     with brownie.reverts(f"{error_msg}"):
         core_agent.proxyDelegate(accounts[5], accounts[0], 0, {'from': accounts[1], 'value': MIN_INIT_DELEGATE_VALUE})
@@ -1633,25 +1608,10 @@ def test_proxy_delegate2refused(core_agent, candidate_hub, set_candidate):
     operators, consensuses = set_candidate
     turn_round()
     candidate_hub.refuseDelegate({'from': operators[0]})
-    update_system_contract_address(core_agent, pledge_agent=accounts[1])
+    update_system_contract_address(core_agent, channel=accounts[1])
     error_msg = encode_args_with_signature("InactiveCandidate(address)", [operators[0].address])
     with brownie.reverts(f"{error_msg}"):
         core_agent.proxyDelegate(operators[0], accounts[3], 0, {'from': accounts[1], 'value': MIN_INIT_DELEGATE_VALUE})
-
-
-def test_proxy_transfer2unregistered_agent(core_agent):
-    update_system_contract_address(core_agent, pledge_agent=accounts[0])
-    error_msg = encode_args_with_signature("InactiveCandidate(address)", [accounts[3].address])
-    with brownie.reverts(f"{error_msg}"):
-        core_agent.proxyTransfer(accounts[5], accounts[3], accounts[1], MIN_INIT_DELEGATE_VALUE)
-
-
-def test_proxy_transfer_coin_failed_with_same_agent(core_agent, set_candidate):
-    operators, consensuses = set_candidate
-    update_system_contract_address(core_agent, pledge_agent=accounts[0])
-    error_msg = encode_args_with_signature("SameCandidate(address)", [operators[0].address])
-    with brownie.reverts(f"{error_msg}"):
-        core_agent.proxyTransfer(operators[0], operators[0], accounts[1], MIN_INIT_DELEGATE_VALUE)
 
 
 def test_remove_delegation_success(core_agent, validator_set):

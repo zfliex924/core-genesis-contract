@@ -9,7 +9,6 @@ import "../interface/ICandidateHub.sol";
 import "../interface/IParamSubscriber.sol";
 import "../interface/ISlashIndicator.sol";
 import "../interface/IStakeHub.sol";
-import "../interface/IPledgeAgent.sol";
 import "../interface/ILightClient.sol";
 import "../System.sol";
 import "../lib/Address.sol";

@@ -253,19 +253,6 @@ def run_stake_operation(operation, candidate, account, operation_amount, target_
     return tx
 
 
-# delegate
-def run_proxy_stake_operation(operation, candidate, account, operation_amount, target_agent=None, candidates=None):
-    tx = None
-    if operation == 'proxy_delegate':
-        tx = proxy_delegate_coin_success(candidate, account, operation_amount)
-    elif operation == 'proxy_undelegate':
-        tx = proxy_undelegate_coin_success(candidate, account, operation_amount)
-    elif operation == 'proxy_transfer':
-        tx = proxy_transfer_coin_success(candidate, target_agent, account, operation_amount)
-    elif operation == 'proxy_claim':
-        tx = proxy_claim_reward_success(candidates, account)
-    return tx
-
 
 def delegate_coin_success(candidate, delegator, amount):
     tx = CoreAgentMock[0].delegateCoin(candidate, {'value': amount, 'from': delegator})
@@ -316,34 +303,6 @@ def delegate_power_success(candidate, delegator, value=1, stake_round=0):
     stake_round = get_current_round() - 6 + stake_round
     BtcLightClientMock[0].setMiners(stake_round, candidate, [delegator] * value)
 
-# old delegate
-def proxy_delegate_coin_success(candidate, account, amount):
-    tx = PledgeAgentMock[0].delegateCoin(candidate, {'value': amount, 'from': account})
-    assert 'delegatedCoin' in tx.events
-    return tx
-
-
-def proxy_undelegate_coin_success(candidate, account, amount=0):
-    tx = PledgeAgentMock[0].undelegateCoin(candidate, amount, {'from': account})
-    assert 'undelegatedCoin' in tx.events
-    return tx
-
-
-def proxy_transfer_coin_success(source_agent, target_agent, account, amount=0):
-    tx = PledgeAgentMock[0].transferCoin(source_agent, target_agent, amount, {'from': account})
-    assert 'transferredCoin' in tx.events
-    return tx
-
-
-def proxy_claim_reward_success(candidates, account=None):
-    if isinstance(account, list):
-        for a in account:
-            tx = PledgeAgentMock[0].claimReward(candidates, {'from': a})
-    else:
-        if account is None:
-            account = accounts[0]
-        tx = PledgeAgentMock[0].claimReward(candidates, {'from': account})
-    return tx
 
 class BtcScript:
     @staticmethod

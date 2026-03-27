@@ -2,7 +2,6 @@
 pragma solidity 0.8.4;
 
 import "../StakeHub.sol";
-import "../interface/IPledgeAgent.sol";
 import "../interface/IAgent.sol";
 
 contract StakeHubMock is StakeHub {

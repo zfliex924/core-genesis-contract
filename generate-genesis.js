@@ -115,11 +115,6 @@ Promise.all([
       "GovHub"
   ),
   compileContract(
-      "pledgeAgent",
-      "contracts/PledgeAgent.sol",
-      "PledgeAgent"
-  ),
-  compileContract(
     "burn",
     "contracts/Burn.sol",
     "Burn"

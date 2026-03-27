@@ -75,11 +75,6 @@ def deposit_for_reward(validator_set, system_reward):
     accounts[99].transfer(system_reward.address, Web3.to_wei(100000, 'ether'))
 
 
-def test_reinit(pledge_agent):
-    with brownie.reverts("the contract already init"):
-        pledge_agent.init()
-
-
 def test_validators_and_rewards_length_mismatch_revert(validator_set):
     validators = [accounts[1], accounts[2]]
     reward_list = [1000]
@@ -619,25 +614,6 @@ def test_claim_reward_all_asset_types_combined(stake_hub, btc_agent, core_agent,
     assert len(rewards) == 3
     assert tracker.delta() == TOTAL_REWARD - 2
     assert sum(rewards[1:]) == TOTAL_REWARD // 2
-
-
-def test_only_pledge_agent_can_call(stake_hub):
-    with brownie.reverts("the sender must be pledge agent contract"):
-        stake_hub.proxyClaimReward(accounts[0])
-
-
-def test_proxy_claim_reward_success(stake_hub, btc_agent, pledge_agent, set_candidate):
-    delegate_amount = 1000000
-    operators, consensuses = set_candidate
-    turn_round()
-    delegate_coin_success(operators[0], accounts[2], delegate_amount)
-    script, pay_address, timestamp = build_btc_lock_script()
-    delegate_btc_success(operators[1], accounts[2], 100, script, timestamp, relay=accounts[2])
-    turn_round(consensuses, round_count=2)
-    tracker = get_tracker(accounts[0])
-    update_system_contract_address(stake_hub, pledge_agent=accounts[0])
-    stake_hub.proxyClaimReward(accounts[2])
-    assert tracker.delta() == BLOCK_REWARD
 
 
 # _calculateReward

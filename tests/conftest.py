@@ -102,18 +102,6 @@ def validator_set(accounts):
 
 
 @pytest.fixture(scope="module")
-def pledge_agent(accounts):
-    accounts[0].deploy(BitcoinHelper)
-    accounts[0].deploy(TypedMemView)
-    accounts[0].deploy(SafeCast)
-    c = accounts[0].deploy(PledgeAgentMock)
-    c.init()
-    if is_development:
-        c.developmentInit()
-    return c
-
-
-@pytest.fixture(scope="module")
 def burn(accounts):
     c = accounts[0].deploy(Burn)
     c.init()
@@ -188,7 +176,6 @@ def set_system_contract_address(
         slash_indicator,
         system_reward,
         validator_set,
-        pledge_agent,
         burn,
         foundation,
         stake_hub,
@@ -201,7 +188,7 @@ def set_system_contract_address(
 ):
     contracts = [
         validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
-        pledge_agent, burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel
+        burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
 

@@ -90,7 +90,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   event storedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
 
   modifier onlyInternalCall() {
-    require(msg.sender == PLEDGE_AGENT_ADDR || msg.sender == CHANNEL_ADDR, "the sender must be PledgeAgent or Channel contracts");
+    require(msg.sender == CHANNEL_ADDR, "the sender must be Channel contract");
     _;
   }
 
@@ -261,11 +261,9 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     revert NotImplemented();
   }
 
-  /// for backward compatibility - allow users to unstake through PledgeAgent
-  /// support channel from v1.0.20
   /// @param candidate the validator candidate address
   /// @param delegator the delegator address
-  /// @param channelId the channel id, 0 represents from PledgeAgent
+  /// @param channelId the channel id
   function proxyDelegate(address candidate, address delegator, uint32 channelId) external payable override onlyInternalCall {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(candidate)) {
       revert InactiveCandidate(candidate);
@@ -277,39 +275,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     if (channelId != 0) {
       delegatorMap[delegator].channelAmount += msg.value;
     }
-  }
-
-  /// for backward compatibility - allow users to unstake through PledgeAgent
-  /// support channel from v1.0.20
-  /// @param candidate the validator candidate address
-  /// @param delegator the delegator address
-  /// @param amount the amount of CORE to unstake
-  function proxyUnDelegate(address candidate, address delegator, uint256 amount) external override onlyInternalCall returns(uint256) {
-    amount = undelegate(candidate, delegator, amount);
-    Address.sendValue(payable(PLEDGE_AGENT_ADDR), amount);
-    return amount;
-  }
-
-  /// for backward compatibility - allow users to transfer stake through PledgeAgent
-  /// @param sourceCandidate the validator candidate address to transfer from
-  /// @param targetCandidate the validator candidate address to transfer to
-  /// @param delegator the delegator address
-  /// @param amount the amount of CORE to unstake
-  function proxyTransfer(address sourceCandidate, address targetCandidate, address delegator, uint256 amount) external onlyInternalCall {
-    if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetCandidate)) {
-      revert InactiveCandidate(targetCandidate);
-    }
-    if (sourceCandidate == targetCandidate) {
-      revert SameCandidate(sourceCandidate);
-    }
-    IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
-    if (amount == 0) {
-      amount = candidateMap[sourceCandidate].cDelegatorMap[delegator].realtimeAmount;
-    }
-    _undelegateCoin(sourceCandidate, delegator, amount, true);
-    uint256 newDeposit = _delegateCoin(targetCandidate, delegator, amount, true);
-
-    emit transferredCoin(sourceCandidate, targetCandidate, delegator, amount, newDeposit);
   }
 
   /*********************** Internal methods ***************************/
@@ -336,8 +301,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   }
 
 
-  /// for backward compatibility - allow users to unstake through PledgeAgent
-  /// support channel from v1.0.20
   /// @param candidate the validator candidate address
   /// @param delegator the delegator address
   /// @param amount the amount of CORE to unstake

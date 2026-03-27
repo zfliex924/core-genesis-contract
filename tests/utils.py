@@ -178,7 +178,6 @@ def update_system_contract_address(update_contract,
                                    slash_indicator=None,
                                    system_reward=None,
                                    validator_set=None,
-                                   pledge_agent=None,
                                    burn=None,
                                    foundation=None,
                                    stake_hub=None,
@@ -203,8 +202,6 @@ def update_system_contract_address(update_contract,
         system_reward = SystemRewardMock[0]
     if validator_set is None:
         validator_set = ValidatorSetMock[0]
-    if pledge_agent is None:
-        pledge_agent = PledgeAgentMock[0]
     if burn is None:
         burn = Burn[0]
     if foundation is None:
@@ -225,7 +222,7 @@ def update_system_contract_address(update_contract,
         channel = Channel[0]
     contracts = [
         validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
-        pledge_agent, burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel
+        burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
     getattr(update_contract, "updateContractAddr")(args)

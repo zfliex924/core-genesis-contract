@@ -4,7 +4,7 @@ if [ ! -z "$name" ]; then
 	solc @openzeppelin/=$(pwd)/node_modules/@openzeppelin/ --optimize --overwrite --abi -o ./abi contracts/${name}.sol
 else
   contracts=( "BtcLightClient" "Burn" "CandidateHub" "Foundation" "GovHub" \
-    "PledgeAgent" "RelayerHub" "SlashIndicator" "SystemReward" "ValidatorSet" \
+    "RelayerHub" "SlashIndicator" "SystemReward" "ValidatorSet" \
     "BitcoinAgent" "BitcoinStake" "HashPowerAgent" "CoreAgent" \
     "StakeHub" "Channel" "Configuration")
 

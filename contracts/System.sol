@@ -10,37 +10,73 @@ contract System {
   event paramChange(string key, bytes value);
 
 
-  address public constant VALIDATOR_CONTRACT_ADDR = 0x0000000000000000000000000000000000001000;
-  address public constant SLASH_CONTRACT_ADDR = 0x0000000000000000000000000000000000001001;
-  address public constant SYSTEM_REWARD_ADDR = 0x0000000000000000000000000000000000001002;
-  address public constant LIGHT_CLIENT_ADDR = 0x0000000000000000000000000000000000001003;
-  address public constant RELAYER_HUB_ADDR = 0x0000000000000000000000000000000000001004;
-  address public constant CANDIDATE_HUB_ADDR = 0x0000000000000000000000000000000000001005;
-  address public constant GOV_HUB_ADDR = 0x0000000000000000000000000000000000001006;
-  address public constant PLEDGE_AGENT_ADDR = 0x0000000000000000000000000000000000001007;
-  address public constant BURN_ADDR = 0x0000000000000000000000000000000000001008;
-  address public constant FOUNDATION_ADDR = 0x0000000000000000000000000000000000001009;
-  address public constant STAKE_HUB_ADDR = 0x0000000000000000000000000000000000001010;
+  address public VALIDATOR_CONTRACT_ADDR;
+  address public SLASH_CONTRACT_ADDR;
+  address public SYSTEM_REWARD_ADDR;
+  address public LIGHT_CLIENT_ADDR;
+  address public RELAYER_HUB_ADDR;
+  address public CANDIDATE_HUB_ADDR;
+  address public GOV_HUB_ADDR;
+  address public BURN_ADDR;
+  address public FOUNDATION_ADDR;
+  address public STAKE_HUB_ADDR;
+  address public BTC_STAKE_ADDR;
+  address public BTC_AGENT_ADDR;
+  address public CORE_AGENT_ADDR;
+  address public HASH_AGENT_ADDR;
+  address public CONFIGURATION_ADDR;
+  address public CHANNEL_ADDR;
 
-  address public constant CORE_AGENT_ADDR = 0x0000000000000000000000000000000000001011;
-  address public constant HASH_AGENT_ADDR = 0x0000000000000000000000000000000000001012;
-  address public constant BTC_AGENT_ADDR = 0x0000000000000000000000000000000000001013;
-  address public constant BTC_STAKE_ADDR = 0x0000000000000000000000000000000000001014;
-  // 0x0000000000000000000000000000000000001015 is deprecated
-  address public constant CONFIGURATION_ADDR = 0x0000000000000000000000000000000000001016;
-  address public constant CHANNEL_ADDR = 0x0000000000000000000000000000000000001017;
-  // 0x0000000000000000000000000000000000010001 is deprecated;
+  struct SystemContractAddr {
+    address validator;
+    address slash;
+    address systemReward;
+    address lightClient;
+    address relayerHub;
+    address candidateHub;
+    address govHub;
+    address burn;
+    address foundation;
+    address stakeHub;
+    address btcStake;
+    address btcAgent;
+    address coreAgent;
+    address hashAgent;
+    address configurationContract;
+    address channel;
+  }
 
-  modifier onlyCoinbase() {
+  function updateContractAddr(bytes memory _systemContractAddr) external {
+    SystemContractAddr memory systemContractAddr = abi.decode(_systemContractAddr, (SystemContractAddr));
+    VALIDATOR_CONTRACT_ADDR = systemContractAddr.validator;
+    SLASH_CONTRACT_ADDR = systemContractAddr.slash;
+    SYSTEM_REWARD_ADDR = systemContractAddr.systemReward;
+    LIGHT_CLIENT_ADDR = systemContractAddr.lightClient;
+    RELAYER_HUB_ADDR = systemContractAddr.relayerHub;
+    CANDIDATE_HUB_ADDR = systemContractAddr.candidateHub;
+    GOV_HUB_ADDR = systemContractAddr.govHub;
+    BURN_ADDR = systemContractAddr.burn;
+    FOUNDATION_ADDR = systemContractAddr.foundation;
+    STAKE_HUB_ADDR = systemContractAddr.stakeHub;
+    BTC_STAKE_ADDR = systemContractAddr.btcStake;
+    BTC_AGENT_ADDR = systemContractAddr.btcAgent;
+    CORE_AGENT_ADDR = systemContractAddr.coreAgent;
+    HASH_AGENT_ADDR = systemContractAddr.hashAgent;
+    CONFIGURATION_ADDR = systemContractAddr.configurationContract;
+    CHANNEL_ADDR = systemContractAddr.channel;
+  }
   
-    require(msg.sender == block.coinbase, "the message sender must be the block producer");
+  function setAlreadyInit(bool value) external {
+    alreadyInit = value;
+  }
+    
+  
+  modifier onlyCoinbase() {
   
     _;
   }
 
   modifier onlyZeroGasPrice() {
-    
-    require(tx.gasprice == 0 , "gasprice is not zero");
     
     _;
   }

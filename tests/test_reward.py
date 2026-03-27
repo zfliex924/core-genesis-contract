@@ -106,10 +106,9 @@ class StateMachine:
     is_turn_round = strategy('bool')
     operate_count = strategy('uint', min_value=10, max_value=20)
 
-    def __init__(self, candidate_hub, pledge_agent, validator_set, btc_light_client, slash_indicator,
+    def __init__(self, candidate_hub, validator_set, btc_light_client, slash_indicator,
                  stake_hub, btc_stake, btc_lst_stake, core_agent, relay_hub, gov_hub):
         self.candidate_hub = candidate_hub
-        self.pledge_agent = pledge_agent
         self.validator_set = validator_set
         self.btc_light_client = btc_light_client
         self.slash_indicator = slash_indicator
@@ -324,8 +323,6 @@ class StateMachine:
                 old_delegate_coin_success(operator, delegator, core_amount)
                 self.delegate_map['coin'][delegator] += core_amount
                 agents_map[operator]['coin'] += core_amount
-        for i in self.operators:
-            print('self.pledge_agent.agentsMap', self.pledge_agent.agentsMap(i))
         print('delegate_map>>>>>>>>>>>>>>>>>', self.delegate_map)
         print('agents_map>>>>>>>>>>>>>>>>>', agents_map)
         return tx_ids
@@ -338,12 +335,12 @@ class StateMachine:
             operator = random.choice(self.operators)
             delegator = random.choice(list(self.delegate_map['coin'].keys()))
             if op == 'undelegate':
-                if self.pledge_agent.getDelegator(operator, delegator)['newDeposit'] > 0:
+                if self.core_agent.getDelegator(operator, delegator)['realtimeAmount'] > 0:
                     tx = old_undelegate_coin_success(operator, delegator, 0)
                     print('old_undelegate_coin_success>>>>>>>>>>', tx.events)
             else:
                 operator1 = random.choice(self.operators)
-                if self.pledge_agent.getDelegator(operator, delegator)['newDeposit'] > 0:
+                if self.core_agent.getDelegator(operator, delegator)['realtimeAmount'] > 0:
                     if operator1 != operator:
                         tx = old_transfer_coin_success(operator, operator1, delegator, 0)
                         print('old_transfer_coin_success>>>>>>>>>>', tx.events)
@@ -396,12 +393,11 @@ class StateMachine:
                 agents_map[operator]['coin'] += core_amount
 
 
-def test_stateful(state_machine, candidate_hub, pledge_agent, validator_set, btc_light_client, slash_indicator,
+def test_stateful(state_machine, candidate_hub, validator_set, btc_light_client, slash_indicator,
                   stake_hub, btc_stake, btc_lst_stake, core_agent, relay_hub, gov_hub):
     state_machine(
         StateMachine,
         candidate_hub,
-        pledge_agent,
         validator_set,
         btc_light_client,
         slash_indicator,

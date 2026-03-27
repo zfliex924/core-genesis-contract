@@ -19,7 +19,7 @@ import "./lib/SatoshiPlusHelper.sol";
 import "./lib/SafeCast.sol";
 
 /// This contract deals with overall hybrid score and reward distribution logics. 
-/// It replaces the existing role of PledgeAgent.sol to interact with CandidateHub.sol and other protocol contracts during the turnround process. 
+/// It interacts with CandidateHub.sol and other protocol contracts during the turnround process.
 /// Underneath it interacts with the new agent contracts to deal with CORE, BTC and hash staking separately. 
 contract StakeHub is IStakeHub, System, IParamSubscriber {
   using BytesLib for *;
@@ -77,18 +77,12 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   event claimedRelayerReward(address indexed relayer, uint256 amount);
   event received(address indexed from, uint256 amount);
 
-  modifier onlyPledgeAgent() {
-    require(msg.sender == PLEDGE_AGENT_ADDR, "the sender must be pledge agent contract");
-    _;
-  }
-
   function init() external onlyNotInit {
     // initialize list of supported assets
     assets.push(Asset("CORE", CORE_AGENT_ADDR, 6000));
     assets.push(Asset("HASHPOWER", HASH_AGENT_ADDR, 2000));
     assets.push(Asset("BTC", BTC_AGENT_ADDR, 4000));
 
-    operators[PLEDGE_AGENT_ADDR] = true;
     operators[CORE_AGENT_ADDR] = true;
     operators[HASH_AGENT_ADDR] = true;
     operators[BTC_AGENT_ADDR] = true;
@@ -248,31 +242,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     if (reward != 0) {
       Address.sendValue(payable(delegator), reward);
       emit claimedReward(delegator, rewards);
-    }
-  }
-
-  /// Claim reward for PledgeAgent
-  /// @param delegator delegator address
-  /// @return reward Amounts claimed
-  function proxyClaimReward(address delegator) external onlyPledgeAgent returns (uint256 reward) {
-    uint256[] memory rewards = _calculateReward(delegator, true);
-
-    Delegator storage d  = delegatorMap[delegator];
-    for (uint256 i = 0; i < d.rewards.length; i++) {
-      rewards[i] += d.rewards[i];
-    }
-    uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
-    if (d.changeRound != currentRound) {
-      d.changeRound = currentRound;
-    }
-    delete delegatorMap[delegator].rewards;
-
-
-    for (uint256 i = 0; i < rewards.length; i++) {
-      reward += rewards[i];
-    }
-    if (reward != 0) {
-      Address.sendValue(payable(PLEDGE_AGENT_ADDR), reward);
     }
   }
 

@@ -172,7 +172,7 @@ contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
     }
   }
 
-  /// Distribute rewards to validators (and delegators through PledgeAgent)
+  /// Distribute rewards to validators (and delegators through StakeHub)
   /// @dev this method is called by the CandidateHub contract at the beginning of turn round
   /// @dev this is where we deal with reward distribution logics
   function distributeReward(uint256 roundTag) external override onlyCandidate returns (address[] memory operateAddressList) {

@@ -29,7 +29,7 @@ felony_deposit = int(1e5)
 
 
 @pytest.fixture(scope="module", autouse=True)
-def setup(system_reward, validator_set, pledge_agent, core_agent, stake_hub, candidate_hub):
+def setup(system_reward, validator_set, core_agent, stake_hub, candidate_hub):
     global account_tracker, system_reward_tracker, validator_set_tracker, stake_hub_tracker
     global validator_set_instance
     global BLOCK_REWARD, block_reward, validator_count

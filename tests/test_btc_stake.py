@@ -29,9 +29,9 @@ def deposit_for_reward(validator_set, gov_hub):
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_block_reward(validator_set, candidate_hub, btc_light_client, btc_stake, pledge_agent, stake_hub, core_agent):
+def set_block_reward(validator_set, candidate_hub, btc_light_client, btc_stake, stake_hub, core_agent):
     global BLOCK_REWARD, FEE
-    global BTC_STAKE, STAKE_HUB, CORE_AGENT, TOTAL_REWARD, PLEDGE_AGENT
+    global BTC_STAKE, STAKE_HUB, CORE_AGENT, TOTAL_REWARD
     FEE = FEE * Utils.CORE_DECIMAL
     block_reward = validator_set.blockReward()
     block_reward_incentive_percent = validator_set.blockRewardIncentivePercent()
@@ -44,7 +44,6 @@ def set_block_reward(validator_set, candidate_hub, btc_light_client, btc_stake, 
     BTC_STAKE = btc_stake
     STAKE_HUB = stake_hub
     CORE_AGENT = core_agent
-    PLEDGE_AGENT = pledge_agent
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -1850,7 +1849,7 @@ def test_transfer_to_zero_address(btc_stake, set_candidate):
     with brownie.reverts(error_msg):
         transfer_btc_success(tx_id, ZERO_ADDRESS, accounts[0])
 
-def test_get_grades_success(btc_stake, pledge_agent, set_candidate):
+def test_get_grades_success(btc_stake, set_candidate):
     update_system_contract_address(btc_stake, gov_hub=accounts[0])
     grades = [[0, 1], [1000, 2000]]
     grades_encode = rlp.encode(grades)
@@ -1858,7 +1857,7 @@ def test_get_grades_success(btc_stake, pledge_agent, set_candidate):
     assert btc_stake.getGrades() == [[0, 1], [grades[1][0] * Utils.ROUND_INTERVAL, 2000]]
 
 
-def test_get_expire_value_success(btc_stake, pledge_agent, set_candidate):
+def test_get_expire_value_success(btc_stake, set_candidate):
     operators, consensuses = set_candidate
     delegate_btc_success(operators[0], accounts[0], BTC_VALUE, LOCK_SCRIPT)
     end_round = 20103

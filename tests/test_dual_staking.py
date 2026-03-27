@@ -35,7 +35,7 @@ def deposit_for_reward(validator_set, gov_hub, system_reward):
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_block_reward(validator_set, candidate_hub, btc_light_client, btc_stake, stake_hub, core_agent, pledge_agent,
+def set_block_reward(validator_set, candidate_hub, btc_light_client, btc_stake, stake_hub, core_agent,
                      gov_hub, hash_power_agent, btc_agent, system_reward):
     global BLOCK_REWARD, FEE, COIN_REWARD, BTC_REWARD_NO_POWER, COIN_REWARD_NO_POWER, BTC_REWARD, TOTAL_REWARD, HASH_POWER_AGENT, BTC_AGENT, stake_manager
     global BTC_STAKE, STAKE_HUB, CORE_AGENT, BTC_LIGHT_CLIENT, MIN_INIT_DELEGATE_VALUE, CANDIDATE_HUB
@@ -1052,7 +1052,7 @@ def test_claim_dual_staking_reward_after_btc_expiration(btc_stake, stake_hub, co
     assert tracker.delta() == actual_reward
 
 
-def test_coin_staking_reward_settlement(set_candidate, pledge_agent, stake_hub):
+def test_coin_staking_reward_settlement(set_candidate, stake_hub):
     stake_manager.set_is_stake_hub_active(True)
     stake_manager.set_tlp_rates()
     operators, consensuses = set_candidate
@@ -1308,8 +1308,7 @@ def test_claim_reward_after_current_round_operation(stake_hub, set_candidate):
     assert tracker.delta() == btc_reward + BTC_REWARD_NO_POWER + coin_reward + COIN_REWARD_NO_POWER
 
 
-@pytest.mark.parametrize("claim", [True, False])
-def test_proxy_claim_reward_after_current_round_operation(stake_hub, set_candidate, claim):
+def test_claim_reward_after_current_round_operation(stake_hub, set_candidate):
     stake_manager.set_is_stake_hub_active(True)
     stake_manager.set_tlp_rates()
     operators, consensuses = set_candidate
@@ -1319,18 +1318,12 @@ def test_proxy_claim_reward_after_current_round_operation(stake_hub, set_candida
     delegate_coin_success(operators[0], accounts[0], delegate_amount)
     turn_round(consensuses)
     delegate_btc_success(operators[0], accounts[0], btc_value, LOCK_SCRIPT)
-    proxy_claim_reward_success(operators, accounts[0])
-    if claim:
-        proxy_claim_reward_success(operators, accounts[0])
-    else:
-        stake_hub_claim_reward(accounts[0])
+    stake_hub_claim_reward(accounts[0])
+    stake_hub_claim_reward(accounts[0])
     turn_round(consensuses, round_count=2)
     tracker = get_tracker(accounts[0])
     stake_manager.set_lp_rates([[4999, 1000], [5000, 20000], [5001, 1000]])
-    if claim:
-        tx = proxy_claim_reward_success(operators, accounts[0])
-    else:
-        tx = stake_hub_claim_reward(accounts[0])
+    tx = stake_hub_claim_reward(accounts[0])
     event_name = ['claimedCoinReward', 'claimedRewardBtcTx']
     expect_event(tx, event_name[0], {
         'amount': COIN_REWARD_NO_POWER + TOTAL_REWARD,
