@@ -149,7 +149,6 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       require(zecAmount != 0, "staked value is zero");
       require(ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(candidate), "inactive candidate");
       require(IRelayerHub(RELAYER_HUB_ADDR).isRelayer(msg.sender), "only relayer can submit");
-      IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
 
       zecTxMap[txid] = ZecTx({
         amount: zecAmount,
@@ -259,16 +258,15 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   }
 
   function claimReward(
-    address delegator,
-    bool claim
+    address delegator
   ) external override onlyStakeHub returns (uint256 reward) {
-    reward = _processRewards(delegator, roundTag - 1, claim);
-    if (reward > 0 && claim) {
+    reward = _processRewards(delegator, roundTag - 1);
+    if (reward > 0) {
       emit claimedReward(delegator, reward);
     }
   }
 
-  function _processRewards(address delegator, uint256 settleRound, bool claim) internal returns (uint256 totalReward) {
+  function _processRewards(address delegator, uint256 settleRound) internal returns (uint256 totalReward) {
     bytes32[] storage txids = delegatorTxids[delegator];
 
     for (uint256 i = txids.length; i > 0; --i) {
@@ -283,29 +281,19 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
       // Include previously settled reward (from dualStake multiplier change)
       txReward += dr.reward;
-
-      if (txReward > 0) {
-        if (claim) {
-          dr.reward = 0;
-          totalReward += txReward;
-        } else {
-          dr.reward = txReward;
-        }
-      }
+      dr.reward = 0;
+      totalReward += txReward;
 
       // Clean up expired stakes
       if (expired) {
-        // Refund dual stake if exists
         if (dr.dualStakeAmount > 0) {
           uint256 refund = dr.dualStakeAmount;
           dr.dualStakeAmount = 0;
           Address.sendValue(payable(dr.delegator), refund);
         }
-        if (claim && dr.reward == 0) {
-          delete receiptMap[txid];
-          txids[i - 1] = txids[txids.length - 1];
-          txids.pop();
-        }
+        delete receiptMap[txid];
+        txids[i - 1] = txids[txids.length - 1];
+        txids.pop();
       }
     }
   }

@@ -437,13 +437,6 @@ def build_btc_lock_script(timestamp=None):
     script, pay_address = BtcScript().k2_btc_script(private_key_hex, timestamp, scrip_type, lock_script_type)
     return script, pay_address, timestamp
 
-class StakeManager:
-    @staticmethod
-    def set_stake_hub_delegator_map(account, change_round, rewards=None):
-        if rewards is None:
-            rewards = []
-        StakeHubMock[0].setDelegatorMap(account, change_round, rewards)
-
 
 class RoundRewardManager:
     @staticmethod

@@ -147,8 +147,6 @@ def test_claim_reward_after_transfer_to_duplicated_validator(core_agent, stake_h
             core_agent.delegateCoin(operator, {"value": MIN_INIT_DELEGATE_VALUE, "from": client})
     turn_round()
     core_agent.transferCoin(operators[0], operators[1], MIN_INIT_DELEGATE_VALUE, {"from": clients[0]})
-    stake_hub_reward_map = stake_hub.getDelegatorMap(accounts[0])
-    assert stake_hub_reward_map == [get_current_round(), [0, 0, 0]]
     turn_round(consensuses, round_count=2)
     tracker0 = get_tracker(clients[0])
     tracker1 = get_tracker(clients[1])
@@ -2065,10 +2063,6 @@ def test_cancel_after_skip_round(core_agent, validator_set, set_candidate, stake
     turn_round(consensuses)
     transfer_coin_success(operators[0], operators[2], accounts[0], delegate_amount // 2)
     undelegate_coin_success(operators[2], accounts[0], delegate_amount + delegate_amount // 2)
-    stake_delegator_map = stake_hub.getDelegatorMap(accounts[0])
-    # Settlement of historical rewards during unstaking.
-    actual_reward = TOTAL_REWARD // 2 * 3
-    assert stake_delegator_map[1][0] == actual_reward
     turn_round(consensuses)
     actual_reward += TOTAL_REWARD // 2 + TOTAL_REWARD // 4
     tracker0 = get_tracker(accounts[0])

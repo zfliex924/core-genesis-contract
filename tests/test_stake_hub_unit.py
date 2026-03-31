@@ -239,18 +239,6 @@ def __mock_stake_hub_reward():
     accounts[3].transfer(STAKE_HUB, Web3.to_wei(1, 'ether'))
 
 
-def test_calculate_reward_only_core_stakes(stake_hub, core_agent, set_candidate):
-    operators, consensuses = set_candidate
-    delegator = accounts[0]
-    delegate_coin_success(operators[0], delegator, 10000)
-    turn_round()
-    turn_round(consensuses, round_count=2)
-    tx = stake_hub.calculateReward(delegator, {'from': accounts[1]})
-    delegator_info = stake_hub.getDelegator(delegator)
-    assert delegator_info[0] == get_current_round()
-    assert len(delegator_info[1]) == 3
-    assert delegator_info[1][0] == COIN_REWARD * 2
-
 
 def test_get_assets_success(stake_hub, core_agent, hash_power_agent, zec_agent):
     assets = stake_hub.getAssets()

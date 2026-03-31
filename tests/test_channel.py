@@ -1652,4 +1652,3 @@ def test_claim_reward_after_multi_users_delegate_through_same_channel(
     stake_hub.claimReward({'from': delegator1})
     assert delegator1.balance() - init_balance1 == expected_remaining
 
-    stake_hub.calculateReward(delegator2)

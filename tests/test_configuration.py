@@ -3,12 +3,9 @@ import brownie
 import rlp
 from eth_utils import to_bytes
 
-from .delegate import StakeManager
 from .utils import *
 from .common import register_candidate, execute_proposal
 from web3 import Web3
-
-stake_manager = StakeManager()
 
 
 @pytest.fixture(scope="module", autouse=True)

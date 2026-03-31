@@ -34,8 +34,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   // other smart contracts granted to interact with StakeHub
   mapping(address => bool) public operators;
 
-  // Delegator's map
-  mapping(address => Delegator) public delegatorMap;
 
   struct Asset {
     string  name;
@@ -46,11 +44,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
   struct AssetState {
     uint256 amount;
     uint256 factor;
-  }
-
-  struct Delegator {
-    uint256 changeRound;
-    uint256[] rewards;
   }
 
   /*********************** events **************************/
@@ -178,66 +171,21 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     }
   }
 
-  /// Claim reward for delegator
-  /// @return rewards Amounts claimed
+  /// Claim reward for delegator across all agents
+  /// @return rewards Amounts claimed per asset
   function claimReward() external returns (uint256[] memory rewards) {
     address delegator = msg.sender;
-    rewards = _calculateReward(delegator, true);
-
-    Delegator storage d  = delegatorMap[delegator];
-    for (uint256 i = 0; i < d.rewards.length; i++) {
-      rewards[i] += d.rewards[i];
-    }
-    uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
-    if (d.changeRound != currentRound) {
-      d.changeRound = currentRound;
-    }
-    delete delegatorMap[delegator].rewards;
-
-    uint256 reward;
-    for (uint256 i = 0; i < rewards.length; i++) {
-      reward += rewards[i];
-    }
-    if (reward != 0) {
-      Address.sendValue(payable(delegator), reward);
-      emit claimedReward(delegator, rewards);
-    }
-  }
-
-  /// This method is invoked whenever user stake changes.
-  /// @param delegator delegator address
-  function onStakeChange(address delegator) override external {
-    calculateReward(delegator);
-  }
-
-  // Calculate reward for delegator.
-  /// @param delegator delegator address
-  function calculateReward(address delegator) public {
-    Delegator storage d = delegatorMap[delegator];
-    uint256 currentRound = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag();
-    if (d.changeRound != currentRound) {
-      uint256[] memory rewards = _calculateReward(delegator, false);
-      for (uint256 i = 0; i < rewards.length; i++) {
-        if (d.rewards.length == i) {
-          d.rewards.push(rewards[i]);
-        } else {
-          d.rewards[i] += rewards[i];
-        }
-      }
-      d.changeRound = currentRound;
-    }
-  }
-
-  /// Calculate reward for delegator
-  /// No more cross-agent dependency (surplus/floatReward removed)
-  /// Each agent calculates rewards independently
-  function _calculateReward(address delegator, bool claim) internal returns (uint256[] memory rewards) {
     uint256 assetSize = assets.length;
     rewards = new uint256[](assetSize);
 
-    // All agents use unified IAgent.claimReward (each uses internal roundTag - 1)
+    uint256 total;
     for (uint256 i = 0; i < assetSize; ++i) {
-      rewards[i] = IAgent(assets[i].agent).claimReward(delegator, claim);
+      rewards[i] = IAgent(assets[i].agent).claimReward(delegator);
+      total += rewards[i];
+    }
+    if (total != 0) {
+      Address.sendValue(payable(delegator), total);
+      emit claimedReward(delegator, rewards);
     }
   }
 
@@ -280,7 +228,4 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     return assets;
   }
 
-  function getDelegator(address delegator) external view returns(Delegator memory) {
-    return delegatorMap[delegator];
-  }
 }

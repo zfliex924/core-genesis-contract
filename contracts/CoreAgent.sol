@@ -6,7 +6,6 @@ import "./interface/ICoreAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/ISystemReward.sol";
-import "./interface/IStakeHub.sol";
 import "./lib/Address.sol";
 import "./lib/BytesToTypes.sol";
 import "./lib/Memory.sol";
@@ -85,9 +84,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     uint256 realtimeAmount
   );
   event claimedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
-  event storedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
   event collectedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
-  event storedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
 
   modifier onlyInternalCall() {
     require(msg.sender == CHANNEL_ADDR, "the sender must be Channel contract");
@@ -179,7 +176,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       revert InactiveCandidate(candidate);
     }
     require(msg.value >= requiredCoinDeposit, "delegate amount is too small");
-    IStakeHub(STAKE_HUB_ADDR).onStakeChange(msg.sender);
     uint256 realtimeAmount = _delegateCoin(candidate, msg.sender, msg.value, false);
     emit delegatedCoin(candidate, msg.sender, msg.value, realtimeAmount);
   }
@@ -203,7 +199,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     if (sourceCandidate == targetCandidate) {
       revert SameCandidate(sourceCandidate);
     }
-    IStakeHub(STAKE_HUB_ADDR).onStakeChange(msg.sender);
     _undelegateCoin(sourceCandidate, msg.sender, amount, true);
     uint256 newDeposit = _delegateCoin(targetCandidate, msg.sender, amount, true);
 
@@ -212,9 +207,8 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
-  /// @param claim claim or store rewards
   /// @return reward Amount claimed
-  function claimReward(address delegator, bool claim) external override onlyStakeHub returns (uint256 reward) {
+  function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward) {
     address[] storage candidates = delegatorMap[delegator].candidates;
     uint256 candidateSize = candidates.length;
     address candidate;
@@ -226,11 +220,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       (txReward, , ) = _collectRewardFromCandidate(candidate, cd);
       rewardSum += txReward;
       if (txReward != 0) {
-        if (claim) {
-          emit collectedReward(candidate, delegator, txReward, 0);
-        } else {
-          emit storedReward(candidate, delegator, txReward, 0);
-        }
+        emit collectedReward(candidate, delegator, txReward, 0);
       }
       if (cd.realtimeAmount == 0 && cd.transferredAmount == 0) {
         _removeDelegation(delegator, candidate);
@@ -243,11 +233,7 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
     }
     reward += rewardSum;
     if (reward != 0) {
-      if (claim) {
-        emit claimedCoinReward(delegator, reward, 0);
-      } else {
-        emit storedCoinReward(delegator, reward, 0);
-      }
+      emit claimedCoinReward(delegator, reward, 0);
     }
   }
 
@@ -259,7 +245,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
       revert InactiveCandidate(candidate);
     }
     require(msg.value >= requiredCoinDeposit, "delegate amount is too small");
-    IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
     uint256 realtimeAmount = _delegateCoin(candidate, delegator, msg.value, false);
     emit delegatedCoin(candidate, delegator, msg.value, realtimeAmount);
     if (channelId != 0) {
@@ -295,7 +280,6 @@ contract CoreAgent is ICoreAgent, System, IParamSubscriber {
   /// @param delegator the delegator address
   /// @param amount the amount of CORE to unstake
   function undelegate(address candidate, address delegator, uint256 amount) internal returns(uint256) {
-    IStakeHub(STAKE_HUB_ADDR).onStakeChange(delegator);
     if (amount == 0) {
       amount = candidateMap[candidate].cDelegatorMap[delegator].realtimeAmount;
     }

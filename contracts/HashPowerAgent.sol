@@ -18,7 +18,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   /*********************** events **************************/
   event claimedHashReward(address indexed delegator, uint256 amount);
   event validatorAvgReward(address indexed validator, uint256 avgReward);
-  event storedHashReward(address indexed delegator, uint256 amount);
 
   struct Reward {
     uint256 reward;
@@ -84,17 +83,12 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
-  /// @param claim claim or store claim
   /// @return reward Amount claimed
-  function claimReward(address delegator, bool claim) external override onlyStakeHub returns (uint256 reward) {
+  function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward) {
     reward = rewardMap[delegator].reward;
     if (reward != 0) {
       delete rewardMap[delegator];
-      if (claim) {
-        emit claimedHashReward(delegator, reward);
-      } else {
-        emit storedHashReward(delegator, reward);
-      }
+      emit claimedHashReward(delegator, reward);
     }
   }
 

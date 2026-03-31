@@ -31,7 +31,6 @@ interface IAgent {
 
   /// Claim reward for delegator
   /// @param delegator the delegator address
-  /// @param claim claim or store rewards
   /// @return reward Amount claimed
-  function claimReward(address delegator, bool claim) external returns (uint256 reward);
+  function claimReward(address delegator) external returns (uint256 reward);
 }
