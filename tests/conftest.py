@@ -110,7 +110,7 @@ def burn(accounts):
 
 @pytest.fixture(scope="module")
 def core_agent(accounts):
-    c = accounts[0].deploy(CoreAgentMock)
+    c = accounts[0].deploy(NativeAgentMock)
     c.init()
     if is_development:
         c.developmentInit()

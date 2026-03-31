@@ -209,7 +209,7 @@ def update_system_contract_address(update_contract,
     if stake_hub is None:
         stake_hub = StakeHubMock[0]
     if core_agent is None:
-        core_agent = CoreAgentMock[0]
+        core_agent = NativeAgentMock[0]
     if hash_power_agent is None:
         hash_power_agent = HashPowerAgentMock[0]
     if configuration is None:

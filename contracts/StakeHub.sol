@@ -53,11 +53,11 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   function init() external onlyNotInit {
     // initialize list of supported assets
-    assets.push(Asset("CORE", CORE_AGENT_ADDR, 6000));
+    assets.push(Asset("CORE", NATIVE_AGENT_ADDR, 6000));
     assets.push(Asset("HASHPOWER", HASH_AGENT_ADDR, 2000));
     assets.push(Asset("ZEC", ZEC_AGENT_ADDR, 3000));
 
-    operators[CORE_AGENT_ADDR] = true;
+    operators[NATIVE_AGENT_ADDR] = true;
     operators[HASH_AGENT_ADDR] = true;
     operators[ZEC_AGENT_ADDR] = true;
 

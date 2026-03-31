@@ -3,7 +3,7 @@ pragma solidity 0.8.4;
 
 import "./lib/Address.sol";
 import "./interface/IChannel.sol";
-import "./interface/ICoreAgent.sol";
+import "./interface/INativeAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./lib/Memory.sol";
 import "./lib/SatoshiPlusHelper.sol";
@@ -91,7 +91,7 @@ contract Channel is IChannel, System, IParamSubscriber {
   /// @param amount the staked amount
   /// @param reward the amount of rewards collected
   /// @return remainingReward the remain reward after pay commission.
-  function payCommissions(address delegator, uint256 amount, uint256 reward) external override onlyCaller(CORE_AGENT_ADDR) returns (uint256 remainingReward) {
+  function payCommissions(address delegator, uint256 amount, uint256 reward) external override onlyCaller(NATIVE_AGENT_ADDR) returns (uint256 remainingReward) {
     if (reward == 0) {
       return reward;
     }
@@ -128,7 +128,7 @@ contract Channel is IChannel, System, IParamSubscriber {
   ///
   /// @param delegator the delegator address
   /// @param amount the undelegate amount
-  function onUndelegateCoin(address delegator, uint256 amount) external override onlyCaller(CORE_AGENT_ADDR) {
+  function onUndelegateCoin(address delegator, uint256 amount) external override onlyCaller(NATIVE_AGENT_ADDR) {
     uint32[] storage ids = delegators[delegator];
     for (uint256 i = ids.length; amount != 0 && i != 0; i--) {
       uint32 tempId = ids[i-1];
@@ -234,7 +234,7 @@ contract Channel is IChannel, System, IParamSubscriber {
     }
     address delegator = msg.sender;
     uint256 amount = msg.value;
-    ICoreAgent(CORE_AGENT_ADDR).proxyDelegate{value: amount}(candidate, delegator, id);
+    INativeAgent(NATIVE_AGENT_ADDR).proxyDelegate{value: amount}(candidate, delegator, id);
     Partner storage p = partners[id];
     uint256 existAmount = p.delegatorAmounts[delegator];
     if (existAmount == 0) {

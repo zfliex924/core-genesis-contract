@@ -3,7 +3,7 @@ pragma solidity 0.8.4;
 
 import "./IAgent.sol";
 
-interface ICoreAgent is IAgent {
+interface INativeAgent is IAgent {
   /// @param candidate the validator candidate address
   /// @param delegator the delegator address
   /// @param channelId the channel id

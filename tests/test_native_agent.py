@@ -1896,12 +1896,12 @@ def __check_accrued_reward_core(validate, round_tag, result: int):
 
 
 def __get_delegator_info(candidate, delegator):
-    delegator_info = CoreAgentMock[0].getDelegator(candidate, delegator)
+    delegator_info = NativeAgentMock[0].getDelegator(candidate, delegator)
     return delegator_info
 
 
 def __get_candidate_list_by_delegator(delegator):
-    candidate_info = CoreAgentMock[0].getCandidateListByDelegator(delegator)
+    candidate_info = NativeAgentMock[0].getCandidateListByDelegator(delegator)
     return candidate_info
 
 

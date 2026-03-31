@@ -2,7 +2,7 @@
 pragma solidity 0.8.4;
 
 import "./interface/IChannel.sol";
-import "./interface/ICoreAgent.sol";
+import "./interface/INativeAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/ISystemReward.sol";
@@ -13,7 +13,7 @@ import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 
 /// This contract handles CORE staking.
-contract CoreAgent is ICoreAgent, System, IParamSubscriber {
+contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   uint256 public constant INIT_REQUIRED_COIN_DEPOSIT = 1e18;
 

@@ -214,7 +214,7 @@ class CoreAsset(Asset):
         return 0
 
     def get_agent_addr(self):
-        return CoreAgentMock[0]
+        return NativeAgentMock[0]
 
     def create_round_reward(self, reward_amount, stake_amount):
         return CoreRoundReward(reward_amount, stake_amount)

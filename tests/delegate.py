@@ -229,7 +229,7 @@ def set_last_round_tag(stake_round, time0=None):
     end_round0 = time0 // Utils.ROUND_INTERVAL
     current_round = end_round0 - stake_round - 1
     CandidateHubMock[0].setRoundTag(current_round)
-    CoreAgentMock[0].setRoundTag(current_round)
+    NativeAgentMock[0].setRoundTag(current_round)
     return end_round0, current_round
 
 
@@ -249,19 +249,19 @@ def run_stake_operation(operation, candidate, account, operation_amount, target_
 
 
 def delegate_coin_success(candidate, delegator, amount):
-    tx = CoreAgentMock[0].delegateCoin(candidate, {'value': amount, 'from': delegator})
+    tx = NativeAgentMock[0].delegateCoin(candidate, {'value': amount, 'from': delegator})
     assert 'delegatedCoin' in tx.events
     return tx
 
 
 def transfer_coin_success(source_agent, target_agent, delegator, amount):
-    tx = CoreAgentMock[0].transferCoin(source_agent, target_agent, amount, {'from': delegator})
+    tx = NativeAgentMock[0].transferCoin(source_agent, target_agent, amount, {'from': delegator})
     assert 'transferredCoin' in tx.events
     return tx
 
 
 def undelegate_coin_success(candidate, delegator, amount):
-    tx = CoreAgentMock[0].undelegateCoin(candidate, amount, {'from': delegator})
+    tx = NativeAgentMock[0].undelegateCoin(candidate, amount, {'from': delegator})
     assert 'undelegatedCoin' in tx.events
     return tx
 
@@ -441,7 +441,7 @@ def build_btc_lock_script(timestamp=None):
 class RoundRewardManager:
     @staticmethod
     def mock_core_reward_map(delegator, reward, acc_stake_amount):
-        CoreAgentMock[0].setCoreRewardMap(delegator, reward, acc_stake_amount)
+        NativeAgentMock[0].setCoreRewardMap(delegator, reward, acc_stake_amount)
 
     @staticmethod
     def mock_power_reward_map(delegator, reward):

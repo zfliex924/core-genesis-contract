@@ -20,7 +20,7 @@ contract System {
   address public BURN_ADDR;
   address public FOUNDATION_ADDR;
   address public STAKE_HUB_ADDR;
-  address public CORE_AGENT_ADDR;
+  address public NATIVE_AGENT_ADDR;
   address public HASH_AGENT_ADDR;
   address public CONFIGURATION_ADDR;
   address public CHANNEL_ADDR;
@@ -38,7 +38,7 @@ contract System {
     address burn;
     address foundation;
     address stakeHub;
-    address coreAgent;
+    address nativeAgent;
     address hashAgent;
     address configurationContract;
     address channel;
@@ -58,7 +58,7 @@ contract System {
     BURN_ADDR = systemContractAddr.burn;
     FOUNDATION_ADDR = systemContractAddr.foundation;
     STAKE_HUB_ADDR = systemContractAddr.stakeHub;
-    CORE_AGENT_ADDR = systemContractAddr.coreAgent;
+    NATIVE_AGENT_ADDR = systemContractAddr.nativeAgent;
     HASH_AGENT_ADDR = systemContractAddr.hashAgent;
     CONFIGURATION_ADDR = systemContractAddr.configurationContract;
     CHANNEL_ADDR = systemContractAddr.channel;

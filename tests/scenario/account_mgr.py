@@ -105,7 +105,7 @@ class AccountMgr:
             "ValidatorSet": ValidatorSetMock[0],
             "CandidateHub": CandidateHubMock[0],
             "StakeHub": StakeHubMock[0],
-            "CoreAgent": CoreAgentMock[0],
+            "NativeAgent": NativeAgentMock[0],
             "HashPowerAgent": HashPowerAgentMock[0],
             "BitcoinAgent": BitcoinAgentMock[0],
             "BitcoinStake": BitcoinStakeMock[0],

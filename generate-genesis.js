@@ -125,9 +125,9 @@ Promise.all([
     "StakeHub"
   ),
   compileContract(
-    "coreagent",
-    "contracts/CoreAgent.sol",
-    "CoreAgent"
+    "nativeagent",
+    "contracts/NativeAgent.sol",
+    "NativeAgent"
   ),
   compileContract(
     "hashpoweragent",

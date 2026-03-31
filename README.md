@@ -19,7 +19,7 @@ This repo holds all the genesis contracts on Core blockchain, which are part of 
 - [SystemReward.sol](./contracts/SystemReward.sol): This smart contract manages funds for relayers and verifiers.
 - [ValidatorSet.sol](./contracts/ValidatorSet.sol): This contract manages elected validators in each round. All rewards for validators on Core blockchain are minted in genesis block and stored in this contract.
 - [StakeHub.sol](./contracts/StakeHub.sol): This contract deals with overall hybrid score and reward distribution logics. It interacts with CandidateHub.sol and other protocol contracts during the turnround process.
-- [CoreAgent.sol](./contracts/CoreAgent.sol): This contract handles CORE staking.
+- [NativeAgent.sol](./contracts/NativeAgent.sol): This contract handles CORE staking.
 - [HashPowerAgent.sol](./contracts/HashPowerAgent.sol): This contract handles Bitcoin hash power staking (measured in BTC blocks).
 - [BitcoinAgent.sol](./contracts/BitcoinAgent.sol): This contract handles BTC staking. It interacts with BitcoinStake.sol and BitcoinLSTStake.sol for non-custodial BTC staking and LST BTC staking correspondingly. 
 - [BitcoinStake.sol](./contracts/BitcoinStake.sol): This contract handles non-custodial BTC staking. 

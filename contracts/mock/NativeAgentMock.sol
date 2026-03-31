@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache2.0
 pragma solidity 0.8.4;
 
-import {CoreAgent} from "../CoreAgent.sol";
+import {NativeAgent} from "../NativeAgent.sol";
 import "../lib/SatoshiPlusHelper.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
-contract CoreAgentMock is CoreAgent {
+contract NativeAgentMock is NativeAgent {
     uint256 public rewardAmountM;
 
     function developmentInit() external {

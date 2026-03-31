@@ -261,7 +261,7 @@ class StakeCore(TaskHandler):
     def on_task_ready(self):
         super().on_task_ready()
         self.chain.init_balance(self.task.delegator)
-        self.chain.init_balance(CoreAgentMock[0])
+        self.chain.init_balance(NativeAgentMock[0])
         self.checker.check_core_history_reward(self.task.delegator)
 
     def on_task_finish(self):
@@ -274,7 +274,7 @@ class StakeCore(TaskHandler):
         self.check_state()
 
     def check_state(self):
-        self.checker.check_balance(CoreAgentMock[0])
+        self.checker.check_balance(NativeAgentMock[0])
         self.checker.check_balance(self.task.delegator)
         self.checker.check_candidate_core_realtime_amount(self.task.delegatee)
         self.checker.check_delegator_core_realtime_amount(self.task.delegator, self.task.delegatee)
@@ -289,7 +289,7 @@ class UnstakeCore(TaskHandler):
     def on_task_ready(self):
         super().on_task_ready()
         self.chain.init_balance(self.task.delegator)
-        self.chain.init_balance(CoreAgentMock[0])
+        self.chain.init_balance(NativeAgentMock[0])
         self.checker.check_core_history_reward(self.task.delegator)
 
     def on_task_finish(self):
@@ -302,7 +302,7 @@ class UnstakeCore(TaskHandler):
         self.check_state()
 
     def check_state(self):
-        self.checker.check_balance(CoreAgentMock[0])
+        self.checker.check_balance(NativeAgentMock[0])
         self.checker.check_balance(self.task.delegator)
         self.checker.check_candidate_core_realtime_amount(self.task.delegatee)
         self.checker.check_delegator_core_realtime_amount(self.task.delegator, self.task.delegatee)
@@ -318,7 +318,7 @@ class TransferCore(TaskHandler):
     def on_task_ready(self):
         super().on_task_ready()
         self.chain.init_balance(self.task.delegator)
-        self.chain.init_balance(CoreAgentMock[0])
+        self.chain.init_balance(NativeAgentMock[0])
         self.checker.check_core_history_reward(self.task.delegator)
 
     def on_task_finish(self):
@@ -333,7 +333,7 @@ class TransferCore(TaskHandler):
         self.check_state()
 
     def check_state(self):
-        self.checker.check_balance(CoreAgentMock[0])
+        self.checker.check_balance(NativeAgentMock[0])
         self.checker.check_balance(self.task.delegator)
         self.checker.check_candidate_core_realtime_amount(self.task.from_delegatee)
         self.checker.check_candidate_core_realtime_amount(self.task.to_delegatee)

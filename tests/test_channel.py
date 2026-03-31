@@ -842,7 +842,7 @@ def test_pay_commissions_unauthorized_caller(channel, required_margin):
         {'from': delegator, 'value': delegate_amount}
     )
     
-    with brownie.reverts(f"NotPermissionalCaller: {channel.CORE_AGENT_ADDR().lower()}, {accounts[5].address.lower()}"):
+    with brownie.reverts(f"NotPermissionalCaller: {channel.NATIVE_AGENT_ADDR().lower()}, {accounts[5].address.lower()}"):
         channel.payCommissions(
             delegator, delegate_amount, reward_amount,
             {'from': accounts[5]}

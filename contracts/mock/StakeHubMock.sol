@@ -17,7 +17,7 @@ contract StakeHubMock is StakeHub {
         stateMap[agent] = AssetState(value, value1);
     }
 
-    function coreAgentDistributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external {
-        IAgent(CORE_AGENT_ADDR).distributeReward(validators, rewardList, round);
+    function nativeAgentDistributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external {
+        IAgent(NATIVE_AGENT_ADDR).distributeReward(validators, rewardList, round);
     }
 }

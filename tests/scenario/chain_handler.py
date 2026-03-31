@@ -637,7 +637,7 @@ class ChainHandler:
 
         # update balance
         self.chain.add_balance(delegator, -amount)
-        self.chain.add_balance(CoreAgentMock[0], amount)
+        self.chain.add_balance(NativeAgentMock[0], amount)
 
     def undelegate_core(self, delegator, delegatee, amount, is_transfer=False):
         candidate = self.chain.get_candidate(delegatee)
@@ -677,7 +677,7 @@ class ChainHandler:
 
         # update balance
         self.chain.add_balance(delegator, amount)
-        self.chain.add_balance(CoreAgentMock[0], -amount)
+        self.chain.add_balance(NativeAgentMock[0], -amount)
         if not is_transfer:
             self._deduct_transferred_amount_from_staked_candidates(delegator, amount - min(amount, stake_amount))
 

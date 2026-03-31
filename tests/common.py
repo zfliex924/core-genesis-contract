@@ -93,7 +93,7 @@ def get_current_round():
 
 def set_round_tag(round_tag):
     CandidateHubMock[0].setRoundTag(round_tag)
-    CoreAgentMock[0].setRoundTag(round_tag)
+    NativeAgentMock[0].setRoundTag(round_tag)
 
 
 def stake_hub_claim_reward(account):

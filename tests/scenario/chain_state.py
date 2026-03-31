@@ -581,16 +581,16 @@ class ChainState:
         return ValidatorSetMock[0].totalInCome()
 
     def get_delegator_core_stake_state_on_chain(self, delegator, delegatee):
-        return CoreAgentMock[0].getDelegator(delegatee, delegator)
+        return NativeAgentMock[0].getDelegator(delegatee, delegator)
 
     def get_candidate_core_stake_state_on_chain(self, delegatee):
-        return CoreAgentMock[0].candidateMap(delegatee)
+        return NativeAgentMock[0].candidateMap(delegatee)
 
     def get_core_stake_total_amount_on_chain(self, delegator):
-        return CoreAgentMock[0].delegatorMap(delegator)
+        return NativeAgentMock[0].delegatorMap(delegator)
 
     def get_core_stake_candidates_on_chain(self, delegator):
-        return CoreAgentMock[0].getCandidateListByDelegator(delegator)
+        return NativeAgentMock[0].getCandidateListByDelegator(delegator)
 
     def get_core_history_reward_on_chain(self, delegator):
         # rewards [core,power,btc]

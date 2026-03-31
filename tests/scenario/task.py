@@ -294,7 +294,7 @@ class StakeCore(Task):
     def execute(self):
         super().execute()
         self.notify_task_ready()
-        tx_receipt = CoreAgentMock[0].delegateCoin(
+        tx_receipt = NativeAgentMock[0].delegateCoin(
             self.delegatee, {
                 "value": self.amount,
                 "from": self.delegator
@@ -315,7 +315,7 @@ class UnstakeCore(Task):
     def execute(self):
         super().execute()
         self.notify_task_ready()
-        tx_receipt = CoreAgentMock[0].undelegateCoin(
+        tx_receipt = NativeAgentMock[0].undelegateCoin(
             self.delegatee,
             self.amount, {
                 "from": self.delegator
@@ -337,7 +337,7 @@ class TransferCore(Task):
     def execute(self):
         super().execute()
         self.notify_task_ready()
-        tx_receipt = CoreAgentMock[0].transferCoin(
+        tx_receipt = NativeAgentMock[0].transferCoin(
             self.from_delegatee,
             self.to_delegatee,
             self.amount, {

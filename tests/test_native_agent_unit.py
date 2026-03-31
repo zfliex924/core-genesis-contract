@@ -67,13 +67,13 @@ def test_core_agent_distribute_reward(core_agent, stake_hub):
         if test['status'] == 'success':
             for validator, amout, real_amout in zip(test['validators'], test['amout_list'], test['real_amout_list']):
                 core_agent.setCandidateMapAmount(validator, amout, real_amout, 0)
-            tx = stake_hub.coreAgentDistributeReward(test['validators'], test['reward_list'], test['round'])
+            tx = stake_hub.nativeAgentDistributeReward(test['validators'], test['reward_list'], test['round'])
             for i in range(len(test['expect_round_reward'])):
                 assert test['expect_round_reward'][i] == core_agent.getAccruedRewardMap(test['validators'][i],
                                                                                         test['round'])
         else:
             with brownie.reverts("the length of validators and rewardList should be equal"):
-                stake_hub.coreAgentDistributeReward(test['validators'], test['reward_list'], test['round'])
+                stake_hub.nativeAgentDistributeReward(test['validators'], test['reward_list'], test['round'])
 
 
 def test_core_agent_get_stake_amounts(core_agent):
