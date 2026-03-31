@@ -268,7 +268,7 @@ def undelegate_coin_success(candidate, delegator, amount):
 
 def delegate_power_success(candidate, delegator, value=1, stake_round=0):
     stake_round = get_current_round() - 6 + stake_round
-    BtcLightClientMock[0].setMiners(stake_round, candidate, [delegator] * value)
+    ZcashLightClientMock[0].setMiners(stake_round, candidate, [delegator] * value)
 
 
 class BtcScript:
@@ -444,8 +444,8 @@ class RoundRewardManager:
         CoreAgentMock[0].setCoreRewardMap(delegator, reward, acc_stake_amount)
 
     @staticmethod
-    def mock_power_reward_map(delegator, reward, delegate_amount):
-        HashPowerAgentMock[0].setPowerRewardMap(delegator, reward, delegate_amount)
+    def mock_power_reward_map(delegator, reward):
+        HashPowerAgentMock[0].setPowerRewardMap(delegator, reward)
 
 
 def int_to_varint_hex(value: int) -> str:

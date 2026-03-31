@@ -5,9 +5,12 @@ import {HashPowerAgent} from "../HashPowerAgent.sol";
 
 contract HashPowerAgentMock is HashPowerAgent {
 
-    function setPowerRewardMap(address delegator, uint256 reward, uint256 accStakedAmount) external {
-        rewardMap[delegator] = Reward(reward, accStakedAmount);
+    function setPowerRewardMap(address delegator, uint256 reward) external {
+        rewardMap[delegator] = reward;
     }
 
-
+    function setRoundAmounts(uint256 staked, uint256 total) external {
+        stakedRoundAmount = staked;
+        totalRoundAmount = total;
+    }
 }

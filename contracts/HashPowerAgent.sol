@@ -7,22 +7,22 @@ import "./interface/ILightClient.sol";
 import "./System.sol";
 
 /// This contract handles Zcash hash power staking (measured in ZEC blocks).
+/// Rewards are distributed proportionally to staked (bound) miners only.
+/// Unbound miner power still contributes to hybrid score but their
+/// share of rewards is returned as undistributed (for burning).
 contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
-  // This field is used to store hash power reward of delegators
-  // it is updated on turnround
-  // key: delegator address
-  // value: amount of CORE tokens claimable
-  mapping(address => Reward) public rewardMap;
+  // key: delegator address, value: claimable reward
+  mapping(address => uint256) public rewardMap;
+
+  // Staked (bound) power total from getStakeAmounts
+  uint256 public stakedRoundAmount;
+  // Total power across all candidates (bound + unbound)
+  uint256 public totalRoundAmount;
 
   /*********************** events **************************/
   event claimedHashReward(address indexed delegator, uint256 amount);
   event validatorAvgReward(address indexed validator, uint256 avgReward);
-
-  struct Reward {
-    uint256 reward;
-    uint256 accStakedAmount;
-  }
 
   /*********************** Init ********************************/
   function init() external onlyNotInit {
@@ -30,62 +30,62 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   }
 
   /*********************** IAgent implementations ***************************/
-  /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round
-  /// @param validators List of validator operator addresses
-  /// @param rewardList List of reward amount
-  /// @param round The round tag
+
+  /// Get staked hash power for each candidate
+  /// Records stakedRoundAmount per candidate and totalRoundAmount for reward scaling
+  function getStakeAmounts(address[] calldata candidates, uint256 roundTag) external override returns (uint256[] memory amounts, uint256 totalAmount) {
+    (amounts, totalAmount) = ILightClient(ZEC_LIGHT_CLIENT_ADDR).getRoundPowers(roundTag - 7, candidates);
+    totalRoundAmount = totalAmount;
+    uint256 staked;
+    for (uint256 i = 0; i < candidates.length; ++i) {
+      staked += amounts[i];
+    }
+    stakedRoundAmount = staked;
+  }
+
+  /// Distribute rewards to bound miners
+  /// Each miner gets: rewardList[i] / minerSize * stakedRoundAmount / totalRoundAmount
+  /// The unbound portion is returned as undistributed
   function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external override onlyStakeHub
     returns (uint256 undistributed)
   {
     uint256 validatorSize = validators.length;
     require(validatorSize == rewardList.length, "the length of validatorList and rewardList should be equal");
 
-    // fetch BTC miners who delegated hash power in the about to end round;
-    // and distribute rewards to them
-    uint256 minerSize;
-    uint256 avgReward;
     for (uint256 i = 0; i < validatorSize; ++i) {
-      if (rewardList[i] == 0) {
+      if (rewardList[i] == 0) continue;
+
+      address[] memory miners = ILightClient(ZEC_LIGHT_CLIENT_ADDR).getRoundMiners(round - 7, validators[i]);
+      uint256 minerSize = miners.length;
+      if (minerSize == 0) {
+        undistributed += rewardList[i];
         continue;
       }
-      address[] memory miners = ILightClient(ZEC_LIGHT_CLIENT_ADDR).getRoundMiners(round-7, validators[i]);
-      // distribute rewards to every miner
-      minerSize = miners.length;
-      if (minerSize != 0) {
-        avgReward = rewardList[i] / minerSize;
+
+      // Scale reward by staked/total ratio (bound miners vs all power)
+      uint256 effectiveReward = rewardList[i];
+      if (totalRoundAmount > 0 && stakedRoundAmount < totalRoundAmount) {
+        effectiveReward = rewardList[i] * stakedRoundAmount / totalRoundAmount;
+        undistributed += rewardList[i] - effectiveReward;
+      }
+
+      if (effectiveReward > 0) {
+        uint256 avgReward = effectiveReward / minerSize;
         for (uint256 j = 0; j < minerSize; ++j) {
-          rewardMap[miners[j]].reward += avgReward;
+          rewardMap[miners[j]] += avgReward;
         }
         emit validatorAvgReward(validators[i], avgReward);
-      } else {
-        undistributed += rewardList[i];
       }
     }
   }
 
-  /// Get staked BTC hash value
-  /// @param candidates List of candidate operator addresses
-  /// @param roundTag The new round tag
-  /// @return amounts List of staked BTC hash values on all candidates in the round
-  /// @return totalAmount Total staked BTC hash values on all candidates in the round
-  function getStakeAmounts(address[] calldata candidates, uint256 roundTag) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
-    // fetch hash power delegated on list of candidates
-    // which is used to calculate hybrid score for validators in the new round
-    (amounts, totalAmount) = ILightClient(ZEC_LIGHT_CLIENT_ADDR).getRoundPowers(roundTag-7, candidates);
-  }
-
-  /// Start new round, this is called by the StakeHub contract
-  /// @param validators List of elected validators in this round
-  /// @param round The new round tag
+  /// Start new round
   function setNewRound(address[] calldata validators, uint256 round) external override onlyStakeHub {
-
   }
 
   /// Claim reward for delegator
-  /// @param delegator the delegator address
-  /// @return reward Amount claimed
   function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward) {
-    reward = rewardMap[delegator].reward;
+    reward = rewardMap[delegator];
     if (reward != 0) {
       delete rewardMap[delegator];
       emit claimedHashReward(delegator, reward);
@@ -93,9 +93,6 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   }
 
   /*********************** Governance ********************************/
-  /// Update parameters through governance vote
-  /// @param key The name of the parameter
-  /// @param value the new value set to the parameter
   function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov view {
     revert UnsupportedGovParam(key);
   }
