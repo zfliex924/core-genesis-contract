@@ -6,7 +6,7 @@ import "./interface/IParamSubscriber.sol";
 import "./interface/ILightClient.sol";
 import "./System.sol";
 
-/// This contract handles Bitcoin hash power staking (measured in BTC blocks).
+/// This contract handles Zcash hash power staking (measured in ZEC blocks).
 contract HashPowerAgent is IAgent, System, IParamSubscriber {
 
   // This field is used to store hash power reward of delegators
@@ -49,7 +49,7 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
       if (rewardList[i] == 0) {
         continue;
       }
-      address[] memory miners = ILightClient(LIGHT_CLIENT_ADDR).getRoundMiners(round-7, validators[i]);
+      address[] memory miners = ILightClient(ZEC_LIGHT_CLIENT_ADDR).getRoundMiners(round-7, validators[i]);
       // distribute rewards to every miner
       minerSize = miners.length;
       if (minerSize != 0) {
@@ -72,7 +72,7 @@ contract HashPowerAgent is IAgent, System, IParamSubscriber {
   function getStakeAmounts(address[] calldata candidates, uint256 roundTag) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
     // fetch hash power delegated on list of candidates
     // which is used to calculate hybrid score for validators in the new round
-    (amounts, totalAmount) = ILightClient(LIGHT_CLIENT_ADDR).getRoundPowers(roundTag-7, candidates);
+    (amounts, totalAmount) = ILightClient(ZEC_LIGHT_CLIENT_ADDR).getRoundPowers(roundTag-7, candidates);
   }
 
   /// Start new round, this is called by the StakeHub contract
