@@ -43,8 +43,8 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
   uint256 public constant CONFIRM_BLOCK = 24;
   uint256 public constant POWER_ROUND_GAP = 7;
 
-  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-  uint32 public constant INIT_CHAIN_HEIGHT = 1;
+  bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"{{initConsensusStateBytes}}";
+  uint32 public constant INIT_CHAIN_HEIGHT = {{initChainHeight}};
 
   uint256 public constant INIT_STORE_BLOCK_GAS_PRICE = 35e9;
 
@@ -204,11 +204,11 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     bytes32[] calldata nodes,
     uint256 index
   ) public view override returns (bool) {
-
+{% if mock %}
     if (checkResult == true) {
       return checkResult;
     }
-
+{% endif %}
 
     bytes32 blockHash = height2HashMap[blockHeight];
     if (blockHeight + confirmBlock > getChainTipHeight() || txid == bytes32(0) || blockHash == bytes32(0)) {
@@ -241,11 +241,11 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
   ) external view override returns (bool, uint64) {
     bool r = checkTxProof(txid, blockHeight, confirmBlock, nodes, index);
 
-
+{% if mock %}
     if (checkResult == true) {
       return (checkResult, timesTamp);
     }
-
+{% endif %}
 
     if (r) {
       bytes32 blockHash = height2HashMap[blockHeight];
@@ -496,8 +496,8 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     emit paramChange(key, value);
   }
 
-
+{% if mock %}
   bool public checkResult;
   uint64 public timesTamp;
-
+{% endif %}
 }
