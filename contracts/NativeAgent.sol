@@ -3,502 +3,346 @@ pragma solidity 0.8.4;
 
 import "./interface/INativeAgent.sol";
 import "./interface/IParamSubscriber.sol";
+import "./lib/RLPDecode.sol";
 import "./interface/ICandidateHub.sol";
-import "./interface/ISystemReward.sol";
 import "./lib/Address.sol";
-import "./lib/BytesToTypes.sol";
 import "./lib/Memory.sol";
+import "./lib/BytesToTypes.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./System.sol";
 
-/// This contract handles CORE staking.
+/// NativeAgent handles native token staking using per-stake records (StakeTx).
+/// Each delegation creates an individual StakeTx identified by a unique stakeId.
+/// Rewards are tracked via accrued-reward-per-unit on each candidate.
 contract NativeAgent is INativeAgent, System, IParamSubscriber {
+
+  using RLPDecode for bytes;
+  using RLPDecode for RLPDecode.RLPItem;
 
   uint256 public constant INIT_REQUIRED_COIN_DEPOSIT = 1e18;
 
-  // minimal CORE require to stake
   uint256 public requiredCoinDeposit;
-
-  // accrued reward of every 1 million CORE per validator on each round
-  // validator => (round => 1 million CORE Reward)
-  mapping(address => mapping(uint256 => uint256)) public accruedRewardMap;
-
-  // key: delegator address
-  // value: delegator info
-  mapping(address => Delegator) public delegatorMap;
-
-  // key: candidate op address
-  // value: candidate info
-  mapping(address => Candidate) public candidateMap;
-
-  // This field is used to store reward of delegators
-  // key: delegator address
-  // value: amount of CORE tokens claimable
-  mapping(address => Reward) public rewardMap;
-
-  // roundTag is set to be timestamp / round interval,
-  // the valid value should be greater than 10,000 since the chain started.
-  // It is initialized to 1.
   uint256 public roundTag;
 
-  struct CoinDelegator {
-    uint256 stakedAmount;
-    uint256 realtimeAmount;
-    uint256 transferredAmount;
-    uint256 changeRound;
+  /// @dev Individual stake record
+  struct StakeTx {
+    address candidate;       // validator candidate
+    address delegator;       // stake owner
+    uint256 amount;          // staked amount
+    uint256 round;           // round when staked (for reward calculation start)
+    uint256 lockUntilRound;  // locked until this round (0 = no lock)
+    uint256 multiplier;      // reward multiplier fixed at delegate time (DENOMINATOR = 10000 = 1.0x)
+    uint256 reward;          // accumulated unclaimed reward (from transfer settlement)
   }
 
+  /// @dev Staking duration grade — longer lock = higher multiplier
+  struct StakeDurationGrade {
+    uint256 lockDays;        // minimum lock duration in days
+    uint256 multiplier;      // reward multiplier (DENOMINATOR = 10000 = 1.0x)
+  }
+  StakeDurationGrade[] public grades;
+
+  /// @dev Per-candidate staking state
   struct Candidate {
-    mapping(address => CoinDelegator) cDelegatorMap;
-    // Staked amount on last turnround snapshot
-    uint256 amount;
-    // Realtime staked amount
-    uint256 realtimeAmount;
-    uint256[] continuousRewardEndRounds;
+    uint256 stakedAmount;           // snapshot for current round
+    uint256 realtimeAmount;         // current realtime staked amount
+    uint256 stakedWeightedAmount;   // snapshot: Σ(amount * multiplier)
+    uint256 realtimeWeightedAmount; // realtime: Σ(amount * multiplier)
+    uint256[] rewardEndRounds;
   }
 
-  struct Delegator {
-    address[] candidates;
-    uint256 amount;
-  }
+  // Auto-increment nonce for generating unique stake IDs
+  uint256 public stakeIdCounter;
 
-  struct Reward {
-    uint256 reward;
-    uint256 accStakedAmount;
-  }
+  // Primary storage
+  mapping(bytes32 => StakeTx) public stakeTxMap;
+  mapping(address => Candidate) public candidateMap;
+  mapping(address => bytes32[]) public delegatorStakeIds;
 
-  error NotImplemented();
-
-  error InsufficientTokens(uint32 channelId);
+  // Reward tracking: candidate => round => accrued reward per unit
+  mapping(address => mapping(uint256 => uint256)) public accruedRewardMap;
 
   /*********************** events **************************/
-  event delegatedCoin(address indexed candidate, address indexed delegator, uint256 amount, uint256 realtimeAmount);
-  event undelegatedCoin(address indexed candidate, address indexed delegator, uint256 amount);
-  event transferredCoin(
-    address indexed sourceCandidate,
-    address indexed targetCandidate,
-    address indexed delegator,
-    uint256 amount,
-    uint256 realtimeAmount
-  );
-  event claimedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
-  event collectedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
+  event delegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
+  event undelegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
+  event transferredCoin(bytes32 indexed stakeId, address indexed targetCandidate, address indexed delegator, uint256 amount);
+  event claimedReward(address indexed delegator, uint256 reward);
 
   /*********************** Init ********************************/
   function init() external onlyNotInit {
     requiredCoinDeposit = INIT_REQUIRED_COIN_DEPOSIT;
     roundTag = block.timestamp / SatoshiPlusHelper.ROUND_INTERVAL;
+    stakeIdCounter = 1;
+
+    // Default staking duration grades (lockDays, multiplier)
+    grades.push(StakeDurationGrade(1,   10000));  // 1 day:   1.0x
+    grades.push(StakeDurationGrade(7,   10500));  // 7 days:  1.05x
+    grades.push(StakeDurationGrade(15,  11000));  // 15 days: 1.1x
+    grades.push(StakeDurationGrade(30,  12000));  // 30 days: 1.2x
+    grades.push(StakeDurationGrade(90,  14000));  // 90 days: 1.4x
+    grades.push(StakeDurationGrade(180, 17000));  // 180 days: 1.7x
+    grades.push(StakeDurationGrade(365, 20000));  // 365 days: 2.0x
+
     alreadyInit = true;
   }
 
   /*********************** IAgent implementations ***************************/
-  /// Receive round rewards from StakeHub, which is triggered at the beginning of turn round.
-  /// @param validators List of validator operator addresses
-  /// @param rewardList List of reward amount
-  /// @param round The round tag
-  function distributeReward(address[] calldata validators, uint256[] calldata rewardList, uint256 round) external override onlyStakeHub
-    returns (uint256 undistributed)
-  {
+
+  function distributeReward(
+    address[] calldata validators,
+    uint256[] calldata rewardList,
+    uint256 round
+  ) external override onlyStakeHub returns (uint256 undistributed) {
     uint256 validateSize = validators.length;
     require(validateSize == rewardList.length, "the length of validators and rewardList should be equal");
 
-    uint256 historyReward;
-    uint256 lastRewardRound;
-    uint256 l;
-    address validator;
     for (uint256 i = 0; i < validateSize; i++) {
-      if (rewardList[i] == 0) {
-        continue;
-      }
-      validator = validators[i];
-      mapping(uint256 => uint256) storage m = accruedRewardMap[validator];
-      Candidate storage c = candidateMap[validator];
-      if (c.amount == 0) {
+      if (rewardList[i] == 0) continue;
+      Candidate storage c = candidateMap[validators[i]];
+      if (c.stakedWeightedAmount == 0) {
         undistributed += rewardList[i];
         continue;
       }
-      l = c.continuousRewardEndRounds.length;
+
+      uint256 historyReward;
+      uint256 l = c.rewardEndRounds.length;
+      uint256 lastRewardRound;
       if (l != 0) {
-        lastRewardRound = c.continuousRewardEndRounds[l - 1];
-        historyReward = m[lastRewardRound];
-      } else {
-        historyReward = 0;
-        lastRewardRound = 0;
+        lastRewardRound = c.rewardEndRounds[l - 1];
+        historyReward = accruedRewardMap[validators[i]][lastRewardRound];
       }
-      // Calculate accrued reward of 1M Core on a validator for the round
-      m[round] = historyReward + rewardList[i] * SatoshiPlusHelper.CORE_STAKE_DECIMAL / c.amount;
+      accruedRewardMap[validators[i]][round] = historyReward + rewardList[i] * SatoshiPlusHelper.CORE_STAKE_DECIMAL / c.stakedWeightedAmount;
       if (lastRewardRound + 1 == round) {
-        c.continuousRewardEndRounds[l - 1] = round;
+        c.rewardEndRounds[l - 1] = round;
       } else {
-        c.continuousRewardEndRounds.push(round);
+        c.rewardEndRounds.push(round);
       }
     }
   }
 
-  /// Get staked CORE amount
-  /// @param candidates List of candidate operator addresses
-  ///
-  /// @return amounts List of staked CORE amounts on all candidates in the round
-  /// @return totalAmount Total staked CORE on all candidates in the round
-  function getStakeAmounts(address[] calldata candidates, uint256) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
+  function getStakeAmounts(
+    address[] calldata candidates,
+    uint256
+  ) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
     uint256 candidateSize = candidates.length;
     amounts = new uint256[](candidateSize);
     for (uint256 i = 0; i < candidateSize; ++i) {
-      amounts[i] = candidateMap[candidates[i]].realtimeAmount;
+      amounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
       totalAmount += amounts[i];
     }
   }
 
-  /// Start new round, this is called by the StakeHub contract
-  /// @param validators List of elected validators in this round
-  /// @param round The new round tag
-  function setNewRound(address[] calldata validators, uint256 round) external override onlyStakeHub {
-    uint256 validatorSize = validators.length;
-    for (uint256 i = 0; i < validatorSize; ++i) {
+  function setNewRound(
+    address[] calldata validators,
+    uint256 round
+  ) external override onlyStakeHub {
+    for (uint256 i = 0; i < validators.length; ++i) {
       Candidate storage a = candidateMap[validators[i]];
-      a.amount = a.realtimeAmount;
+      a.stakedAmount = a.realtimeAmount;
+      a.stakedWeightedAmount = a.realtimeWeightedAmount;
     }
     roundTag = round;
   }
 
-  /*********************** External methods ***************************/
-  /// Delegate coin to a validator
-  /// @param candidate The operator address of validator
-  function delegateCoin(address candidate) external override payable {
-    if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(candidate)) {
-      revert InactiveCandidate(candidate);
-    }
-    require(msg.value >= requiredCoinDeposit, "delegate amount is too small");
-    uint256 realtimeAmount = _delegateCoin(candidate, msg.sender, msg.value, false);
-    emit delegatedCoin(candidate, msg.sender, msg.value, realtimeAmount);
-  }
-
-  /// Undelegate coin from a validator
-  /// @param candidate The operator address of validator
-  /// @param amount The amount of CORE to undelegate
-  function undelegateCoin(address candidate, uint256 amount) public override {
-    amount = undelegate(candidate, msg.sender, amount);
-    Address.sendValue(payable(msg.sender), amount);
-  }
-
-  /// Transfer coin stake to a new validator
-  /// @param sourceCandidate The validator to transfer coin stake from
-  /// @param targetCandidate The validator to transfer coin stake to
-  /// @param amount The amount of CORE to transfer
-  function transferCoin(address sourceCandidate, address targetCandidate, uint256 amount) public override {
-    if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetCandidate)) {
-      revert InactiveCandidate(targetCandidate);
-    }
-    if (sourceCandidate == targetCandidate) {
-      revert SameCandidate(sourceCandidate);
-    }
-    _undelegateCoin(sourceCandidate, msg.sender, amount, true);
-    uint256 newDeposit = _delegateCoin(targetCandidate, msg.sender, amount, true);
-
-    emit transferredCoin(sourceCandidate, targetCandidate, msg.sender, amount, newDeposit);
-  }
-
-  /// Claim reward for delegator
-  /// @param delegator the delegator address
-  /// @return reward Amount claimed
   function claimReward(address delegator) external override onlyStakeHub returns (uint256 reward) {
-    address[] storage candidates = delegatorMap[delegator].candidates;
-    uint256 candidateSize = candidates.length;
-    address candidate;
-    uint256 rewardSum;
-    uint256 txReward;
-    for (uint256 i = candidateSize; i != 0; --i) {
-      candidate = candidates[i - 1];
-      CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
-      (txReward, , ) = _collectRewardFromCandidate(candidate, cd);
-      rewardSum += txReward;
-      if (txReward != 0) {
-        emit collectedReward(candidate, delegator, txReward, 0);
-      }
-      if (cd.realtimeAmount == 0 && cd.transferredAmount == 0) {
-        _removeDelegation(delegator, candidate);
-      }
+    bytes32[] storage stakeIds = delegatorStakeIds[delegator];
+    uint256 settleRound = roundTag - 1;
+
+    for (uint256 i = stakeIds.length; i > 0; --i) {
+      StakeTx storage stx = stakeTxMap[stakeIds[i - 1]];
+      if (stx.amount == 0) continue;
+
+      reward += _collectReward(stx, settleRound);
+      reward += stx.reward;
+      stx.reward = 0;
     }
 
-    reward = rewardMap[delegator].reward;
-    if (reward != 0 || rewardMap[delegator].accStakedAmount != 0) {
-      delete rewardMap[delegator];
-    }
-    reward += rewardSum;
     if (reward != 0) {
-      emit claimedCoinReward(delegator, reward, 0);
+      emit claimedReward(delegator, reward);
     }
   }
 
-  /*********************** Internal methods ***************************/
-  /// delegate CORE tokens
-  /// @param candidate the validator candidate to delegate to
-  /// @param delegator the delegator address
-  /// @param amount the amount of CORE 
-  /// @param isTransfer is called from transfer workflow
-  function _delegateCoin(address candidate, address delegator, uint256 amount, bool isTransfer) internal returns (uint256) {
-    Candidate storage a = candidateMap[candidate];
-    CoinDelegator storage cd = a.cDelegatorMap[delegator];
-    uint256 changeRound = cd.changeRound;
-    if (changeRound == 0) {
-      cd.changeRound = roundTag;
-      delegatorMap[delegator].candidates.push(candidate);
-    }
-    a.realtimeAmount += amount;
-    cd.realtimeAmount += amount;
-    if (!isTransfer) {
-      delegatorMap[delegator].amount += amount;
-    }
+  /*********************** External methods ***************************/
 
-    return cd.realtimeAmount;
+  /// Delegate native coin with a specific lock duration (in rounds/days)
+  /// The multiplier is determined by matching lockRound against grades
+  /// @param candidate The validator candidate
+  /// @param lockRound Number of rounds to lock (must match a grade's lockDays)
+  function delegateCoin(address candidate, uint256 lockRound) external override payable returns (bytes32 stakeId) {
+    require(msg.value >= requiredCoinDeposit, "delegate amount is too small");
+    uint256 multiplier = _getMultiplier(lockRound);
+
+    stakeId = _createStake(candidate, msg.value, roundTag + lockRound, multiplier);
+    emit delegatedCoin(stakeId, candidate, msg.sender, msg.value);
   }
 
-
-  /// @param candidate the validator candidate address
-  /// @param delegator the delegator address
-  /// @param amount the amount of CORE to unstake
-  function undelegate(address candidate, address delegator, uint256 amount) internal returns(uint256) {
-    if (amount == 0) {
-      amount = candidateMap[candidate].cDelegatorMap[delegator].realtimeAmount;
-    }
-
-    uint256 dAmount = _undelegateCoin(candidate, delegator, amount, false);
-    _deductTransferredAmount(delegator, dAmount);
-    emit undelegatedCoin(candidate, delegator, amount);
-    return amount;
+  function _createStake(address candidate, uint256 amount, uint256 lockUntilRound, uint256 multiplier) internal returns (bytes32 stakeId) {
+    stakeId = bytes32(stakeIdCounter++);
+    stakeTxMap[stakeId] = StakeTx({
+      candidate: candidate,
+      delegator: msg.sender,
+      amount: amount,
+      round: roundTag,
+      lockUntilRound: lockUntilRound,
+      multiplier: multiplier,
+      reward: 0
+    });
+    delegatorStakeIds[msg.sender].push(stakeId);
+    Candidate storage c = candidateMap[candidate];
+    c.realtimeAmount += amount;
+    c.realtimeWeightedAmount += amount * multiplier;
   }
 
-  /// undelegate CORE tokens
-  /// @param candidate the validator candidate to delegate to
-  /// @param delegator the delegator address
-  /// @param amount the amount of CORE 
-  /// @param isTransfer is called from transfer workflow
-  /// @return undelegatedNewAmount the amount minuses the reduced staked amount.
-  function _undelegateCoin(address candidate, address delegator, uint256 amount, bool isTransfer) internal returns (uint256 undelegatedNewAmount) {
-    require(amount != 0, 'Undelegate zero coin');
-    Candidate storage a = candidateMap[candidate];
-    CoinDelegator storage cd = a.cDelegatorMap[delegator];
-    uint256 changeRound = cd.changeRound;
-    require(changeRound != 0, 'no delegator information found');
-
-    uint256 realtimeAmount = cd.realtimeAmount;
-    require(realtimeAmount >= amount, "Not enough staked tokens");
-    if (amount != realtimeAmount) {
-      require(amount >= requiredCoinDeposit, "undelegate amount is too small");
-      require(cd.realtimeAmount - amount >= requiredCoinDeposit, "remain amount is too small");
-    }
-
-    uint256 stakedAmount = cd.stakedAmount;
-    a.realtimeAmount -= amount;
-    if (isTransfer) {
-      if (stakedAmount > amount) {
-        cd.transferredAmount += amount;
-      } else if (stakedAmount != 0) {
-        cd.transferredAmount += stakedAmount;
-      }
-    } else {
-      delegatorMap[delegator].amount -= amount;
-    }
-    if (!isTransfer && cd.realtimeAmount == amount && cd.transferredAmount == 0) {
-      _removeDelegation(delegator, candidate);
-    } else {
-      cd.realtimeAmount -= amount;
-      if (stakedAmount > amount) {
-        cd.stakedAmount -= amount;
-      } else if (stakedAmount != 0) {
-        cd.stakedAmount = 0;
-      }
-    }
-    undelegatedNewAmount = amount - (stakedAmount - cd.stakedAmount);
-  }
-
-  function _deductTransferredAmount(address delegator, uint256 amount) internal {
-    Delegator storage d = delegatorMap[delegator];
-    address[] storage candidates = d.candidates;
-    address candidate;
-    uint256 transferredAmount;
-    for (uint256 i = candidates.length; i != 0; --i) {
-      candidate = candidates[i - 1];
-      CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
-      transferredAmount = cd.transferredAmount;
-      if (transferredAmount != 0) {
-        if (transferredAmount <= amount) {
-          amount -= transferredAmount;
-          cd.transferredAmount = 0;
-          if (cd.realtimeAmount == 0) {
-            delete candidateMap[candidate].cDelegatorMap[delegator];
-            if (i < candidates.length) {
-              d.candidates[i-1] = d.candidates[candidates.length-1];
-            }
-            d.candidates.pop();
-          }
-        } else {
-          cd.transferredAmount -= amount;
-          break;
-        }
-      }
-    }
-  }
-
-  /// Exposed for staking API to do readonly calls, restricted to onlyStakeHub() for safety reasons.
-  /// @param delegator the address of delegator
-  /// @return candidates the validator list with stakes
-  /// @return rewards rewards on each validator
-  /// @return stakedAmount1 the staked amount in the first round
-  /// @return stakedAmount2 the staked amount in the last round
-  function calculateRewards(address delegator) external onlyStakeHub returns (address[] memory candidates, uint256[] memory rewards, uint256 stakedAmount1, uint256 stakedAmount2) {
-    address candidate;
-    uint256 size = delegatorMap[delegator].candidates.length;
-    rewards = new uint256[](size);
-    uint256 s1;
-    uint256 s2;
-    for (uint256 i = 0; i < size; ++i) {
-      candidate = delegatorMap[delegator].candidates[i];
-      CoinDelegator storage cd = candidateMap[candidate].cDelegatorMap[delegator];
-      (rewards[i], s1, s2) = _collectRewardFromCandidate(candidate, cd);
-      stakedAmount1 += s1;
-      stakedAmount2 += s2;
-    }
-    return (delegatorMap[delegator].candidates, rewards, stakedAmount1, stakedAmount2);
-  }
-
-  /// collect reward from a validator candidate
-  /// @param candidate the validator candidate to collect reward from
-  /// @param cd the structure stores user CORE stake information
-  /// @return reward the amount of rewards collected
-  /// @return stakedAmount1 the staked amount in the first round
-  /// @return stakedAmount2 the staked amount in the last round
-  function _collectRewardFromCandidate(address candidate, CoinDelegator storage cd) internal returns (uint256 reward, uint256 stakedAmount1, uint256 stakedAmount2) {
-    uint256 stakedAmount = cd.stakedAmount;
-    uint256 realtimeAmount = cd.realtimeAmount;
-    uint256 transferredAmount = cd.transferredAmount;
-
-    uint256 changeRound = cd.changeRound;
-    require(changeRound != 0, "invalid delegator");
-    uint256 lastRound = roundTag - 1;
-
-    if (changeRound <= lastRound) {
-      uint256 changeRoundReward = _getRoundAccruedReward(candidate, changeRound);
-      uint256 lastChangeRoundReward = _getRoundAccruedReward(candidate, changeRound - 1);
-      stakedAmount1 = stakedAmount + transferredAmount;
-      reward = stakedAmount1 * (changeRoundReward - lastChangeRoundReward) / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
-
-      if (changeRound < lastRound) {
-        stakedAmount2 = realtimeAmount;
-        uint256 lastRoundReward = _getRoundAccruedReward(candidate, lastRound);
-        reward += stakedAmount2 * (lastRoundReward - changeRoundReward) / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
-      } else {
-        stakedAmount2 = stakedAmount1;
-      }
-
-      if (transferredAmount != 0) {
-        cd.transferredAmount = 0;
-      }
-      if (realtimeAmount != stakedAmount) {
-        cd.stakedAmount = realtimeAmount;
-      }
-      cd.changeRound = roundTag;
-    }
-  }
-
-  /// remove delegate record of a candidate/delegator pair
-  /// @param delegator the delegator address
-  /// @param candidate the validator candidate address
-  function _removeDelegation(address delegator, address candidate) internal {
-    Delegator storage d = delegatorMap[delegator];
-    uint256 l = d.candidates.length;
-    for (uint256 i = 0; i < l; ++i) {
-      if (d.candidates[i] == candidate) {
-        if (i + 1 < l) {
-          d.candidates[i] = d.candidates[l-1];
-        }
-        d.candidates.pop();
+  /// Match lockRound against grades to get multiplier
+  /// Picks the highest grade whose lockDays <= lockRound
+  function _getMultiplier(uint256 lockRound) internal view returns (uint256) {
+    uint256 multiplier = SatoshiPlusHelper.DENOMINATOR;
+    for (uint256 i = grades.length; i > 0; --i) {
+      if (lockRound >= grades[i - 1].lockDays) {
+        multiplier = grades[i - 1].multiplier;
         break;
       }
     }
-    delete candidateMap[candidate].cDelegatorMap[delegator];
+    return multiplier;
   }
 
-  /// get accrued rewards of a validator candidate on a given round
-  /// @param candidate validator candidate address
-  /// @param round the round to calculate rewards
-  /// @return reward the amount of rewards
-  function _getRoundAccruedReward(address candidate, uint256 round) internal returns (uint256 reward) {
-    reward = accruedRewardMap[candidate][round];
-    if (reward != 0) {
-      return reward;
-    }
-    
-    // there might be no rewards for a candidate on a given round if it is unelected or jailed, etc
-    // the accrued reward map will only be updated when reward is distributed to the candidate on that round
-    // in that case, the accrued reward for round N == a round smaller but also closest to N
-    // here we use binary search to get that round efficiently
+  /// Undelegate a specific stake by stakeId
+  function undelegateCoin(bytes32 stakeId) external override {
+    StakeTx storage stx = stakeTxMap[stakeId];
+    require(stx.amount > 0, "stake not found");
+    require(stx.delegator == msg.sender, "not the delegator");
+    require(roundTag >= stx.lockUntilRound, "stake is still locked");
+
+    uint256 amount = stx.amount;
+    address candidate = stx.candidate;
+
+    // Collect pending reward + stored reward before removing
+    uint256 reward = _collectReward(stx, roundTag - 1) + stx.reward;
+
     Candidate storage c = candidateMap[candidate];
-    uint256 b = c.continuousRewardEndRounds.length;
-    if (b == 0) {
-      return 0;
-    }
-    b -= 1;
-    uint256 a;
-    uint256 m;
-    uint256 targetRound;
-    uint256 t;
-    while (a <= b) {
-      m = (a + b) / 2;
-      t = c.continuousRewardEndRounds[m];
-      if (t < round) {
-        targetRound = t;
-        a = m + 1;
-      } else if (m == 0) {
-        return 0;
-      } else {
-        b = m - 1;
+    c.realtimeAmount -= amount;
+    c.realtimeWeightedAmount -= amount * stx.multiplier;
+
+    // Remove stake
+    _removeStake(msg.sender, stakeId);
+
+    // Send back staked amount + reward
+    uint256 total = amount + reward;
+    Address.sendValue(payable(msg.sender), total);
+
+    emit undelegatedCoin(stakeId, candidate, msg.sender, amount);
+  }
+
+  /// Transfer a stake to a different candidate
+  function transferCoin(address targetCandidate, bytes32 stakeId) external override {
+    StakeTx storage stx = stakeTxMap[stakeId];
+    require(stx.amount > 0, "stake not found");
+    require(stx.delegator == msg.sender, "not the delegator");
+    require(stx.candidate != targetCandidate, "same candidate");
+
+    // Settle reward from old candidate, store in StakeTx
+    stx.reward += _collectReward(stx, roundTag - 1);
+
+    // Move stake
+    address oldCandidate = stx.candidate;
+    uint256 weighted = stx.amount * stx.multiplier;
+    candidateMap[oldCandidate].realtimeAmount -= stx.amount;
+    candidateMap[oldCandidate].realtimeWeightedAmount -= weighted;
+    candidateMap[targetCandidate].realtimeAmount += stx.amount;
+    candidateMap[targetCandidate].realtimeWeightedAmount += weighted;
+    stx.candidate = targetCandidate;
+    stx.round = roundTag;
+
+    emit transferredCoin(stakeId, targetCandidate, msg.sender, stx.amount);
+  }
+
+  /*********************** Internal methods ***************************/
+
+  function _collectReward(StakeTx storage stx, uint256 settleRound) internal returns (uint256 reward) {
+    if (stx.round >= settleRound) return 0;
+
+    uint256 accruedAtSettle = _getAccruedReward(stx.candidate, settleRound);
+    uint256 accruedAtStart = _getAccruedReward(stx.candidate, stx.round);
+    if (accruedAtSettle <= accruedAtStart) return 0;
+
+    // reward per weighted unit × this stake's weighted amount
+    reward = (accruedAtSettle - accruedAtStart) * stx.amount * stx.multiplier / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
+
+    stx.round = settleRound;
+  }
+
+  function _getAccruedReward(address candidate, uint256 round) internal view returns (uint256) {
+    uint256 value = accruedRewardMap[candidate][round];
+    if (value != 0) return value;
+
+    Candidate storage c = candidateMap[candidate];
+    uint256 len = c.rewardEndRounds.length;
+    for (uint256 i = len; i > 0; --i) {
+      uint256 endRound = c.rewardEndRounds[i - 1];
+      if (endRound >= round) {
+        uint256 startRound = (i >= 2) ? c.rewardEndRounds[i - 2] + 1 : 1;
+        if (round >= startRound) {
+          return accruedRewardMap[candidate][endRound];
+        }
       }
     }
-    if (targetRound != 0) {
-      reward = accruedRewardMap[candidate][targetRound];
-      accruedRewardMap[candidate][round] = reward;
-    }
-    return reward;
+    return 0;
   }
-  
-  /*********************** Governance ********************************/
-  /// Update parameters through governance vote
-  /// @param key The name of the parameter
-  /// @param value the new value set to the parameter
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
-    if (value.length != 32) {
-      revert MismatchParamLength(key);
+
+  function _removeStake(address delegator, bytes32 stakeId) internal {
+    delete stakeTxMap[stakeId];
+    bytes32[] storage ids = delegatorStakeIds[delegator];
+    for (uint256 i = 0; i < ids.length; i++) {
+      if (ids[i] == stakeId) {
+        ids[i] = ids[ids.length - 1];
+        ids.pop();
+        break;
+      }
     }
+  }
+
+  /*********************** Governance ********************************/
+  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
     if (Memory.compareStrings(key, "requiredCoinDeposit")) {
+      require(value.length == 32, "length mismatch");
       uint256 newRequiredCoinDeposit = BytesToTypes.bytesToUint256(32, value);
       if (newRequiredCoinDeposit == 0) {
         revert OutOfBounds(key, newRequiredCoinDeposit, 1, type(uint256).max);
       }
       requiredCoinDeposit = newRequiredCoinDeposit;
+    } else if (Memory.compareStrings(key, "grades")) {
+      // value = RLP([ RLP([lockDays, multiplier]), ... ])
+      RLPDecode.RLPItem[] memory items = value.toRLPItem().toList();
+      require(items.length > 0, "empty grades");
+      delete grades;
+      for (uint256 i = 0; i < items.length; i++) {
+        RLPDecode.RLPItem[] memory pair = items[i].toList();
+        uint256 lockDays = RLPDecode.toUint(pair[0]);
+        uint256 multiplier = RLPDecode.toUint(pair[1]);
+        if (i == 0) {
+          require(multiplier >= SatoshiPlusHelper.DENOMINATOR, "multiplier too low");
+        } else {
+          require(lockDays > grades[i - 1].lockDays, "lockDays disorder");
+          require(multiplier > grades[i - 1].multiplier, "multiplier disorder");
+        }
+        grades.push(StakeDurationGrade(lockDays, multiplier));
+      }
     } else {
       revert UnsupportedGovParam(key);
     }
     emit paramChange(key, value);
   }
 
-  /*********************** Public view methods ********************************/
-  /// Get delegator information
-  /// @param candidate The operator address of candidate
-  /// @param delegator The delegator address
-  /// @return CoinDelegator Information of the delegator
-  function getDelegator(address candidate, address delegator) external view returns (CoinDelegator memory) {
-    return candidateMap[candidate].cDelegatorMap[delegator];
+  /*********************** View methods ********************************/
+  function getDelegatorStakeIds(address delegator) external view returns (bytes32[] memory) {
+    return delegatorStakeIds[delegator];
   }
 
-  /// Get delegator information
-  /// @param delegator The delegator address
-  /// return the delegated candidates list of the delegator
-  function getCandidateListByDelegator(address delegator) external view returns (address[] memory) {
-    return delegatorMap[delegator].candidates;
+  function getGrades() external view returns (StakeDurationGrade[] memory) {
+    return grades;
   }
 
-  function getContinuousRewardEndRoundsByCandidate(address candidate) external view returns(uint256[] memory) {
-    return candidateMap[candidate].continuousRewardEndRounds;
+  function getContinuousRewardEndRounds(address candidate) external view returns (uint256[] memory) {
+    return candidateMap[candidate].rewardEndRounds;
   }
 }

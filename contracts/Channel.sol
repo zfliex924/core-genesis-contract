@@ -86,28 +86,26 @@ contract Channel is IChannel, System, IParamSubscriber {
   /// Delegate native coin through Channel (Channel becomes the delegator in NativeAgent)
   /// @param candidate The validator candidate
   /// @param partnerId The channel partner ID
-  function delegateCoin(address candidate, uint32 partnerId) external payable {
+  function delegateCoin(address candidate, uint32 partnerId, uint256 lockRound) external payable {
     if (partners[partnerId].status == 0) {
       revert NoPartner(partnerId);
     }
-    INativeAgent(NATIVE_AGENT_ADDR).delegateCoin{value: msg.value}(candidate);
+    INativeAgent(NATIVE_AGENT_ADDR).delegateCoin{value: msg.value}(candidate, lockRound);
     delegatorPartner[msg.sender] = partnerId;
     emit DelegatedCoin(msg.sender, candidate, partnerId, msg.value);
   }
 
-  /// Undelegate native coin through Channel
-  /// @param candidate The validator candidate
-  /// @param amount The amount to undelegate
-  function undelegateCoin(address candidate, uint256 amount) external {
-    INativeAgent(NATIVE_AGENT_ADDR).undelegateCoin(candidate, amount);
+  /// Undelegate a native coin stake through Channel
+  /// @param stakeId The stake ID to undelegate
+  function undelegateCoin(bytes32 stakeId) external {
+    INativeAgent(NATIVE_AGENT_ADDR).undelegateCoin(stakeId);
   }
 
-  /// Transfer native coin delegation between candidates through Channel
-  /// @param sourceCandidate The source validator candidate
+  /// Transfer a native coin stake to a different candidate through Channel
   /// @param targetCandidate The target validator candidate
-  /// @param amount The amount to transfer
-  function transferCoin(address sourceCandidate, address targetCandidate, uint256 amount) external {
-    INativeAgent(NATIVE_AGENT_ADDR).transferCoin(sourceCandidate, targetCandidate, amount);
+  /// @param stakeId The stake ID to transfer
+  function transferCoin(address targetCandidate, bytes32 stakeId) external {
+    INativeAgent(NATIVE_AGENT_ADDR).transferCoin(targetCandidate, stakeId);
   }
 
   /*********************** ZEC Stake Tracking **************************/

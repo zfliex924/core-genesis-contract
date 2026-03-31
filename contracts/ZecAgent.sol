@@ -54,7 +54,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   struct CandidateState {
     uint256 stakedAmount;    // Snapshotted amount for current round
     uint256 realtimeAmount;  // Current realtime staked amount
-    uint256[] continuousRewardEndRounds;
+    uint256[] rewardEndRounds;
   }
 
   /// @dev Expiration tracking per round
@@ -244,17 +244,17 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       }
 
       uint256 historyReward;
-      uint256 len = cs.continuousRewardEndRounds.length;
+      uint256 len = cs.rewardEndRounds.length;
       if (len > 0) {
-        historyReward = accruedRewardPerZECMap[validators[i]][cs.continuousRewardEndRounds[len - 1]];
+        historyReward = accruedRewardPerZECMap[validators[i]][cs.rewardEndRounds[len - 1]];
       }
       uint256 perZecReward = historyReward + rewardList[i] * SatoshiPlusHelper.ZEC_DECIMAL / cs.stakedAmount;
       accruedRewardPerZECMap[validators[i]][round] = perZecReward;
 
-      if (len > 0 && cs.continuousRewardEndRounds[len - 1] == round - 1) {
-        cs.continuousRewardEndRounds[len - 1] = round;
+      if (len > 0 && cs.rewardEndRounds[len - 1] == round - 1) {
+        cs.rewardEndRounds[len - 1] = round;
       } else {
-        cs.continuousRewardEndRounds.push(round);
+        cs.rewardEndRounds.push(round);
       }
     }
   }
@@ -449,11 +449,11 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     if (value != 0) return value;
 
     CandidateState storage cs = candidateMap[candidate];
-    uint256 len = cs.continuousRewardEndRounds.length;
+    uint256 len = cs.rewardEndRounds.length;
     for (uint256 i = len; i > 0; --i) {
-      uint256 endRound = cs.continuousRewardEndRounds[i - 1];
+      uint256 endRound = cs.rewardEndRounds[i - 1];
       if (endRound >= round) {
-        uint256 startRound = (i >= 2) ? cs.continuousRewardEndRounds[i - 2] + 1 : 1;
+        uint256 startRound = (i >= 2) ? cs.rewardEndRounds[i - 2] + 1 : 1;
         if (round >= startRound) {
           return accruedRewardPerZECMap[candidate][endRound];
         }
@@ -479,7 +479,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   }
 
   function getContinuousRewardEndRounds(address candidate) external view returns (uint256[] memory) {
-    return candidateMap[candidate].continuousRewardEndRounds;
+    return candidateMap[candidate].rewardEndRounds;
   }
 
   function getDualStakingGrades() external view returns (DualStakingGrade[] memory) {

@@ -1,75 +1,28 @@
 // SPDX-License-Identifier: Apache2.0
 pragma solidity 0.8.4;
 
-import {NativeAgent} from "../NativeAgent.sol";
-import "../lib/SatoshiPlusHelper.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
+import "../NativeAgent.sol";
 
 contract NativeAgentMock is NativeAgent {
-    uint256 public rewardAmountM;
 
     function developmentInit() external {
-        requiredCoinDeposit = requiredCoinDeposit / 1e16;
-        roundTag = 7;
+        requiredCoinDeposit = requiredCoinDeposit;
     }
 
-    function setRoundTag(uint value) external {
+    function setRoundTag(uint256 value) external {
         roundTag = value;
     }
 
-    function setRequiredCoinDeposit(uint newRequiredCoinDeposit) external {
+    function setRequiredCoinDeposit(uint256 newRequiredCoinDeposit) external {
         requiredCoinDeposit = newRequiredCoinDeposit;
     }
 
-    function getDelegatorMap(address delegator) external view returns (address[] memory, uint256) {
-        address[] memory candidates = delegatorMap[delegator].candidates;
-        uint256 amount = delegatorMap[delegator].amount;
-        return (candidates, amount);
+    function setCandidateAmount(address candidate, uint256 staked, uint256 realtime) external {
+        candidateMap[candidate].stakedAmount = staked;
+        candidateMap[candidate].realtimeAmount = realtime;
     }
 
     function getAccruedRewardMap(address validator, uint256 round) external view returns (uint256) {
-        uint256 accruedReward = accruedRewardMap[validator][round];
-        return accruedReward;
+        return accruedRewardMap[validator][round];
     }
-
-    function setAccruedRewardMap(address candidate, uint256 round, uint256 amount) public {
-        accruedRewardMap[candidate][round] = amount;
-    }
-
-    function setCoreRewardMap(address delegator, uint256 reward, uint256 accStakedAmount) external {
-        uint256 accrueRound = roundTag - 1;
-        address[] memory candidates = delegatorMap[delegator].candidates;
-        for (uint256 i = 0; i < candidates.length; ++i) {
-            setAccruedRewardMap(candidates[i], accrueRound, 0);
-        }
-        rewardMap[delegator] = Reward(reward, accStakedAmount);
-    }
-    
-
-    function setCandidateMapAmount(address candidate, uint256 amount, uint256 realAmount, uint256 endRound) external {
-        candidateMap[candidate].amount = amount;
-        candidateMap[candidate].realtimeAmount = realAmount;
-        if (endRound > 0) {
-            candidateMap[candidate].continuousRewardEndRounds.push(endRound);
-        }
-    }
-    function setCoinDelegatorMap(address candidate, address delegator, uint256 stakedAmount, uint256 realtimeAmount) external {
-        CoinDelegator storage d = candidateMap[candidate].cDelegatorMap[delegator];
-        d.stakedAmount = stakedAmount;
-        d.realtimeAmount = realtimeAmount; 
-    }
-
-    function getRewardAmount() external view returns (uint256) {
-        return rewardAmountM;
-    }
-    //  for unit test
-    function collectCoinRewardMock(address agent, address delegator) external returns (uint256 reward, uint256 stakedAmount1, uint256 stakedAmount2) {
-        Candidate storage a = candidateMap[agent];
-        CoinDelegator storage d = a.cDelegatorMap[delegator];
-        (reward, stakedAmount1, stakedAmount2) = _collectRewardFromCandidate(agent, d);
-    }
-    function deductTransferredAmountMock(address delegator, uint256 amount) external {
-        _deductTransferredAmount(delegator, amount);
-    }
-
 }

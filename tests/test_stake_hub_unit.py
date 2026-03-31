@@ -98,7 +98,7 @@ def test_add_round_reward_success(validator_set, core_agent, zec_light_client, c
     power_value = 5
     core_value = 100
     for validator in validators:
-        core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
+        core_agent.setCandidateAmount(validator, core_value, core_value)
         zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
     tx = validator_set.addRoundRewardMock(validators, reward_list, round_tag,
@@ -129,7 +129,7 @@ def test_add_round_reward_core_only(validator_set, core_agent, candidate_hub,
     reward_list = [1000, 2000]
     value_sum = sum(reward_list)
     for validator in validators:
-        core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
+        core_agent.setCandidateAmount(validator, core_value, core_value)
     candidate_hub.getScoreMock(validators, round_tag)
     tx = validator_set.addRoundRewardMock(validators, reward_list, round_tag,
                                           {'from': accounts[0], 'value': value_sum})
@@ -145,7 +145,7 @@ def test_reward_without_stake(validator_set, core_agent, zec_light_client, candi
     power_value = 5
     core_value = 100
     for validator in validators:
-        core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
+        core_agent.setCandidateAmount(validator, core_value, core_value)
         zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
     tx = validator_set.addRoundRewardMock(validators, reward_list, round_tag,
@@ -177,7 +177,7 @@ def test_get_hybrid_score_success(core_agent, zec_light_client, candidate_hub, s
     zec_value = 0
     values = [core_value, power_value, zec_value]
     for validator in validators[:1]:
-        core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
+        core_agent.setCandidateAmount(validator, core_value, core_value)
         zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     tx = candidate_hub.getScoreMock(validators, round_tag)
     scores = tx.return_value
@@ -191,7 +191,7 @@ def test_calculate_factor_success(core_agent, zec_light_client, candidate_hub, s
     core_value = 100e18
     power_value = 200
     for validator in validators[:1]:
-        core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
+        core_agent.setCandidateAmount(validator, core_value, core_value)
         zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
 
@@ -203,7 +203,7 @@ def test_two_rounds_score_calculation_success(core_agent, zec_light_client, cand
     core_value = 100e18
     power_value = 200
     for validator in validators[:1]:
-        core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
+        core_agent.setCandidateAmount(validator, core_value, core_value)
         zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
     candidate_hub.getScoreMock(validators, round_tag)
@@ -216,7 +216,7 @@ def test_validators_score_calculation_success(core_agent, zec_light_client, cand
     core_value = 100e18
     power_value = 200
     for validator in validators:
-        core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
+        core_agent.setCandidateAmount(validator, core_value, core_value)
         zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     tx = candidate_hub.getScoreMock(validators, round_tag)
     scores = tx.return_value
@@ -350,7 +350,7 @@ def test_stake_hup_add_round_reward(stake_hub, validator_set, candidate_hub, cor
             value_sum += v
         if 'add_core' in test:
             for validator, v in test['add_core']:
-                core_agent.setCandidateMapAmount(validator, v, v, 0)
+                core_agent.setCandidateAmount(validator, v, v)
         if 'add_pow' in test:
             for v1, v2 in test['add_pow']:
                 zec_light_client.setMiners(test['round'] - 7, v1, v2)
@@ -388,7 +388,7 @@ def test_stake_hup_get_hybrid_score(stake_hub, validator_set, candidate_hub, cor
         print(f'case{tests.index(test)}:', test)
         if 'add_core' in test:
             for validator, v in test['add_core']:
-                core_agent.setCandidateMapAmount(validator, v, v, 0)
+                core_agent.setCandidateAmount(validator, v, v)
         if 'add_pow' in test:
             for v1, v2 in test['add_pow']:
                 zec_light_client.setMiners(test['round'] - 7, v1, v2)

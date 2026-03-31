@@ -254,14 +254,14 @@ def delegate_coin_success(candidate, delegator, amount):
     return tx
 
 
-def transfer_coin_success(source_agent, target_agent, delegator, amount):
-    tx = NativeAgentMock[0].transferCoin(source_agent, target_agent, amount, {'from': delegator})
+def transfer_coin_success(source_agent, target_agent, delegator, stakeId):
+    tx = NativeAgentMock[0].transferCoin(source_agent, target_agent, stakeId, {'from': delegator})
     assert 'transferredCoin' in tx.events
     return tx
 
 
-def undelegate_coin_success(candidate, delegator, amount):
-    tx = NativeAgentMock[0].undelegateCoin(candidate, amount, {'from': delegator})
+def undelegate_coin_success(candidate, delegator, stakeId):
+    tx = NativeAgentMock[0].undelegateCoin(candidate, stakeId, {'from': delegator})
     assert 'undelegatedCoin' in tx.events
     return tx
 
@@ -441,7 +441,7 @@ def build_btc_lock_script(timestamp=None):
 class RoundRewardManager:
     @staticmethod
     def mock_core_reward_map(delegator, reward, acc_stake_amount):
-        NativeAgentMock[0].setCoreRewardMap(delegator, reward, acc_stake_amount)
+        pass  # NativeAgent no longer has setCoreRewardMap
 
     @staticmethod
     def mock_power_reward_map(delegator, reward):
