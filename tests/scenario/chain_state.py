@@ -29,7 +29,7 @@ class Candidate:
             self.status = 0
             return
 
-        assert len(tuple_data) == 8
+        assert len(tuple_data) == 10
 
         self.operator_addr = accounts.at(tuple_data[0], force=True)
         self.consensus_addr = accounts.at(tuple_data[1], force=True)
@@ -39,6 +39,8 @@ class Candidate:
         self.status = tuple_data[5]
         self.commission_last_change_round = tuple_data[6]
         self.commission_last_round_value = tuple_data[7]
+        self.agent = tuple_data[8]
+        self.vote_addr = tuple_data[9]
 
         self.stake_state = CandidateStakeState()
         self.commission_in_use = tuple_data[3]
@@ -564,9 +566,8 @@ class ChainState:
         return BitcoinLSTToken[0].balanceOf(addr)
 
     def get_candidate_on_chain(self, operator_addr):
-        idx = CandidateHubMock[0].operateMap(operator_addr)
-        assert idx > 0, f"Invalid operator address"
-        candidate = CandidateHubMock[0].candidateSet(idx - 1)
+        assert CandidateHubMock[0].operateMap(operator_addr), f"Invalid operator address"
+        candidate = CandidateHubMock[0].getCandidate(operator_addr)
 
         return Candidate(candidate)
 

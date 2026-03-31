@@ -22,10 +22,9 @@ def register_candidate(consensus=None, fee_address=None, operator=None, commissi
 
 
 def get_candidate(operator=None):
-    idx = CandidateHubMock[0].operateMap(operator)
-    if idx == 0:
+    if not CandidateHubMock[0].operateMap(operator):
         return None
-    return CandidateHubMock[0].candidateSet(idx - 1).dict()
+    return CandidateHubMock[0].getCandidate(operator).dict()
 
 
 def chain_deposit(miners, tx_fee=100, deposit_count=1):

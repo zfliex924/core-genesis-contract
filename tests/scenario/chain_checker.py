@@ -29,8 +29,8 @@ class ChainChecker:
         # print(f"dataArr={dataArr}")
 
         for i in range(len(operator_addr_list)):
-            tuple_data = CandidateHubMock[0].candidateSet(i)
-            operator_addr = tuple_data[0]
+            operator_addr = operator_addr_list[i]
+            tuple_data = CandidateHubMock[0].getCandidate(operator_addr)
 
             candidate_off_chain = candidates[operator_addr]
             commission_on_chain = tuple_data[3]
@@ -117,8 +117,7 @@ class ChainChecker:
         assert_result("candidate", candidate, candidate_on_chain)
 
     def check_candidate_removed(self, candidate):
-        idx = CandidateHubMock[0].operateMap(candidate.get_operator_addr())
-        assert idx == 0
+        assert CandidateHubMock[0].operateMap(candidate.get_operator_addr()) == False
 
     def check_slash_indicator(self, operator_addr):
         candidate = self.chain.get_candidate(operator_addr)

@@ -9,7 +9,6 @@ import "../interface/ICandidateHub.sol";
 import "../interface/IParamSubscriber.sol";
 import "../interface/ISlashIndicator.sol";
 import "../interface/IStakeHub.sol";
-import "../interface/ILightClient.sol";
 import "../System.sol";
 import "../lib/Address.sol";
 import "../lib/SatoshiPlusHelper.sol";
@@ -17,9 +16,6 @@ import "../lib/SatoshiPlusHelper.sol";
 contract CandidateHubMock is CandidateHub {
     bool public controlRoundTimeTag = false;
     bool public turnroundFailed = false;
-    uint256[] public scores;
-    uint256 public totalPower;
-    uint256 public totalCoin;
 
     function developmentInit() external {
         roundInterval = 1;
@@ -41,29 +37,22 @@ contract CandidateHubMock is CandidateHub {
         dues = value;
     }
 
-    function mockRegister(uint256 value) external {
-        for (uint256 i = 0; i < value; i++) {
-            candidateSet.push();
-        }
-    }
-
-
     function setValidatorCount(uint256 value) external {
         validatorCount = value;
     }
 
     function getCanDelegateCandidates() external view returns (address[] memory) {
         uint count;
-        for (uint256 i = 0; i < candidateSet.length; i++) {
-            if (this.canDelegate(candidateSet[i].operateAddr)) {
+        for (uint256 i = 0; i < candidateList.length; i++) {
+            if (this.canDelegate(candidateList[i])) {
                 count++;
             }
         }
         address[] memory opAddrs = new address[](count);
         uint n;
-        for (uint256 i = 0; i < candidateSet.length; i++) {
-            if (this.canDelegate(candidateSet[i].operateAddr)) {
-                opAddrs[n] = candidateSet[i].operateAddr;
+        for (uint256 i = 0; i < candidateList.length; i++) {
+            if (this.canDelegate(candidateList[i])) {
+                opAddrs[n] = candidateList[i];
                 n++;
             }
         }
@@ -72,16 +61,16 @@ contract CandidateHubMock is CandidateHub {
 
     function getRefusedCandidates() external view returns (address[] memory) {
         uint count;
-        for (uint256 i = 0; i < candidateSet.length; i++) {
-            if ((candidateSet[i].status & SET_INACTIVE) == SET_INACTIVE) {
+        for (uint256 i = 0; i < candidateList.length; i++) {
+            if ((candidateMap[candidateList[i]].status & SET_INACTIVE) == SET_INACTIVE) {
                 count++;
             }
         }
         address[] memory opAddrs = new address[](count);
         uint n;
-        for (uint256 i = 0; i < candidateSet.length; i++) {
-            if ((candidateSet[i].status & SET_INACTIVE) == SET_INACTIVE) {
-                opAddrs[n] = candidateSet[i].operateAddr;
+        for (uint256 i = 0; i < candidateList.length; i++) {
+            if ((candidateMap[candidateList[i]].status & SET_INACTIVE) == SET_INACTIVE) {
+                opAddrs[n] = candidateList[i];
                 n++;
             }
         }
@@ -93,11 +82,11 @@ contract CandidateHubMock is CandidateHub {
     }
 
     function setCandidateMargin(address k, uint256 v) public {
-        candidateSet[operateMap[k] - 1].margin = v;
+        candidateMap[k].margin = v;
     }
 
     function setCandidateStatus(address k, uint256 v) public {
-        candidateSet[operateMap[k] - 1].status = v;
+        candidateMap[k].status = v;
     }
 
     function setTurnroundFailed(bool value) public {
@@ -108,43 +97,35 @@ contract CandidateHubMock is CandidateHub {
         roundInterval = value;
     }
 
-
     function getCandidate(address k) public view returns (Candidate memory) {
-        return candidateSet[operateMap[k] - 1];
+        return candidateMap[k];
     }
 
-    function getConsensusMap(address consensusAddr) public view returns (uint256) {
+    function getConsensusMap(address consensusAddr) public view returns (address) {
         return consensusMap[consensusAddr];
     }
 
     function getScoreMock(address[] memory candidates, uint256 round) external returns (uint256[] memory hybridScores) {
-        hybridScores = IStakeHub(STAKE_HUB_ADDR).getHybridScore(
-            candidates,
-            round
-        );
+        hybridScores = IStakeHub(STAKE_HUB_ADDR).getHybridScore(candidates, round);
         return hybridScores;
     }
 
-    function getScores() external view returns (uint256[] memory) {
-        return scores;
-    }
-
     function getValidatorsMock(
-        address[] memory candidateList,
+        address[] memory candidateList_,
         uint256[] memory scoreList,
         uint256 count,
         uint256 sortedCount
     ) public pure returns (address[] memory validatorList) {
-        return getValidators(candidateList, scoreList, count, sortedCount);
+        return getValidators(candidateList_, scoreList, count, sortedCount);
     }
+
     function getAlternateCountMock(
-        uint256 maxAlternateCount,
+        uint256 _maxAlternateCount,
         uint256 count,
         uint256 candidateSize
     ) public pure returns (uint256) {
-        return getAlternateCount(maxAlternateCount, count, candidateSize);
+        return getAlternateCount(_maxAlternateCount, count, candidateSize);
     }
-
 
     function cleanMock() public {
         ISlashIndicator(SLASH_CONTRACT_ADDR).clean();
@@ -157,30 +138,24 @@ contract CandidateHubMock is CandidateHub {
         uint32 commissionThousandths,
         bytes calldata voteAddr
     ) external payable onlyInit {
-        uint256 status = SET_CANDIDATE;
-        candidateSet.push(
-            Candidate({
-                operateAddr: operateAddr,
-                consensusAddr: consensusAddr,
-                feeAddr: feeAddr,
-                commissionThousandths: commissionThousandths,
-                margin: msg.value,
-                status: status,
-                commissionLastChangeRound: roundTag,
-                commissionLastRoundValue: commissionThousandths
-            })
-        );
-        exMap[operateAddr] = CandidateEx({
-            voteAddr: voteAddr,
-            agent: address(0)
+        candidateMap[operateAddr] = Candidate({
+            operateAddr: operateAddr,
+            consensusAddr: consensusAddr,
+            feeAddr: feeAddr,
+            commissionThousandths: commissionThousandths,
+            margin: msg.value,
+            status: SET_CANDIDATE,
+            commissionLastChangeRound: roundTag,
+            commissionLastRoundValue: commissionThousandths,
+            agent: address(0),
+            voteAddr: voteAddr
         });
-        uint256 index = candidateSet.length;
-        operateMap[operateAddr] = index;
-        consensusMap[consensusAddr] = index;
+        candidateList.push(operateAddr);
+        operateMap[operateAddr] = true;
+        consensusMap[consensusAddr] = operateAddr;
 
         emit registered(operateAddr, consensusAddr, feeAddr, commissionThousandths, msg.value, voteAddr);
     }
-    /********************* External methods  ****************************/
 
     function turnRound() public virtual override onlyCoinbase onlyInit onlyZeroGasPrice {
         require(!turnroundFailed, "turnRound failed");
@@ -194,16 +169,27 @@ contract CandidateHubMock is CandidateHub {
             super.nextRound();
         }
     }
-    
+
     function setMaxAlternateCount(uint256 _maxAlternateCount) external {
         maxAlternateCount = _maxAlternateCount;
     }
-    function mockGetAlternateCount(uint256 maxAlternateCount, uint256 count, uint256 candidateSize) public pure returns (uint256) {
-        return getAlternateCount(maxAlternateCount, count, candidateSize);
+
+    function mockGetAlternateCount(uint256 _maxAlternateCount, uint256 count, uint256 candidateSize) public pure returns (uint256) {
+        return getAlternateCount(_maxAlternateCount, count, candidateSize);
     }
+
     receive() external payable {}
-    // for unit test
-    function removeCandidateMock(uint256 index) external {
-        removeCandidate(index);
+
+    function removeCandidateMock(address operateAddr) external {
+        _removeCandidate(operateAddr);
+    }
+
+    /// @dev Fill candidateList with dummy addresses to simulate a large candidate set
+    function mockFillCandidateList(uint256 count) external {
+        for (uint256 i = candidateList.length; i < count; i++) {
+            address dummy = address(uint160(0xdead0000 + i));
+            candidateList.push(dummy);
+            operateMap[dummy] = true;
+        }
     }
 }

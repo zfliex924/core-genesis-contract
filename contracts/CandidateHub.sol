@@ -10,10 +10,9 @@ import "./interface/IParamSubscriber.sol";
 import "./interface/ISlashIndicator.sol";
 import "./interface/IStakeHub.sol";
 import "./System.sol";
-import "./lib/Address.sol";
 import "./lib/SatoshiPlusHelper.sol";
 
-/// This contract manages all validator candidates on Core blockchain
+/// This contract manages all validator candidates on Z Protocol blockchain
 /// It also exposes the method `turnRound` for the consensus engine to execute the `turn round` workflow
 contract CandidateHub is ICandidateHub, System, IParamSubscriber {
 
@@ -35,38 +34,15 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   uint256 public constant ACTIVE_STATUS = SET_CANDIDATE | SET_VALIDATOR;
   uint256 public constant UNREGISTER_STATUS = SET_CANDIDATE | SET_INACTIVE | SET_MARGIN;
 
-  // the refundable deposit
   uint256 public requiredMargin;
-  // the unregister fee
   uint256 public dues;
-
   uint256 public roundInterval;
   uint256 public validatorCount;
   uint256 public maxCommissionChange;
-
-  // candidate list.
-  Candidate[] public candidateSet;
-  // key is the `operateAddr` of `Candidate`,
-  // value is the index of `candidateSet`.
-  mapping(address => uint256) public operateMap;
-
-  // key is the `consensusAddr` of `Candidate`,
-  // value is the index of `candidateSet`.
-  mapping(address => uint256) consensusMap;
-
-  // key is the `consensusAddr` of `Candidate`,
-  // value is release round
-  mapping(address => uint256) public jailMap;
-
-  uint256 public roundTag;
-  
   uint256 public maxAlternateCount;
+  uint256 public roundTag;
 
-  mapping(address => uint256) public agentMap;
-  // Key is operate address.
-  // Value is CandidateEx
-  mapping(address => CandidateEx) public exMap;
-  
+  /// @dev Unified candidate struct (replaces old Candidate + CandidateEx)
   struct Candidate {
     address operateAddr;
     address consensusAddr;
@@ -76,15 +52,23 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     uint256 status;
     uint256 commissionLastChangeRound;
     uint256 commissionLastRoundValue;
-  }
-
-  struct CandidateEx {
     address agent;
     bytes voteAddr;
   }
 
+  // Primary storage: operator address → Candidate
+  mapping(address => Candidate) public candidateMap;
+  // Address list for enumeration
+  address[] public candidateList;
+
+  // Reverse lookups
+  mapping(address => bool) public operateMap;       // operator exists?
+  mapping(address => address) public consensusMap;   // consensus addr → operator addr
+  mapping(address => address) public agentMap;       // agent addr → operator addr
+  mapping(address => uint256) public jailMap;        // operator addr → release round
+
   modifier onlyOperator() {
-    require(operateMap[msg.sender] != 0, "candidate does not exist");
+    require(operateMap[msg.sender], "candidate does not exist");
     _;
   }
 
@@ -95,7 +79,6 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   event deductedMargin(address indexed operateAddr, uint256 margin, uint256 totalMargin);
   event statusChanged(address indexed operateAddr, uint256 oldStatus, uint256 newStatus);
   event turnedRound(uint256 round);
-
   event AgentUpdated(address indexed operateAddr, address newAgent);
   event ConsensusAddressEdited(address indexed operateAddr, address newConsensusAddr);
   event CommissionRateEdited(address indexed operateAddr, uint256 newRate);
@@ -113,98 +96,66 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   }
 
   /********************* ICandidateHub interface ****************************/
-  /// Whether users can delegate on a validator candidate
-  /// @param candidate The operator address of the validator candidate
-  /// @return true/false
   function canDelegate(address candidate) external override view returns(bool) {
-    uint256 index = operateMap[candidate];
-    if (index == 0) {
-      return false;
-    }
-    uint256 status = candidateSet[index - 1].status;
+    if (!operateMap[candidate]) return false;
+    uint256 status = candidateMap[candidate].status;
     return status == (status & ACTIVE_STATUS);
   }
 
-  /// Whether the candidate is a validator
-  /// @param candidate The operator address of the validator candidate
-  /// @return true/false
   function isValidator(address candidate) external override view returns(bool) {
-    uint256 index = operateMap[candidate];
-    if (index == 0) {
-      return false;
-    }
-    uint256 status = candidateSet[index - 1].status;
-    return SET_VALIDATOR == (status & SET_VALIDATOR);  
+    if (!operateMap[candidate]) return false;
+    return SET_VALIDATOR == (candidateMap[candidate].status & SET_VALIDATOR);
   }
 
-  /// Whether the input address is operator address of a validator candidate 
-  /// @param operateAddr Operator address of validator candidate
-  /// @return true/false
   function isCandidateByOperate(address operateAddr) external override view returns (bool) {
-    return operateMap[operateAddr] != 0;
+    return operateMap[operateAddr];
   }
 
-  /// Jail a validator for some rounds and slash some amount of deposits
-  /// @param operateAddress The operator address of the validator
-  /// @param round The number of rounds to jail
-  /// @param fine The amount of deposits to slash
   function jailValidator(address operateAddress, uint256 round, uint256 fine) external override onlyValidator {
-    uint256 index = operateMap[operateAddress];
-    if (index == 0) return;
+    if (!operateMap[operateAddress]) return;
 
-    Candidate storage c = candidateSet[index - 1];
+    Candidate storage c = candidateMap[operateAddress];
     uint256 margin = c.margin;
     if (margin >= dues && margin - dues >= fine) {
       uint256 status = c.status | SET_JAIL;
-      // update jailMap
       if (jailMap[operateAddress] > 0) {
         jailMap[operateAddress] = jailMap[operateAddress] + round;
       } else {
         jailMap[operateAddress] = roundTag + round;
       }
-      // deduct margin
       uint256 totalMargin = margin - fine;
       c.margin = totalMargin;
       emit deductedMargin(operateAddress, fine, totalMargin);
       if (totalMargin < requiredMargin) {
         status = status | SET_MARGIN;
       }
-      changeStatus(c, status);
+      _changeStatus(operateAddress, status);
       if (fine != 0) {
         payable(SYSTEM_REWARD_ADDR).transfer(fine);
       }
     } else {
-      removeCandidate(index);
-
+      _removeCandidate(operateAddress);
       payable(SYSTEM_REWARD_ADDR).transfer(margin);
       emit deductedMargin(operateAddress, margin, 0);
     }
   }
 
-  /// Simple return the round tag.
   function getRoundTag() external override view returns(uint256) {
     return roundTag;
   }
 
   /********************* External methods  ****************************/
-  /// The `turn round` workflow
-  /// @dev this method is called by Golang consensus engine at the end of a round
   function turnRound() public virtual onlyCoinbase onlyInit onlyZeroGasPrice {
-    
     IValidatorSet(VALIDATOR_CONTRACT_ADDR).exitMaintenanceTurnRound();
-    
-    // distribute rewards for the about to end round
     IValidatorSet(VALIDATOR_CONTRACT_ADDR).distributeReward(roundTag);
-
-    // update the system round tag; new round starts
     nextRound();
 
-    // reset validator flags for all candidates.
-    uint256 candidateSize = candidateSet.length;
+    // Reset validator flags and collect valid candidates
+    uint256 candidateSize = candidateList.length;
     uint256 validCount = 0;
     uint256[] memory statusList = new uint256[](candidateSize);
     for (uint256 i = 0; i < candidateSize; i++) {
-      statusList[i] = candidateSet[i].status & DEL_VALIDATOR;
+      statusList[i] = candidateMap[candidateList[i]].status & DEL_VALIDATOR;
       if (statusList[i] == SET_CANDIDATE) validCount++;
     }
 
@@ -212,48 +163,46 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     uint256 j = 0;
     for (uint256 i = 0; i < candidateSize; i++) {
       if (statusList[i] == SET_CANDIDATE) {
-        candidates[j++] = candidateSet[i].operateAddr;
+        candidates[j++] = candidateList[i];
       }
     }
 
-    // calculate the hybrid score for all valid candidates and 
-    // choose top ones to form the validator set of the new round
     (uint256[] memory scores) =
       IStakeHub(STAKE_HUB_ADDR).getHybridScore(candidates, roundTag);
     uint256 sortedCount = getAlternateCount(maxAlternateCount, validatorCount, candidates.length);
     address[] memory validatorList = getValidators(candidates, scores, validatorCount + sortedCount, sortedCount);
 
-    // prepare arguments, and notify ValidatorSet contract
     address[] memory consensusAddrList = new address[](validatorList.length);
     address payable[] memory feeAddrList = new address payable[](validatorList.length);
     uint256[] memory commissionThousandthsList = new uint256[](validatorList.length);
     bytes[] memory voteAddrList = new bytes[](validatorList.length);
 
     for (uint256 i = 0; i < validatorList.length; ++i) {
-      uint256 index = operateMap[validatorList[i]];
-      Candidate storage c = candidateSet[index - 1];
+      Candidate storage c = candidateMap[validatorList[i]];
       consensusAddrList[i] = c.consensusAddr;
       feeAddrList[i] = c.feeAddr;
-      voteAddrList[i] = exMap[validatorList[i]].voteAddr;
+      voteAddrList[i] = c.voteAddr;
       if (scores[i] == 0) {
         commissionThousandthsList[i] = 1000;
       } else {
         commissionThousandthsList[i] = c.commissionThousandths;
       }
-      statusList[index - 1] |= SET_VALIDATOR;
+      // Find index in candidateList for status update
+      for (uint256 k = 0; k < candidateSize; k++) {
+        if (candidateList[k] == validatorList[i]) {
+          statusList[k] |= SET_VALIDATOR;
+          break;
+        }
+      }
     }
 
     IValidatorSet(VALIDATOR_CONTRACT_ADDR).updateValidatorSet(validatorList, consensusAddrList, feeAddrList, commissionThousandthsList, voteAddrList, validatorCount);
-
-    // clean slash contract
     ISlashIndicator(SLASH_CONTRACT_ADDR).clean();
-
-    // notify StakeHub contract
     IStakeHub(STAKE_HUB_ADDR).setNewRound(validatorList, roundTag);
 
-    // update validator jail status
+    // Update jail status
     for (uint256 i = 0; i < candidateSize; i++) {
-      address opAddr = candidateSet[i].operateAddr;
+      address opAddr = candidateList[i];
       uint256 jailedRound = jailMap[opAddr];
       if (jailedRound != 0 && jailedRound <= roundTag) {
         statusList[i] = statusList[i] & DEL_JAIL;
@@ -261,68 +210,58 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       }
     }
 
+    // Sync status changes
     for (uint256 i = 0; i < candidateSize; i++) {
-      changeStatus(candidateSet[i], statusList[i]);
+      _changeStatus(candidateList[i], statusList[i]);
     }
     emit turnedRound(roundTag);
   }
 
   /****************** register/unregister ***************************/
-  /// Register as a validator candidate on Core blockchain
-  /// @param consensusAddr Consensus address configured on the validator node
-  /// @param feeAddr Fee address set to collect system rewards
-  /// @param commissionThousandths The commission fee taken by the validator, measured in thousandths
-  /// @param voteAddr Vote address set to vote for the validator
   function register(address consensusAddr, address payable feeAddr, uint32 commissionThousandths, bytes calldata voteAddr)
     external payable
     onlyInit
   {
-    uint256 candidateSize = candidateSet.length;
-    require(candidateSize <= CANDIDATE_COUNT_LIMIT, "maximum candidate size reached");
-    require(operateMap[msg.sender] == 0, "candidate already exists");
+    require(candidateList.length <= CANDIDATE_COUNT_LIMIT, "maximum candidate size reached");
+    require(!operateMap[msg.sender], "candidate already exists");
     require(msg.value >= requiredMargin, "deposit is not enough");
     require(commissionThousandths != 0 && commissionThousandths < 1000, "commissionThousandths should be in (0, 1000)");
-    require(consensusMap[consensusAddr] == 0, "consensus already exists");
+    require(consensusMap[consensusAddr] == address(0), "consensus already exists");
     require(consensusAddr != address(0), "consensus address should not be zero");
     require(feeAddr != address(0), "fee address should not be zero");
-  
-    // check jail status
     require(jailMap[msg.sender] < roundTag, "it is in jail");
-
     require(voteAddr.length == 48, "vote address length should be 48");
-    for (uint256 i = 0; i < candidateSize; i++) {
-      require(!BytesLib.equal(exMap[candidateSet[i].operateAddr].voteAddr, voteAddr), "vote address already exists");
+
+    // Check vote address uniqueness
+    for (uint256 i = 0; i < candidateList.length; i++) {
+      require(!BytesLib.equal(candidateMap[candidateList[i]].voteAddr, voteAddr), "vote address already exists");
     }
 
-    uint256 status = SET_CANDIDATE;
-    candidateSet.push(Candidate(
-      msg.sender,
-      consensusAddr,
-      feeAddr,
-      commissionThousandths,
-      msg.value,
-      status,
-      roundTag,
-      commissionThousandths
-    ));
-    exMap[msg.sender] = CandidateEx(
-      address(0),
-      voteAddr
-    );
-    operateMap[msg.sender] = candidateSize + 1;
-    consensusMap[consensusAddr] = candidateSize + 1;
+    candidateMap[msg.sender] = Candidate({
+      operateAddr: msg.sender,
+      consensusAddr: consensusAddr,
+      feeAddr: feeAddr,
+      commissionThousandths: commissionThousandths,
+      margin: msg.value,
+      status: SET_CANDIDATE,
+      commissionLastChangeRound: roundTag,
+      commissionLastRoundValue: commissionThousandths,
+      agent: address(0),
+      voteAddr: voteAddr
+    });
+    candidateList.push(msg.sender);
+    operateMap[msg.sender] = true;
+    consensusMap[consensusAddr] = msg.sender;
 
     emit registered(msg.sender, consensusAddr, feeAddr, commissionThousandths, msg.value, voteAddr);
   }
 
-  /// Unregister the validator candidate role on Core blockchain
   function unregister() external onlyInit onlyOperator {
-    uint256 index = operateMap[msg.sender];
-    Candidate storage c = candidateSet[index - 1];
+    Candidate storage c = candidateMap[msg.sender];
     require(c.status == (c.status & UNREGISTER_STATUS), "candidate status is not cleared");
     uint256 margin = c.margin;
 
-    removeCandidate(index);
+    _removeCandidate(msg.sender);
 
     if (margin > dues) {
       uint256 value = margin - dues;
@@ -334,44 +273,37 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   }
 
   function updateAgent(address newAgent) external onlyOperator {
-    address operateAddr = msg.sender;
-    uint256 index = operateMap[operateAddr];
     require(newAgent != address(0), "agent address cannot be zero");
-    require(agentMap[newAgent] == 0, "agent address already exists");
+    require(agentMap[newAgent] == address(0), "agent address already exists");
 
-    address oldAgent = exMap[operateAddr].agent;
-    if (oldAgent != address(0)) {
-      delete agentMap[oldAgent];
+    Candidate storage c = candidateMap[msg.sender];
+    if (c.agent != address(0)) {
+      delete agentMap[c.agent];
     }
-
-    agentMap[newAgent] = index;
-    exMap[operateAddr].agent = newAgent;
-    emit AgentUpdated(operateAddr, newAgent);
+    agentMap[newAgent] = msg.sender;
+    c.agent = newAgent;
+    emit AgentUpdated(msg.sender, newAgent);
   }
 
   function removeAgent() external onlyOperator {
-    address operateAddr = msg.sender;
-    require(exMap[operateAddr].agent != address(0), "agent address does not exist");
-    delete agentMap[exMap[operateAddr].agent];
-    exMap[operateAddr].agent = address(0);
+    Candidate storage c = candidateMap[msg.sender];
+    require(c.agent != address(0), "agent address does not exist");
+    delete agentMap[c.agent];
+    c.agent = address(0);
   }
 
   function editConsensusAddress(address newConsensusAddr) external {
-    Candidate storage c = getCandidate();
-
-    require(consensusMap[newConsensusAddr] == 0, "consensus already exists");
-    consensusMap[newConsensusAddr] = consensusMap[c.consensusAddr];
+    Candidate storage c = _getCandidate();
+    require(consensusMap[newConsensusAddr] == address(0), "consensus already exists");
+    consensusMap[newConsensusAddr] = c.operateAddr;
     delete consensusMap[c.consensusAddr];
     c.consensusAddr = newConsensusAddr;
-
     emit ConsensusAddressEdited(c.operateAddr, newConsensusAddr);
   }
 
   function editCommissionRate(uint32 newRate) external {
-    Candidate storage c = getCandidate();
-
+    Candidate storage c = _getCandidate();
     require(newRate != 0 && newRate < 1000, "commissionThousandths should in range (0, 1000)");
-    
     uint256 commissionLastRoundValue = roundTag == c.commissionLastChangeRound
       ? c.commissionLastRoundValue
       : c.commissionThousandths;
@@ -389,110 +321,91 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   }
 
   function editVoteAddress(bytes calldata voteAddr) external {
-    Candidate storage c = getCandidate();
+    Candidate storage c = _getCandidate();
     require(voteAddr.length == 48, "vote address length should be 48");
-
-    uint256 candidateSize = candidateSet.length;
-    for (uint256 i = 0; i < candidateSize; i++) {
-      require(!BytesLib.equal(exMap[candidateSet[i].operateAddr].voteAddr, voteAddr), "vote address already exists");
+    for (uint256 i = 0; i < candidateList.length; i++) {
+      require(!BytesLib.equal(candidateMap[candidateList[i]].voteAddr, voteAddr), "vote address already exists");
     }
-    exMap[c.operateAddr].voteAddr = voteAddr;
+    c.voteAddr = voteAddr;
     emit VoteAddressEdited(c.operateAddr, voteAddr);
   }
 
   function editFeeAddress(address payable newFeeAddr) external onlyOperator {
-    Candidate storage c = getCandidate();
-
     require(newFeeAddr != address(0), "fee address cannot be zero");
-    c.feeAddr = newFeeAddr;
-    emit FeeAddressEdited(c.operateAddr, newFeeAddr);
+    candidateMap[msg.sender].feeAddr = newFeeAddr;
+    emit FeeAddressEdited(msg.sender, newFeeAddr);
   }
 
-  /// Refuse to accept delegate from others
-  /// @dev Candidate will not be elected in this state
   function refuseDelegate() external onlyInit onlyOperator {
-    uint256 index = operateMap[msg.sender];
-    Candidate storage c = candidateSet[index - 1];
-    uint256 status = c.status | SET_INACTIVE;
-    changeStatus(c, status);
+    uint256 status = candidateMap[msg.sender].status | SET_INACTIVE;
+    _changeStatus(msg.sender, status);
   }
 
-  /// Accept delegate from others
   function acceptDelegate() external onlyInit onlyOperator {
-    uint256 index = operateMap[msg.sender];
-    Candidate storage c = candidateSet[index - 1];
-    uint256 status = c.status & DEL_INACTIVE;
-    changeStatus(c, status);
+    uint256 status = candidateMap[msg.sender].status & DEL_INACTIVE;
+    _changeStatus(msg.sender, status);
   }
 
-  /// Add refundable deposits
-  /// @dev Candidate will not be elected if there are not enough deposits
   function addMargin() external payable onlyInit onlyOperator {
     require(msg.value != 0, "value should not be zero");
-    uint256 index = operateMap[msg.sender];
-    uint256 totalMargin = candidateSet[index - 1].margin + msg.value;
-    candidateSet[index - 1].margin = totalMargin;
+    Candidate storage c = candidateMap[msg.sender];
+    uint256 totalMargin = c.margin + msg.value;
+    c.margin = totalMargin;
     emit addedMargin(msg.sender, msg.value, totalMargin);
-
     if (totalMargin >= requiredMargin) {
-      Candidate storage c = candidateSet[index - 1];
-      uint256 status = c.status & DEL_MARGIN;
-      changeStatus(c, status);
+      _changeStatus(msg.sender, c.status & DEL_MARGIN);
     }
   }
 
   /*************************** internal methods ******************************/
 
-  function getCandidate() internal view returns (Candidate storage) {
-      uint256 index = operateMap[msg.sender];
-      if (index == 0) {
-          // Check if sender is agent
-          index = agentMap[msg.sender];
-          require(index != 0, "candidate does not exist");
-      }
-      return candidateSet[index - 1];
+  function _getCandidate() internal view returns (Candidate storage) {
+    if (operateMap[msg.sender]) {
+      return candidateMap[msg.sender];
+    }
+    address operator = agentMap[msg.sender];
+    require(operator != address(0), "candidate does not exist");
+    return candidateMap[operator];
   }
 
-  function changeStatus(Candidate storage c, uint256 newStatus) internal {
+  function _changeStatus(address operateAddr, uint256 newStatus) internal {
+    Candidate storage c = candidateMap[operateAddr];
     uint256 oldStatus = c.status;
     if (oldStatus != newStatus) {
       c.status = newStatus;
-      emit statusChanged(c.operateAddr, oldStatus, newStatus);
+      emit statusChanged(operateAddr, oldStatus, newStatus);
     }
   }
 
-  function removeCandidate(uint256 index) internal {
-    Candidate storage c = candidateSet[index - 1];
+  function _removeCandidate(address operateAddr) internal {
+    Candidate storage c = candidateMap[operateAddr];
+    emit unregistered(operateAddr, c.consensusAddr);
 
-    emit unregistered(c.operateAddr, c.consensusAddr);
-
-    if (exMap[c.operateAddr].agent != address(0)) {
-        delete agentMap[exMap[c.operateAddr].agent];
+    if (c.agent != address(0)) {
+      delete agentMap[c.agent];
     }
-
-    delete operateMap[c.operateAddr];
     delete consensusMap[c.consensusAddr];
-    delete exMap[c.operateAddr];
+    delete operateMap[operateAddr];
 
-    if (index != candidateSet.length) {
-      candidateSet[index-1] = candidateSet[candidateSet.length - 1];
-      operateMap[c.operateAddr] = index;
-      consensusMap[c.consensusAddr] = index;
-      if (exMap[c.operateAddr].agent != address(0)) {
-        agentMap[exMap[c.operateAddr].agent] = index;
+    // Swap and pop from candidateList
+    uint256 len = candidateList.length;
+    for (uint256 i = 0; i < len; i++) {
+      if (candidateList[i] == operateAddr) {
+        candidateList[i] = candidateList[len - 1];
+        candidateList.pop();
+        break;
       }
     }
-    candidateSet.pop();
+
+    delete candidateMap[operateAddr];
   }
 
-  /// Rank validator candidates on hybrid score using quicksort
-  function getValidators(address[] memory candidateList, uint256[] memory scoreList, uint256 count, uint256 sortedCount) internal pure returns (address[] memory validatorList){
+  function getValidators(address[] memory candidateList_, uint256[] memory scoreList, uint256 count, uint256 sortedCount) internal pure returns (address[] memory validatorList){
     require(count > sortedCount, "count should be greater than sortedCount");
-    uint256 candidateSize = candidateList.length;
+    uint256 candidateSize = candidateList_.length;
     if (candidateSize == 0) {
       return validatorList;
     }
-    // quicksort by scores O(nlogk)
     uint256 l = 0;
     uint256 r = 0;
     if (count < candidateSize) {
@@ -501,27 +414,25 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       count = candidateSize;
     }
     while (l < r) {
-      // partition
       uint256 ll = l;
       uint256 rr = r;
-      address back = candidateList[ll];
+      address back = candidateList_[ll];
       uint256 p = scoreList[ll];
       while (ll < rr) {
         while (ll < rr && scoreList[rr] < p) {
           rr = rr - 1;
         }
-        candidateList[ll] = candidateList[rr];
+        candidateList_[ll] = candidateList_[rr];
         scoreList[ll] = scoreList[rr];
         while (ll < rr && scoreList[ll] >= p) {
           ll = ll + 1;
         }
-        candidateList[rr] = candidateList[ll];
+        candidateList_[rr] = candidateList_[ll];
         scoreList[rr] = scoreList[ll];
       }
-      candidateList[ll] = back;
+      candidateList_[ll] = back;
       scoreList[ll] = p;
       uint256 mid = ll;
-      // sub sort
       if (mid < count) {
         l = mid + 1;
       } else if (mid > count) {
@@ -531,7 +442,6 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       }
     }
 
-    // select top sortedCount
     for (uint256 i = count - 1; i >= count - sortedCount; i--) {
       uint256 minIndex;
       for (uint256 j = 1; j <= i; j++) {
@@ -540,7 +450,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
         }
       }
       if (minIndex != i) {
-          (candidateList[i], candidateList[minIndex]) = (candidateList[minIndex], candidateList[i]);
+          (candidateList_[i], candidateList_[minIndex]) = (candidateList_[minIndex], candidateList_[i]);
           (scoreList[i], scoreList[minIndex]) = (scoreList[minIndex], scoreList[i]);
       }
     }
@@ -548,10 +458,10 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     uint256 d = candidateSize - count;
     if (d != 0) {
       assembly {
-        mstore(candidateList, sub(mload(candidateList), d))
+        mstore(candidateList_, sub(mload(candidateList_), d))
       }
     }
-    return candidateList;
+    return candidateList_;
   }
 
   function nextRound() internal virtual {
@@ -561,9 +471,6 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   }
 
   /*********************** Param update ********************************/
-  /// Update parameters through governance vote
-  /// @param key The name of the parameter
-  /// @param value the new value set to the parameter
   function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov {
     if (value.length != 32) {
       revert MismatchParamLength(key);
@@ -585,7 +492,6 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       if (newValidatorCount <= 5 || newValidatorCount >= 42) {
         revert OutOfBounds(key, newValidatorCount, 6, 41);
       }
-      // Check if the current maxAlternateCount would violate the constraint with the new validatorCount
       if (maxAlternateCount > newValidatorCount / 3) {
         revert OutOfBounds("maxAlternateCount", maxAlternateCount, 0, newValidatorCount / 3);
       }
@@ -608,33 +514,19 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     emit paramChange(key, value);
   }
 
-  /// Get list of validator candidates 
-  /// @return List of operator addresses
+  /*********************** View methods ********************************/
   function getCandidates() external view returns (address[] memory) {
-    uint256 candidateSize = candidateSet.length;
-    address[] memory opAddrs = new address[](candidateSize);
-    for (uint256 i = 0; i < candidateSize; i++) {
-      opAddrs[i] = candidateSet[i].operateAddr;
-    }
-    return opAddrs;
+    return candidateList;
   }
 
-  /// Whether the input address is consensus address a validator candidate
-  /// @param consensusAddr Consensus address of validator candidate
-  /// @return true/false
   function isCandidateByConsensus(address consensusAddr) external view returns (bool) {
-    return consensusMap[consensusAddr] != 0;
+    return consensusMap[consensusAddr] != address(0);
   }
 
-  /// Whether the validator is jailed
-  /// @param operateAddr Operator address of validator
-  /// @return true/false
   function isJailed(address operateAddr) external view returns (bool) {
     return jailMap[operateAddr] >= roundTag;
   }
 
-  /// Get round interval
-  /// @return round interval
   function getRoundInterval() external pure returns(uint256) {
     return SatoshiPlusHelper.ROUND_INTERVAL;
   }

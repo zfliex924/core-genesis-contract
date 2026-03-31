@@ -1438,7 +1438,7 @@ def test_felony_success_with_validator_set_which_has_0_income(candidate_hub):
                                               [random_vote_address(), random_vote_address()], validator_count)
 
     __update_slash_address()
-    candidate = candidate_hub.candidateSet(0).dict()
+    candidate = candidate_hub.getCandidate(accounts[0]).dict()
     tx = validator_set_instance.felony(accounts[0], felony_round, felony_deposit)
     expect_event(tx, 'validatorFelony', {'validator': accounts[0], 'amount': 0})
     total_margin = Web3.to_wei(20000, 'ether') - felony_deposit
@@ -1475,7 +1475,7 @@ def test_felony_success_with_validator_set_which_has_income(candidate_hub):
     average_value = deposit_value / 1
     validator_set_instance.deposit(accounts[0], {'value': deposit_value})
 
-    candidate = candidate_hub.candidateSet(0).dict()
+    candidate = candidate_hub.getCandidate(accounts[0]).dict()
     tx = validator_set_instance.felony(accounts[0], felony_round, felony_deposit)
     expect_event(tx, "validatorFelony", {'validator': accounts[0], "amount": deposit_value})
 
