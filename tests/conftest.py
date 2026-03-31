@@ -130,18 +130,6 @@ def stake_hub(accounts):
 
 
 @pytest.fixture(scope="module")
-def btc_stake(accounts):
-    c = accounts[0].deploy(BitcoinStakeMock)
-    return c
-
-
-@pytest.fixture(scope="module")
-def btc_agent(accounts):
-    c = accounts[0].deploy(BitcoinAgentMock)
-    c.init()
-    return c
-
-@pytest.fixture(scope="module")
 def hash_power_agent(accounts):
     c = accounts[0].deploy(HashPowerAgentMock)
     c.init()
@@ -195,8 +183,6 @@ def set_system_contract_address(
         burn,
         foundation,
         stake_hub,
-        btc_stake,
-        btc_agent,
         core_agent,
         hash_power_agent,
         configuration,
@@ -206,7 +192,7 @@ def set_system_contract_address(
 ):
     contracts = [
         validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
-        burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel,
+        burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
         zec_light_client, zec_agent
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
@@ -218,11 +204,9 @@ def set_system_contract_address(
     accounts[99].transfer(gov_hub.address, Web3.to_wei(100000, 'ether'))
     # init after set system contract
     system_reward.init()
-    btc_stake.init()
     stake_hub.init()
 
     if is_development:
-        btc_stake.developmentInit()
         stake_hub.developmentInit()
 
 

@@ -332,17 +332,14 @@ def parse_delegation(agents, block_reward, state_map=None, compensation_reward=N
         reward_cap = {
             'coin': HardCap.CORE_HARD_CAP,
             'power': HardCap.POWER_HARD_CAP,
-            'btc': HardCap.BTC_HARD_CAP
         }
     factor_map = {
         'coin': 1,
         'power': 0,
-        'btc': 0
     }
     reward_unit_amount_map = {
         'coin': Utils.CORE_STAKE_DECIMAL,
         'power': 1,
-        'btc': Utils.BTC_DECIMAL
     }
 
     # init asset score for 3 assets: coin, power, btc

@@ -229,14 +229,12 @@ def set_last_round_tag(stake_round, time0=None):
     end_round0 = time0 // Utils.ROUND_INTERVAL
     current_round = end_round0 - stake_round - 1
     CandidateHubMock[0].setRoundTag(current_round)
-    BitcoinStakeMock[0].setRoundTag(current_round)
     CoreAgentMock[0].setRoundTag(current_round)
     return end_round0, current_round
 
 
 # delegate
-def run_stake_operation(operation, candidate, account, operation_amount, target_agent=None, tx_id=None,
-                        lock_script=None, btc_value=None, channel_id=0):
+def run_stake_operation(operation, candidate, account, operation_amount, target_agent=None):
     tx = None
     if operation == 'delegate':
         tx = delegate_coin_success(candidate, account, operation_amount)
@@ -244,10 +242,6 @@ def run_stake_operation(operation, candidate, account, operation_amount, target_
         tx = undelegate_coin_success(candidate, account, operation_amount)
     elif operation == 'transfer':
         tx = transfer_coin_success(candidate, target_agent, account, operation_amount)
-    elif operation == 'delegate_btc':
-        tx = delegate_btc_success(candidate, account, btc_value, lock_script, events=True, channel_id=channel_id)
-    elif operation == 'transfer_btc':
-        tx = transfer_btc_success(tx_id, target_agent, account)
     elif operation == 'claim':
         tx = stake_hub_claim_reward(account)
     return tx
@@ -269,33 +263,6 @@ def transfer_coin_success(source_agent, target_agent, delegator, amount):
 def undelegate_coin_success(candidate, delegator, amount):
     tx = CoreAgentMock[0].undelegateCoin(candidate, amount, {'from': delegator})
     assert 'undelegatedCoin' in tx.events
-    return tx
-
-
-def delegate_btc_success(agent, delegator, btc_amount, lock_script, lock_data=None, relay=None, stake_duration=None,
-                         fee=1, script_type='p2sh', lock_time=None, events=None, channel_id=0):
-    if stake_duration is None:
-        stake_duration = Utils.MONTH
-    if lock_time is None:
-        lock_time = LOCK_TIME
-    set_block_time_stamp(stake_duration, lock_time)
-    if lock_data is None:
-        lock_data = lock_script
-    btc_tx0 = build_btc_tx(agent, delegator, int(btc_amount), lock_script, lock_data, script_type, fee, channel_id=channel_id)
-    if relay is None:
-        relay = accounts[0]
-    tx = BitcoinStakeMock[0].delegate(btc_tx0, 1, [], 0, lock_script, {"from": relay})
-    assert 'delegated' in tx.events
-    tx_id = get_transaction_txid(btc_tx0)
-    if events is None:
-        return tx_id
-    else:
-        return tx
-
-
-def transfer_btc_success(tx_id, target_candidate, delegator):
-    tx = BitcoinStakeMock[0].transfer(tx_id, target_candidate, {'from': delegator})
-    assert 'transferredBtc' in tx.events
     return tx
 
 
@@ -472,32 +439,6 @@ def build_btc_lock_script(timestamp=None):
 
 class StakeManager:
     @staticmethod
-    def set_lp_rates(rates=None):
-        BitcoinAgentMock[0].popLpRates()
-        if rates:
-            for r in rates:
-                tl = r[0]
-                tp = r[1]
-                BitcoinAgentMock[0].setLpRates(tl, tp)
-
-    @staticmethod
-    def set_tlp_rates(rates=None):
-        BitcoinStakeMock[0].popTtlpRates()
-        if rates:
-            for r in rates:
-                tl = r[0]
-                tp = r[1]
-                BitcoinStakeMock[0].setTlpRates(tl, tp)
-
-    @staticmethod
-    def set_is_stake_hub_active(value=False):
-        BitcoinAgentMock[0].setIsActive(value)
-
-    @staticmethod
-    def set_is_btc_stake_active(value=0):
-        BitcoinStakeMock[0].setIsActive(value)
-
-    @staticmethod
     def set_stake_hub_delegator_map(account, change_round, rewards=None):
         if rewards is None:
             rewards = []
@@ -507,16 +448,7 @@ class StakeManager:
 class RoundRewardManager:
     @staticmethod
     def mock_core_reward_map(delegator, reward, acc_stake_amount):
-        BitcoinAgentMock[0].setCoreRewardMap(delegator, reward, acc_stake_amount)
-
-    @staticmethod
-    def mock_btc_reward_map(candidate, roundTag, reward, unclaimed_reward, btc_amount=1):
-        BitcoinStakeMock[0].setAccruedRewardPerBTCMap(candidate, roundTag - 1,
-                                                      (reward + unclaimed_reward) * 1e8 // btc_amount)
-        if unclaimed_reward > 0:
-            BitcoinStakeMock[0].setIsActive(True)
-            BitcoinStakeMock[0].popTtlpRates()
-            BitcoinStakeMock[0].setTlpRates(0, reward / (reward + unclaimed_reward) * 10000)
+        CoreAgentMock[0].setCoreRewardMap(delegator, reward, acc_stake_amount)
 
     @staticmethod
     def mock_power_reward_map(delegator, reward, delegate_amount):

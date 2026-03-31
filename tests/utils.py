@@ -181,8 +181,6 @@ def update_system_contract_address(update_contract,
                                    burn=None,
                                    foundation=None,
                                    stake_hub=None,
-                                   btc_stake=None,
-                                   btc_agent=None,
                                    core_agent=None,
                                    hash_power_agent=None,
                                    configuration=None,
@@ -210,10 +208,6 @@ def update_system_contract_address(update_contract,
         foundation = Foundation[0]
     if stake_hub is None:
         stake_hub = StakeHubMock[0]
-    if btc_stake is None:
-        btc_stake = BitcoinStakeMock[0]
-    if btc_agent is None:
-        btc_agent = BitcoinAgentMock[0]
     if core_agent is None:
         core_agent = CoreAgentMock[0]
     if hash_power_agent is None:
@@ -228,7 +222,7 @@ def update_system_contract_address(update_contract,
         zec_agent = ZecAgentMock[0]
     contracts = [
         validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
-        burn, foundation, stake_hub, btc_stake, btc_agent, core_agent, hash_power_agent, configuration, channel,
+        burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
         zec_light_client, zec_agent
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])

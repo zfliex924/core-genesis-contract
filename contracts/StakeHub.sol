@@ -5,7 +5,6 @@ import "./interface/IParamSubscriber.sol";
 import "./interface/IStakeHub.sol";
 import "./interface/IAgent.sol";
 import "./interface/ISystemReward.sol";
-import "./interface/IBitcoinStake.sol";
 import "./interface/IZecAgent.sol";
 import "./interface/IValidatorSet.sol";
 import "./interface/ICandidateHub.sol";
@@ -63,13 +62,10 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     // initialize list of supported assets
     assets.push(Asset("CORE", CORE_AGENT_ADDR, 6000));
     assets.push(Asset("HASHPOWER", HASH_AGENT_ADDR, 2000));
-    assets.push(Asset("BTC", BTC_AGENT_ADDR, 4000));
     assets.push(Asset("ZEC", ZEC_AGENT_ADDR, 3000));
 
     operators[CORE_AGENT_ADDR] = true;
     operators[HASH_AGENT_ADDR] = true;
-    operators[BTC_AGENT_ADDR] = true;
-    operators[BTC_STAKE_ADDR] = true;
     operators[ZEC_AGENT_ADDR] = true;
 
     alreadyInit = true;
@@ -147,7 +143,6 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     address[] calldata candidates,
     uint256 round
   ) external override onlyCandidate returns (uint256[] memory scores) {
-    IBitcoinStake(BTC_STAKE_ADDR).prepare(round);
     IZecAgent(ZEC_AGENT_ADDR).prepare(round);
 
     uint256 candidateSize = candidates.length;
@@ -267,10 +262,8 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
       indexplus = 1;
     } else if(Memory.compareStrings(key, "hashHardcap")) {
       indexplus = 2;
-    } else if(Memory.compareStrings(key, "btcHardcap")) {
-      indexplus = 3;
     } else if(Memory.compareStrings(key, "zecHardcap")) {
-      indexplus = 4;
+      indexplus = 3;
     }
     if (indexplus != 0) {
       if (newValue == 0 || newValue > 1e5) {

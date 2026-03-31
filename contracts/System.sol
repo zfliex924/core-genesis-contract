@@ -20,8 +20,6 @@ contract System {
   address public BURN_ADDR;
   address public FOUNDATION_ADDR;
   address public STAKE_HUB_ADDR;
-  address public BTC_STAKE_ADDR;
-  address public BTC_AGENT_ADDR;
   address public CORE_AGENT_ADDR;
   address public HASH_AGENT_ADDR;
   address public CONFIGURATION_ADDR;
@@ -40,8 +38,6 @@ contract System {
     address burn;
     address foundation;
     address stakeHub;
-    address btcStake;
-    address btcAgent;
     address coreAgent;
     address hashAgent;
     address configurationContract;
@@ -62,8 +58,6 @@ contract System {
     BURN_ADDR = systemContractAddr.burn;
     FOUNDATION_ADDR = systemContractAddr.foundation;
     STAKE_HUB_ADDR = systemContractAddr.stakeHub;
-    BTC_STAKE_ADDR = systemContractAddr.btcStake;
-    BTC_AGENT_ADDR = systemContractAddr.btcAgent;
     CORE_AGENT_ADDR = systemContractAddr.coreAgent;
     HASH_AGENT_ADDR = systemContractAddr.hashAgent;
     CONFIGURATION_ADDR = systemContractAddr.configurationContract;
@@ -124,11 +118,6 @@ contract System {
 
   modifier onlyStakeHub() {
     require(msg.sender == STAKE_HUB_ADDR, "the msg sender must be stake hub contract");
-    _;
-  }
-
-  modifier onlyBtcAgent() {
-    require(msg.sender == BTC_AGENT_ADDR, "the msg sender must be bitcoin agent contract");
     _;
   }
 

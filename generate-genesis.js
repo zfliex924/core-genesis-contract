@@ -135,16 +135,6 @@ Promise.all([
     "HashPowerAgent"
   ),
   compileContract(
-    "bitcoinagent",
-    "contracts/BitcoinAgent.sol",
-    "BitcoinAgent"
-  ),
-  compileContract(
-    "bitcoinstake",
-    "contracts/BitcoinStake.sol",
-    "BitcoinStake"
-  ),
-  compileContract(
     "configuration",
     "contracts/Configuration.sol",
     "Configuration"

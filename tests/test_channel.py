@@ -8,17 +8,11 @@ from web3 import Web3
 from .constant import Utils
 from .utils import random_address
 from .common import execute_proposal, register_candidate, turn_round
-from .delegate import delegate_btc_success, StakeManager, delegate_power_success, delegate_coin_success
-
-
-stake_manager = StakeManager()
+from .delegate import delegate_power_success, delegate_coin_success
 
 
 BLOCK_REWARD = 0
 TOTAL_REWARD = 0
-BTC_VALUE = 2000
-LOCK_SCRIPT = '0480db8767b17576a914574fdd26858c28ede5225a809f747c01fcc1f92a88ac'
-LOCK_TIMESTAMP = 1736956800
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -284,23 +278,6 @@ def test_reset_commission_zero_commission(channel, set_channel_partner, stake_hu
 def test_reset_commission_nonexistent_partner(channel, stake_hub):
     non_existent_partner = accounts[99]
     commission, _ = channel.resetCommission.call(non_existent_partner, {'from': stake_hub})
-    assert commission == 0
-
-
-def test_reset_commission_with_unregistered_partner(channel, stake_hub, btc_stake, set_channel_partner):
-    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
-
-    reward = 10000
-    channel.payCommissionById(partner_id, reward, {'from': btc_stake})
-    partner_info = channel.partners(partner_id)
-    assert partner_info[-1] == reward * btc_commission_rate // 10000
-
-    commission, _ = channel.resetCommission.call(partner, {'from': stake_hub})
-    assert commission == reward * btc_commission_rate // 10000
-
-    channel.unregister({'from': partner})
-
-    commission, _ = channel.resetCommission.call(partner, {'from': stake_hub})
     assert commission == 0
 
 
@@ -716,95 +693,6 @@ def test_on_undelegate_coin(channel, core_agent, _type, set_channel):
         assert all_ids == []
         for _id in (partner1_id, partner2_id, partner3_id):
             assert channel.getDelegatorAmount(_id, delegator) == 0
-
-
-def test_pay_commission_by_id_with_invalid_id(channel, btc_stake):
-    partner_id = 999
-    reward_amount = 100
-
-    reward = channel.payCommissionById.call(
-        partner_id, reward_amount,
-        {'from': btc_stake.address}
-    )
-    assert reward == reward_amount
-
-
-def test_pay_commission_by_id_with_unregistered_partner(channel, btc_stake, set_channel_partner):
-    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
-    channel.unregister({'from': partner})
-
-    reward_amount = 100
-    reward = channel.payCommissionById.call(
-        partner_id, reward_amount,
-        {'from': btc_stake.address}
-    )
-    assert reward == reward_amount
-
-
-def test_pay_commission_by_id_success(channel, required_margin, btc_stake):
-    partner = accounts[1]
-    fee_address = accounts[2]
-    core_commission_rate = 1000
-    btc_commission_rate = 1500
-    reward_amount = Wei("100 ether")
-    
-    channel.register(
-        fee_address, core_commission_rate, btc_commission_rate,
-        {'from': partner, 'value': required_margin}
-    )
-    partner_id = channel.partnerIdMap(partner)
-    
-    expected_commission = reward_amount * btc_commission_rate // 10000
-    expected_remaining = reward_amount - expected_commission
-    
-    remaining_reward = channel.payCommissionById.call(
-        partner_id, reward_amount,
-        {'from': btc_stake.address}
-    )
-    channel.payCommissionById(
-        partner_id, reward_amount,
-        {'from': btc_stake.address}
-    )
-    
-    new_commission = channel.partners(partner_id)[6]
-    assert new_commission == expected_commission
-    
-    assert remaining_reward == expected_remaining
-
-
-def test_pay_commission_by_id_zero_partner_id(channel, btc_stake):
-    reward_amount = Wei("100 ether")
-    
-    remaining_reward = channel.payCommissionById.call(
-        0, reward_amount,
-        {'from': btc_stake.address}
-    )
-    channel.payCommissionById(
-        0, reward_amount,
-        {'from': btc_stake.address}
-    )
-    
-    assert remaining_reward == reward_amount
-
-
-def test_pay_commission_by_id_unauthorized_caller(channel, required_margin):
-    partner = accounts[1]
-    fee_address = accounts[2]
-    core_commission_rate = 1000
-    btc_commission_rate = 1500
-    reward_amount = Wei("100 ether")
-    
-    channel.register(
-        fee_address, core_commission_rate, btc_commission_rate,
-        {'from': partner, 'value': required_margin}
-    )
-    partner_id = channel.partnerIdMap(partner)
-    
-    with brownie.reverts(f"NotPermissionalCaller: {channel.BTC_STAKE_ADDR().lower()}, {accounts[5].address.lower()}"):
-        channel.payCommissionById(
-            partner_id, reward_amount,
-            {'from': accounts[5]}
-        )
 
 
 def test_pay_commission_with_unregistered_partner(channel, set_channel_partner, core_agent, required_margin):
@@ -1470,111 +1358,6 @@ def test_pay_commissions_mixed_delegation_edge_cases(channel, required_margin, c
     assert remaining_reward3 == expected_remaining3
 
 
-def test_pay_commission_by_id_through_btc_stake_claim_reward(
-    channel, btc_stake, set_candidate, set_channel_partner, stake_hub
-):
-    operators, consensuses = set_candidate
-    candidate = operators[0]
-    delegator = accounts[0]
-
-    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
-    btc_tx_id = delegate_btc_success(
-        candidate, delegator, BTC_VALUE, LOCK_SCRIPT, lock_data=LOCK_TIMESTAMP, channel_id=partner_id)
-    tx_map = btc_stake.btcTxMap(btc_tx_id)
-    assert tx_map[-1] == partner_id
-    turn_round()
-    turn_round(consensuses)
-
-    expected_commission = TOTAL_REWARD * btc_commission_rate // 10000
-    expected_remaining = TOTAL_REWARD - expected_commission
-
-    init_balance = delegator.balance()
-    stake_hub.claimReward({'from': delegator})
-    assert delegator.balance() - init_balance == expected_remaining
-
-
-@pytest.mark.parametrize("channel_id", [0, 252, 253, 0xffffffff])
-def test_pay_commission_by_id_btc_stake_invalid_channel(channel, btc_stake, set_candidate, stake_hub, channel_id):
-    operators, consensuses = set_candidate
-    candidate = operators[0]
-    delegator = accounts[0]
-
-    btc_tx_id = delegate_btc_success(candidate, delegator, BTC_VALUE, LOCK_SCRIPT, lock_data=LOCK_TIMESTAMP, channel_id=channel_id)
-    tx_map = btc_stake.btcTxMap(btc_tx_id)
-    assert tx_map[-1] == channel_id
-    turn_round()
-    turn_round(consensuses)
-
-    expected_commission = 0
-    expected_remaining = TOTAL_REWARD - expected_commission
-
-    init_balance = delegator.balance()
-    stake_hub.claimReward({'from': delegator})
-    assert delegator.balance() - init_balance == expected_remaining
-
-
-def test_pay_commission_by_id_btc_stake_multiple_txs(
-    channel, btc_stake, set_candidate, set_channel_partner, stake_hub
-):
-    operators, consensuses = set_candidate
-    candidate1 = operators[0]
-    candidate2 = operators[1]
-    delegator = accounts[0]
-
-    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
-    delegate_btc_success(candidate1, delegator, BTC_VALUE, LOCK_SCRIPT, lock_data=LOCK_TIMESTAMP, channel_id=partner_id)
-    delegate_btc_success(candidate2, delegator, BTC_VALUE, LOCK_SCRIPT, lock_data=LOCK_TIMESTAMP, channel_id=partner_id)
-    turn_round()
-    turn_round(consensuses)
-
-    expected_commission = TOTAL_REWARD * btc_commission_rate // 10000 * 2
-    expected_remaining = TOTAL_REWARD * 2 - expected_commission
-
-    init_balance = delegator.balance()
-    stake_hub.claimReward({'from': delegator})
-    assert delegator.balance() - init_balance == expected_remaining
-
-
-def test_pay_commission_by_id_btc_stake_mixed_channels(
-    channel, btc_stake, set_candidate, stake_hub, required_margin
-):
-    operators, consensuses = set_candidate
-    candidate = operators[0]
-    delegator = accounts[0]
-
-    partner1 = accounts[1]
-    fee_address1 = accounts[2]
-    core_commission_rate = 1000
-    btc_commission_rate = 1500
-
-    channel.register(
-        fee_address1, core_commission_rate, btc_commission_rate,
-        {'from': partner1, 'value': required_margin}
-    )
-    partner1_id = channel.partnerIdMap(partner1)
-
-    partner2 = accounts[3]
-    fee_address2 = accounts[4]
-    channel.register(
-        fee_address2, core_commission_rate, btc_commission_rate,
-        {'from': partner2, 'value': required_margin}
-    )
-    partner2_id = channel.partnerIdMap(partner2)
-
-    delegate_btc_success(candidate, delegator, BTC_VALUE, LOCK_SCRIPT, lock_data=LOCK_TIMESTAMP, channel_id=partner1_id)
-    delegate_btc_success(candidate, delegator, BTC_VALUE, LOCK_SCRIPT, lock_data=LOCK_TIMESTAMP, channel_id=partner2_id)
-
-    turn_round()
-    turn_round(consensuses)
-
-    expected_commission = TOTAL_REWARD // 2 * btc_commission_rate // 10000
-    expected_remaining = TOTAL_REWARD - expected_commission * 2 - 1
-
-    init_balance = delegator.balance()
-    stake_hub.claimReward({'from': delegator})
-    assert delegator.balance() - init_balance == expected_remaining
-
-
 def test_core_agent_channel_amount_tracking(channel, required_margin, core_agent):
     partner = accounts[1]
     fee_address = accounts[2]
@@ -1870,45 +1653,3 @@ def test_claim_reward_after_multi_users_delegate_through_same_channel(
     assert delegator1.balance() - init_balance1 == expected_remaining
 
     stake_hub.calculateReward(delegator2)
-
-
-def test_delegate_coin_and_btc_mixed(
-    channel, core_agent, set_candidate, stake_hub, set_channel_partner, btc_stake, btc_agent
-):
-    stake_manager.set_lp_rates([[0, 1000], [10000, 5000], [20000, 10000]])
-    btc_agent.setAssetWeight(1)
-    delegate_amount = 1000000
-    channel_delegate_amount = 3000000
-    btc_value = 1000
-    power_value = 1
-    stake_manager.set_tlp_rates()
-    stake_manager.set_is_stake_hub_active(True)
-
-    delegator = accounts[0]
-    operators, consensuses = set_candidate
-    turn_round()
-
-    partner, fee_address, partner_id, core_commission_rate, btc_commission_rate = set_channel_partner
-
-    total_coin_amount = delegate_amount + channel_delegate_amount
-    expected_coin_commission = channel_delegate_amount * core_commission_rate // 10000 * TOTAL_REWARD // total_coin_amount
-    expected_btc_commission = btc_commission_rate * TOTAL_REWARD // 2 * 1000 // 10000 // 10000
-    expected_coin_remaining = TOTAL_REWARD - expected_coin_commission - 1
-    expected_btc_remaining = TOTAL_REWARD // 10 // 2 - expected_btc_commission + TOTAL_REWARD // 10 // 2
-
-    delegate_coin_success(operators[0], delegator, delegate_amount)
-    channel.delegateCoin(
-        operators[0], partner_id,
-        {'value': channel_delegate_amount, 'from': delegator}
-    )
-    delegate_btc_success(operators[2], delegator, btc_value // 2, LOCK_SCRIPT)
-    delegate_btc_success(operators[2], delegator, btc_value // 2, LOCK_SCRIPT, lock_data=LOCK_TIMESTAMP, channel_id=partner_id)
-    delegate_power_success(operators[1], delegator, power_value)
-    turn_round(consensuses, round_count=2)
-
-    coin_reward, hash_reward, btc_reward = stake_hub.claimReward.call({'from': delegator})
-    assert coin_reward == expected_coin_remaining
-    assert hash_reward == TOTAL_REWARD
-    assert btc_reward == expected_btc_remaining
-
-    stake_hub.claimReward({'from': delegator})

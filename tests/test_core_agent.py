@@ -152,7 +152,7 @@ def test_get_core_stake_amounts_success(core_agent, set_candidate):
     assert amounts[1] == sum(stake_amounts)
 
 
-def test_only_stake_hub_can_call_set_new_round(core_agent, btc_agent):
+def test_only_stake_hub_can_call_set_new_round(core_agent):
     round_tag = get_current_round()
     with brownie.reverts("the msg sender must be stake hub contract"):
         core_agent.setNewRound(accounts[:2], round_tag)
@@ -1272,7 +1272,7 @@ def test_view_validator_rewards_after_unstaking(core_agent, validator_set, set_c
     })
 
 
-def test_historical_rewards_exist(core_agent, set_candidate, btc_agent):
+def test_historical_rewards_exist(core_agent, set_candidate):
     operators, consensuses = set_candidate
     for index, o in enumerate(operators):
         delegate_coin_success(o, accounts[0], MIN_INIT_DELEGATE_VALUE)
@@ -1287,7 +1287,7 @@ def test_historical_rewards_exist(core_agent, set_candidate, btc_agent):
     assert acc_staked_amount == MIN_INIT_DELEGATE_VALUE * 3
 
 
-def test_calculate_for_specified_round(core_agent, set_candidate, btc_agent):
+def test_calculate_for_specified_round(core_agent, set_candidate):
     operators, consensuses = set_candidate
     for index, o in enumerate(operators):
         delegate_coin_success(o, accounts[0], MIN_INIT_DELEGATE_VALUE)

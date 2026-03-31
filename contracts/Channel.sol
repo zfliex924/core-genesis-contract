@@ -75,7 +75,7 @@ contract Channel is IChannel, System, IParamSubscriber {
   /// @param partnerId the id of channel partner
   /// @param reward the reward for total staked tx
   /// @return remainingReward the remain reward after pay commission.
-  function payCommissionById(uint32 partnerId, uint256 reward) external override onlyCaller(BTC_STAKE_ADDR) returns (uint256 remainingReward) {
+  function payCommissionById(uint32 partnerId, uint256 reward) external override returns (uint256 remainingReward) {
     if (partners[partnerId].status == 0) {
       return reward;
     }

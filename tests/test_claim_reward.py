@@ -2,9 +2,7 @@ import brownie
 import pytest
 import rlp
 
-from .calc_reward import set_delegate, parse_delegation, Discount, set_btc_lst_delegate
 from .common import *
-from eth_utils import to_bytes
 from .delegate import *
 from .utils import *
 
@@ -12,16 +10,11 @@ MIN_INIT_DELEGATE_VALUE = 0
 DELEGATE_VALUE = 0
 BLOCK_REWARD = 0
 COIN_VALUE = 10000
-BTC_VALUE = 200
 POWER_VALUE = 20
 TX_FEE = 100
 FEE = 0
 MONTH = 30
 TOTAL_REWARD = 0
-# BTC delegation-related
-LOCK_SCRIPT = "0480db8767b17576a914574fdd26858c28ede5225a809f747c01fcc1f92a88ac"
-LOCK_TIME = 1736956800
-stake_manager = StakeManager()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -38,10 +31,10 @@ def init_system_reward_balance(system_reward):
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_block_reward(validator_set, candidate_hub, btc_stake, stake_hub,
-                     gov_hub, btc_agent, system_reward, core_agent):
+def set_block_reward(validator_set, candidate_hub, stake_hub,
+                     gov_hub, system_reward, core_agent):
     global BLOCK_REWARD, FEE, DELEGATE_VALUE, TOTAL_REWARD, MIN_INIT_DELEGATE_VALUE
-    global BTC_STAKE, STAKE_HUB, CANDIDATE_HUB, block_reward
+    global STAKE_HUB, CANDIDATE_HUB, block_reward
     FEE = FEE * 100
     block_reward = validator_set.blockReward()
     block_reward_incentive_percent = validator_set.blockRewardIncentivePercent()
@@ -50,18 +43,9 @@ def set_block_reward(validator_set, candidate_hub, btc_stake, stake_hub,
     TOTAL_REWARD = BLOCK_REWARD // 2
     MIN_INIT_DELEGATE_VALUE = core_agent.requiredCoinDeposit()
     DELEGATE_VALUE = MIN_INIT_DELEGATE_VALUE * 1000
-    BTC_STAKE = btc_stake
     STAKE_HUB = stake_hub
     CANDIDATE_HUB = candidate_hub
     candidate_hub.setControlRoundTimeTag(True)
-    # The default staking time is 150 days
-    set_block_time_stamp(150, LOCK_TIME)
-    tlp_rates_keys, tlp_rates_values, lp_rates_keys, lp_rates_values = Discount().get_init_discount()
-    btc_agent.setAssetWeight(1)
-    btc_stake.setInitTlpRates(tlp_rates_keys, tlp_rates_values)
-    btc_agent.setInitLpRates(lp_rates_keys, lp_rates_values)
-    btc_stake.setIsActive(True)
-    btc_agent.setIsActive(True)
     system_reward.setOperator(stake_hub.address)
 
 
@@ -90,31 +74,16 @@ def add_candidates(count=25):
     return operators, consensuses
 
 
-def mock_current_round():
-    current_round = 19998
-    timestamp = current_round * Utils.ROUND_INTERVAL
-    return current_round, timestamp
-
-
-def mock_btc_stake_lock_time(timestamp, stake_round=None):
-    if stake_round is None:
-        stake_round = random.randint(1, 10)
-    timestamp = timestamp + (Utils.ROUND_INTERVAL * stake_round)
-    end_round = timestamp // Utils.ROUND_INTERVAL
-    return timestamp, end_round
-
 
 def setup_validators_and_delegates(validator_count=9, alternate_count=3, candidate_count=15):
     validator_set = ValidatorSetMock[0]
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     validator_set.setMaintainSlashPercent(30)
     set_validator_count(validator_count=validator_count, alternate_count=alternate_count)
     operators, consensuses = add_candidates(candidate_count)
     return operators, consensuses
 
 
-def delegate_validator(operators, valudator_index=None, delegator=None, delegate_amount=None, btc_amount=1000):
+def delegate_validator(operators, valudator_index=None, delegator=None, delegate_amount=None):
     if delegate_amount is None:
         delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     if valudator_index is None:
@@ -126,18 +95,14 @@ def delegate_validator(operators, valudator_index=None, delegator=None, delegate
             if type(delegator) == list:
                 for acc in delegator:
                     delegate_coin_success(operators[i], acc, delegate_amount)
-                    delegate_btc_success(operators[i], acc, btc_amount, LOCK_SCRIPT, relay=acc)
             else:
                 delegate_coin_success(operators[i], delegator, delegate_amount)
-                delegate_btc_success(operators[i], delegator, btc_amount, LOCK_SCRIPT, relay=delegator)
     else:
         if type(delegator) == list:
             for acc in delegator:
                 delegate_coin_success(operators[valudator_index], acc, delegate_amount)
-                delegate_btc_success(operators[valudator_index], acc, btc_amount, LOCK_SCRIPT, relay=acc)
         else:
             delegate_coin_success(operators[valudator_index], delegator, delegate_amount)
-            delegate_btc_success(operators[valudator_index], delegator, btc_amount, LOCK_SCRIPT, relay=delegator)
 
 
 def expect_validator_consensus(consensuses):
@@ -145,57 +110,6 @@ def expect_validator_consensus(consensuses):
     for consensus in chain_get_validator_consensus():
         assert consensus in consensuses
 
-
-@pytest.mark.parametrize("hard_cap", [
-    [['coreHardcap', 2000], ['hashHardcap', 9000], ['btcHardcap', 10000]],
-    [['coreHardcap', 3000], ['hashHardcap', 3000], ['btcHardcap', 3000]],
-    [['coreHardcap', 100000], ['hashHardcap', 50000], ['btcHardcap', 30000]],
-])
-def test_claim_reward_after_hardcap_update(stake_hub, hard_cap, set_candidate):
-    update_system_contract_address(stake_hub, gov_hub=accounts[0])
-    for h in hard_cap:
-        hex_value = padding_left(Web3.to_hex(h[1]), 64)
-        stake_hub.updateParam(h[0], hex_value)
-    operators, consensuses = set_candidate
-    turn_round()
-    delegate_coin_success(operators[0], accounts[0], COIN_VALUE)
-    delegate_btc_success(operators[1], accounts[1], BTC_VALUE, LOCK_SCRIPT, relay=accounts[1])
-    delegate_power_success(operators[2], accounts[2], POWER_VALUE)
-    turn_round(consensuses, round_count=2, tx_fee=TX_FEE)
-    _, unclaimed_rewards, account_rewards, _ = parse_delegation([{
-        "address": operators[0],
-        "coin": [set_delegate(accounts[0], COIN_VALUE)],
-    }, {
-        "address": operators[1],
-        "btc": [set_delegate(accounts[1], BTC_VALUE, stake_duration=Utils.MONTH)],
-    }, {
-        "address": operators[2],
-        "power": [set_delegate(accounts[2], POWER_VALUE)]
-    }
-    ], BLOCK_REWARD // 2,
-        state_map={'core_lp': 4},
-        reward_cap={
-            'coin': hard_cap[0][-1],
-            'power': hard_cap[1][-1],
-            'btc': hard_cap[2][-1]
-        }
-    )
-    tracker0 = get_tracker(accounts[0])
-    tracker1 = get_tracker(accounts[1])
-    tracker2 = get_tracker(accounts[2])
-    claim_stake_and_relay_reward(accounts[:3])
-    assert tracker0.delta() == account_rewards[accounts[0]]
-    assert tracker1.delta() == account_rewards[accounts[1]]
-    assert tracker2.delta() == account_rewards[accounts[2]]
-
-
-def init_hybrid_score_mock():
-    STAKE_HUB.initHybridScoreMock()
-    set_round_tag(get_current_round())
-
-
-def move_btc_data(tx_ids):
-    BTC_STAKE.moveData(tx_ids)
 
 
 
@@ -228,19 +142,14 @@ def test_bep127_alternate_replace_after_major_offense(candidate_hub, validator_s
 
 
 def test_bep127_major_offense_alternate_replace_and_repeat(slash_indicator):
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     set_validator_count()
     operators, consensuses = add_candidates(8)
     for i in range(6):
         for acc in accounts[0:2]:
             delegate_coin_success(operators[i], acc, delegate_amount)
-            delegate_btc_success(operators[i], acc, 1000, LOCK_SCRIPT, relay=acc)
     delegate_coin_success(operators[6], accounts[2], 1000)
     delegate_coin_success(operators[6], accounts[3], 1000)
-    delegate_btc_success(operators[6], accounts[2], 1000, LOCK_SCRIPT, relay=accounts[2])
-    delegate_btc_success(operators[6], accounts[3], 1000, LOCK_SCRIPT, relay=accounts[3])
     delegate_coin_success(operators[7], accounts[4], 1000)
     delegate_coin_success(operators[7], accounts[5], 1000)
     turn_round()
@@ -321,15 +230,12 @@ def test_bep127_major_offense_no_alternate_block_after_exit_maintenance(validato
 
 @pytest.mark.parametrize("slash_type", ["minor", "felony"])
 def test_bep127_minor_offense_enter_maintenance_alternate_replace(slash_type, validator_set):
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     set_validator_count()
-    btc_amount = 1000
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(8)
-    delegate_validator(operators, btc_amount=1000)
-    delegate_validator(operators, [6, 7], accounts[2:4], delegate_amount - 1, btc_amount - 1)
-    delegate_validator(operators, [7, 8], accounts[4:6], delegate_amount - 1, btc_amount)
+    delegate_validator(operators)
+    delegate_validator(operators, [6, 7], accounts[2:4], delegate_amount - 1)
+    delegate_validator(operators, [7, 8], accounts[4:6], delegate_amount - 1)
     turn_round()
     assert chain_get_validator_consensus() == consensuses[:6]
     tx = slash_validator(consensuses[2], slash_type=slash_type)
@@ -351,16 +257,13 @@ def test_bep127_minor_offense_enter_maintenance_alternate_replace(slash_type, va
 
 
 def test_bep127_minor_then_felony_alternate_replace(validator_set, candidate_hub):
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     validator_set.setMaintainSlashPercent(30)
-    btc_amount = 1000
     set_validator_count()
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(8)
     delegate_validator(operators)
-    delegate_validator(operators, [6, 7], accounts[2:4], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, [7, 8], accounts[4:6], delegate_amount - 2, btc_amount)
+    delegate_validator(operators, [6, 7], accounts[2:4], delegate_amount - 1)
+    delegate_validator(operators, [7, 8], accounts[4:6], delegate_amount - 2)
     delegate_coin_success(operators[5], accounts[6], 10000)
     turn_round()
     expect_validator_consensus(consensuses[:6])
@@ -378,16 +281,13 @@ def test_bep127_minor_then_felony_alternate_replace(validator_set, candidate_hub
 
 @pytest.mark.parametrize("slash_type", ["minor", "felony"])
 def test_bep127_minor_no_alternate_replace(validator_set, slash_type):
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     validator_set.setMaintainSlashPercent(30)
-    btc_amount = 1000
     set_validator_count()
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(8)
     delegate_validator(operators)
-    delegate_validator(operators, [6, 7], accounts[2:4], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, [7, 8], accounts[4:6], delegate_amount - 1, btc_amount)
+    delegate_validator(operators, [6, 7], accounts[2:4], delegate_amount - 1)
+    delegate_validator(operators, [7, 8], accounts[4:6], delegate_amount - 1)
     delegate_coin_success(operators[2], accounts[3], 10000)
     turn_round()
     slash_validator(consensuses[2], slash_type=slash_type)
@@ -399,17 +299,14 @@ def test_bep127_minor_no_alternate_replace(validator_set, slash_type):
 
 
 def test_bep127_alternate_replace_with_maintenance_and_felony(validator_set):
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     validator_set.setMaintainSlashPercent(30)
-    btc_amount = 1000
     set_validator_count(validator_count=9, alternate_count=3)
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(15)
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
-    delegate_validator(operators, [9, 11], accounts[2], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, [11, 12], accounts[4], delegate_amount - 2, btc_amount)
-    delegate_validator(operators, [12, 15], accounts[5], delegate_amount - 3, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
+    delegate_validator(operators, [9, 11], accounts[2], delegate_amount - 1)
+    delegate_validator(operators, [11, 12], accounts[4], delegate_amount - 2)
+    delegate_validator(operators, [12, 15], accounts[5], delegate_amount - 3)
     turn_round()
     expect_validator_consensus(consensuses[:9])
 
@@ -443,16 +340,13 @@ def test_bep127_alternate_replace_with_maintenance_and_felony(validator_set):
 
 
 def test_bep127_all_alternates_in_maintenance(validator_set):
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     validator_set.setMaintainSlashPercent(30)
-    btc_amount = 1000
     set_validator_count(validator_count=9, alternate_count=3)
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(15)
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
-    delegate_validator(operators, [9, 12], accounts[2], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, [12, 15], accounts[4], delegate_amount - 2, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
+    delegate_validator(operators, [9, 12], accounts[2], delegate_amount - 1)
+    delegate_validator(operators, [12, 15], accounts[4], delegate_amount - 2)
     delegate_coin_success(operators[2], accounts[3], 10000)
     turn_round()
     expect_validator_consensus(consensuses[:9])
@@ -478,20 +372,17 @@ def test_bep127_all_alternates_in_maintenance(validator_set):
 
 
 def test_bep127_alternate_high_score_in_maintenance(validator_set):
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     validator_set.setMaintainSlashPercent(30)
-    btc_amount = 1000
     set_validator_count(validator_count=9, alternate_count=3)
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(15)
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
-    delegate_validator(operators, 2, accounts[6], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, 3, accounts[6], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, 9, accounts[2], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, [10, 12], accounts[3], delegate_amount - 2, btc_amount)
-    delegate_validator(operators, 12, accounts[4], delegate_amount - 3, btc_amount)
-    delegate_validator(operators, [13, 15], accounts[5], delegate_amount - 4, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
+    delegate_validator(operators, 2, accounts[6], delegate_amount - 1)
+    delegate_validator(operators, 3, accounts[6], delegate_amount - 1)
+    delegate_validator(operators, 9, accounts[2], delegate_amount - 1)
+    delegate_validator(operators, [10, 12], accounts[3], delegate_amount - 2)
+    delegate_validator(operators, 12, accounts[4], delegate_amount - 3)
+    delegate_validator(operators, [13, 15], accounts[5], delegate_amount - 4)
     turn_round()
     expect_validator_consensus(consensuses[:9])
     enter_maintenance(operators[2])
@@ -508,15 +399,14 @@ def test_bep127_alternate_high_score_in_maintenance(validator_set):
 
 
 def test_bep127_validator_maintenance_and_return(validator_set):
-    btc_amount = 1000
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = setup_validators_and_delegates()
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
-    delegate_validator(operators, 2, accounts[6], delegate_amount, btc_amount)
-    delegate_validator(operators, 9, accounts[2], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, [10, 12], accounts[3], delegate_amount - 2, btc_amount)
-    delegate_validator(operators, 12, accounts[4], delegate_amount - 3, btc_amount)
-    delegate_validator(operators, [13, 15], accounts[5], delegate_amount - 4, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
+    delegate_validator(operators, 2, accounts[6], delegate_amount)
+    delegate_validator(operators, 9, accounts[2], delegate_amount - 1)
+    delegate_validator(operators, [10, 12], accounts[3], delegate_amount - 2)
+    delegate_validator(operators, 12, accounts[4], delegate_amount - 3)
+    delegate_validator(operators, [13, 15], accounts[5], delegate_amount - 4)
     turn_round()
     expect_validator_consensus(consensuses[:9])
     enter_maintenance(operators[2])
@@ -534,15 +424,14 @@ def test_bep127_validator_maintenance_and_return(validator_set):
 @pytest.mark.parametrize("slash_type", ["minor", "felony", "active"])
 def test_bep127_validator_maintenance_with_minor_slash(validator_set, slash_type):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates()
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
-    delegate_validator(operators, 9, accounts[6], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, 10, accounts[3], delegate_amount - 2, btc_amount)
-    delegate_validator(operators, 11, accounts[7], delegate_amount - 2, btc_amount)
-    delegate_validator(operators, 12, accounts[4], delegate_amount - 3, btc_amount)
-    delegate_validator(operators, [13, 15], accounts[5], delegate_amount - 4, btc_amount)
-    delegate_validator(operators, 2, accounts[2], delegate_amount, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
+    delegate_validator(operators, 9, accounts[6], delegate_amount - 1)
+    delegate_validator(operators, 10, accounts[3], delegate_amount - 2)
+    delegate_validator(operators, 11, accounts[7], delegate_amount - 2)
+    delegate_validator(operators, 12, accounts[4], delegate_amount - 3)
+    delegate_validator(operators, [13, 15], accounts[5], delegate_amount - 4)
+    delegate_validator(operators, 2, accounts[2], delegate_amount)
     tx = turn_round()
     expect_validator_consensus(consensuses[:9])
     chain_deposit(consensuses[2], deposit_count=3)
@@ -587,16 +476,15 @@ def test_bep127_validator_maintenance_with_minor_slash(validator_set, slash_type
 
 def test_bep127_validator_multiple_minor_slash(validator_set, slash_indicator):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates()
     for i in range(0, 9):
-        delegate_validator(operators, i, accounts[1], delegate_amount - i, btc_amount)
-    delegate_validator(operators, 9, accounts[2], delegate_amount + 1, btc_amount)
-    delegate_validator(operators, 10, accounts[3], delegate_amount + 2, btc_amount)
-    delegate_validator(operators, 11, accounts[4], delegate_amount + 3, btc_amount)
-    delegate_validator(operators, 12, accounts[5], delegate_amount + 4, btc_amount)
-    delegate_validator(operators, 13, accounts[6], delegate_amount + 5, btc_amount)
-    delegate_validator(operators, 14, accounts[7], delegate_amount + 5, btc_amount)
+        delegate_validator(operators, i, accounts[1], delegate_amount - i)
+    delegate_validator(operators, 9, accounts[2], delegate_amount + 1)
+    delegate_validator(operators, 10, accounts[3], delegate_amount + 2)
+    delegate_validator(operators, 11, accounts[4], delegate_amount + 3)
+    delegate_validator(operators, 12, accounts[5], delegate_amount + 4)
+    delegate_validator(operators, 13, accounts[6], delegate_amount + 5)
+    delegate_validator(operators, 14, accounts[7], delegate_amount + 5)
 
     tx = turn_round()
     expect_validator_consensus([consensuses[i] for i in [14, 13, 12, 11, 10, 9, 0, 1, 2]])
@@ -619,12 +507,11 @@ def test_bep127_validator_multiple_minor_slash(validator_set, slash_indicator):
 @pytest.mark.parametrize("slash_type", ["minor", "felony", "active"])
 def test_bep127_validator_exit_maintenance_with_minor_or_felony_slash(validator_set, slash_indicator, slash_type):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates()
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount - 1, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount - 1)
     for i, acc in enumerate(accounts[2:8], start=9):
-        delegate_validator(operators, i, acc, delegate_amount - (i - 8), btc_amount)
-    delegate_validator(operators, 2, accounts[8], delegate_amount, btc_amount)
+        delegate_validator(operators, i, acc, delegate_amount - (i - 8))
+    delegate_validator(operators, 2, accounts[8], delegate_amount)
     turn_round()
     slash_indicator.setFelonyThreshold(6)
     expect_validator_consensus(consensuses[:9])
@@ -655,12 +542,11 @@ def test_bep127_validator_exit_maintenance_with_minor_or_felony_slash(validator_
 
 def test_bep127_validator_exit_maintenance_without_slash():
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates()
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
     for i, acc in enumerate(accounts[2:8], start=9):
-        delegate_validator(operators, i, acc, delegate_amount - (i - 8), btc_amount)
-    delegate_validator(operators, 2, accounts[8], delegate_amount, btc_amount)
+        delegate_validator(operators, i, acc, delegate_amount - (i - 8))
+    delegate_validator(operators, 2, accounts[8], delegate_amount)
     turn_round()
     expect_validator_consensus(consensuses[:9])
 
@@ -680,12 +566,11 @@ def test_bep127_validator_exit_maintenance_without_slash():
 @pytest.mark.parametrize("is_exit_maintenance", [True, False])
 def test_bep127_validator_exit_maintenance_and_get_slashed(is_exit_maintenance):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates()
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
     for i, acc in enumerate(accounts[2:8], start=9):
-        delegate_validator(operators, i, acc, delegate_amount - (i - 8), btc_amount)
-    delegate_validator(operators, 2, accounts[8], delegate_amount, btc_amount)
+        delegate_validator(operators, i, acc, delegate_amount - (i - 8))
+    delegate_validator(operators, 2, accounts[8], delegate_amount)
     turn_round()
     expect_validator_consensus(consensuses[:9])
     enter_maintenance(operators[2])
@@ -707,12 +592,11 @@ def test_bep127_validator_exit_maintenance_and_get_slashed(is_exit_maintenance):
 @pytest.mark.parametrize("slash_type", ["minor", "felony"])
 def test_maintenance_and_blocking_then_stop_slashed_no_reward(slash_type, is_maintenance, slash_indicator):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates()
-    delegate_validator(operators, [0, 9], accounts[1], delegate_amount, btc_amount)
+    delegate_validator(operators, [0, 9], accounts[1], delegate_amount)
     for i, acc in enumerate(accounts[2:8], start=9):
-        delegate_validator(operators, i, acc, delegate_amount - (i - 8), btc_amount)
-    delegate_validator(operators, 2, accounts[8], delegate_amount, btc_amount)
+        delegate_validator(operators, i, acc, delegate_amount - (i - 8))
+    delegate_validator(operators, 2, accounts[8], delegate_amount)
     turn_round()
     expect_validator_consensus(consensuses[:9])
     slash_indicator.setFelonyThreshold(6)
@@ -738,13 +622,12 @@ def test_maintenance_and_blocking_then_stop_slashed_no_reward(slash_type, is_mai
 
 def test_not_enough_alternate_next_round_add_and_reward(validator_set):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=9,
                                                             alternate_count=3,
                                                             candidate_count=15)
     for i in range(14):
-        delegate_validator(operators, i, accounts[0], delegate_amount - i, btc_amount)
-    delegate_validator(operators, 14, accounts[1], delegate_amount - 14, btc_amount)
+        delegate_validator(operators, i, accounts[0], delegate_amount - i)
+    delegate_validator(operators, 14, accounts[1], delegate_amount - 14)
     turn_round()
     expect_validator_consensus(consensuses[:9])
     enter_maintenance(operators[0])
@@ -774,16 +657,15 @@ def test_not_enough_alternate_next_round_add_and_reward(validator_set):
 
 def test_validator_enter_maintenance_and_slash_workflow(validator_set, slash_indicator):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=3,
                                                             alternate_count=2,
                                                             candidate_count=7)
     for i in range(3):
-        delegate_validator(operators, i, accounts[i], delegate_amount, btc_amount)
-    delegate_validator(operators, 0, accounts[6], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, 3, accounts[3], delegate_amount - 1, btc_amount)
-    delegate_validator(operators, 4, accounts[4], delegate_amount - 2, btc_amount)
-    delegate_validator(operators, 5, accounts[5], delegate_amount - 3, btc_amount)
+        delegate_validator(operators, i, accounts[i], delegate_amount)
+    delegate_validator(operators, 0, accounts[6], delegate_amount - 1)
+    delegate_validator(operators, 3, accounts[3], delegate_amount - 1)
+    delegate_validator(operators, 4, accounts[4], delegate_amount - 2)
+    delegate_validator(operators, 5, accounts[5], delegate_amount - 3)
     turn_round()
     expect_validator_consensus(consensuses[:3])
     enter_maintenance(operators[0])
@@ -806,13 +688,10 @@ def test_upgrade_with_validator_minor_and_felony(validator_set, candidate_hub, s
     validator_set.setMaintainSlashPercent(0)
     set_validator_count(validator_count=31, alternate_count=0)
     validator_set = ValidatorSetMock[0]
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
-    btc_amount = 1000
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(40)
     for i in range(36):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
     candidate_hub.unregister({'from': operators[-1]})
     candidate_hub.unregister({'from': operators[-2]})
     candidate_hub.unregister({'from': operators[-3]})
@@ -850,13 +729,10 @@ def test_upgrade_with_no_validator_minor_and_felony(validator_set, candidate_hub
     validator_set.setMaintainSlashPercent(0)
     set_validator_count(validator_count=31, alternate_count=0)
     validator_set = ValidatorSetMock[0]
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
-    btc_amount = 1000
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
     operators, consensuses = add_candidates(40)
     for i in range(4, 40):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
     for i in range(4):
         candidate_hub.unregister({'from': operators[i]})
     turn_round()
@@ -891,25 +767,22 @@ def test_new_validator_join_and_unregister(candidate_hub, validator_set):
     validator_count = 5
     alternate_count = 2
     candidate_count = 8
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     set_validator_count(validator_count=validator_count, alternate_count=alternate_count)
     operators, consensuses = add_candidates(candidate_count)
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     for i in range(candidate_count):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[58 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[58 + i], delegate_amount - i)
     turn_round()
     expect_validator_consensus(consensuses[:5])
     new_operator = [accounts[70], accounts[71]]
     new_consensus = []
     new_consensus.append(register_candidate(operator=new_operator[0]))
     new_consensus.append(register_candidate(operator=new_operator[1]))
-    delegate_validator(new_operator, 0, accounts[72], delegate_amount + 1, btc_amount)
-    delegate_validator(new_operator, 0, accounts[73], delegate_amount + 1, btc_amount)
-    delegate_validator(new_operator, 1, accounts[74], delegate_amount - 3, btc_amount)
-    delegate_validator(new_operator, 1, accounts[75], delegate_amount - 3, btc_amount)
+    delegate_validator(new_operator, 0, accounts[72], delegate_amount + 1)
+    delegate_validator(new_operator, 0, accounts[73], delegate_amount + 1)
+    delegate_validator(new_operator, 1, accounts[74], delegate_amount - 3)
+    delegate_validator(new_operator, 1, accounts[75], delegate_amount - 3)
     turn_round(chain_get_validator_consensus())
     new_consensus_list = consensuses[:4]
     new_consensus_list.append(new_consensus[0])
@@ -940,13 +813,12 @@ def test_new_validator_join_and_unregister(candidate_hub, validator_set):
 
 def test_major_offense_then_pay_fine_then_normal(candidate_hub, validator_set, slash_indicator):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     candidate_count = 7
     operators, consensuses = setup_validators_and_delegates(validator_count=3, alternate_count=5,
                                                             candidate_count=candidate_count)
     for i in range(candidate_count):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[58 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[58 + i], delegate_amount - i)
     turn_round()
     expect_validator_consensus(consensuses[:3])
     major_offense_operator = operators[0]
@@ -993,11 +865,9 @@ def test_alternate_count_greater_than_validators_with_unregistered(candidate_hub
                                                             alternate_count=alternate_count,
                                                             candidate_count=candidate_count)
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
-
     for i in range(candidate_count):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[61 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[61 + i], delegate_amount - i)
     turn_round()
     refuse_delegate(operators[3])
     expect_validator_consensus(consensuses[:3])
@@ -1033,11 +903,9 @@ def test_refused_delegate_cannot_be_alternate(candidate_hub, validator_set):
                                                             alternate_count=alternate_count,
                                                             candidate_count=candidate_count)
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
-
     for i in range(candidate_count):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[60 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[60 + i], delegate_amount - i)
     turn_round()
     refuse_delegate(operators[0])
     refuse_delegate(operators[3])
@@ -1056,10 +924,8 @@ def test_replenish_and_validator_count_equals_total_validators(validator_set, ca
     set_validator_count(validator_count=validator_count, alternate_count=replenish_count)
     operators, consensuses = add_candidates(total_validators)
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
-
     for i in range(total_validators):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
 
     turn_round()
     validators = validator_set.getValidators()
@@ -1083,14 +949,13 @@ def test_replenish_and_validator_count_equals_total_validators(validator_set, ca
 
 def test_edit_consensus_address_and_claim_reward(candidate_hub, validator_set):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=5,
                                                             alternate_count=2,
                                                             candidate_count=7)
 
     for i in range(7):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i)
 
     operator = operators[0]
     old_consensus = consensuses[0]
@@ -1144,13 +1009,12 @@ def test_edit_consensus_address_and_claim_reward(candidate_hub, validator_set):
 
 def test_edit_commission_rate_and_claim_reward(candidate_hub):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=5,
                                                             alternate_count=2,
                                                             candidate_count=7)
     for i in range(7):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i)
     agent = accounts[65]
     turn_round()
     expect_validator_consensus(consensuses[:5])
@@ -1183,13 +1047,12 @@ def test_edit_commission_rate_and_claim_reward(candidate_hub):
 
 def test_edit_vote_address_and_claim_reward(candidate_hub):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=5,
                                                             alternate_count=2,
                                                             candidate_count=7)
     for i in range(7):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i)
     agent = accounts[65]
     turn_round()
     weights = [10, 20, 30, 60, 20]
@@ -1216,13 +1079,12 @@ def test_edit_vote_address_and_claim_reward(candidate_hub):
 
 def test_edit_fee_address_and_claim_reward(candidate_hub):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=5,
                                                             alternate_count=2,
                                                             candidate_count=7)
     for i in range(7):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i)
     turn_round()
     expect_validator_consensus(consensuses[:5])
     tx = turn_round(chain_get_validator_consensus())
@@ -1249,11 +1111,10 @@ def test_edit_fee_address_and_claim_reward(candidate_hub):
 
 def test_bep127_refuse_and_redelegate(candidate_hub, validator_set):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=9, alternate_count=3, candidate_count=15)
     for i in range(15):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[70 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[70 + i], delegate_amount - i)
     turn_round()
     trackers = get_trackers(accounts[50:50 + 15])
     refuse_delegate(operators[0])
@@ -1271,13 +1132,12 @@ def test_bep127_refuse_and_redelegate(candidate_hub, validator_set):
 
 def test_edit_agent_info_and_claim_reward(candidate_hub, validator_set):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=5,
                                                             alternate_count=2,
                                                             candidate_count=7)
     for i in range(7):
-        delegate_validator(operators, i, accounts[70 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[77 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[70 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[77 + i], delegate_amount - i)
     turn_round()
     validator_set.setValidatorCount(0)
     candidate_hub.updateAgent(accounts[72], {'from': operators[0]})
@@ -1289,71 +1149,15 @@ def test_edit_agent_info_and_claim_reward(candidate_hub, validator_set):
     turn_round(chain_get_validator_consensus(), round_count=2)
 
 
-def test_maintenance_validator_upgrade_coin_btc_no_effect(validator_set, candidate_hub, slash_indicator):
-    validator_set.setMaintainSlashPercent(0)
-    set_validator_count(validator_count=31, alternate_count=0)
-    validator_set = ValidatorSetMock[0]
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
-    btc_amount = 1000
-    delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    operators, consensuses = add_candidates(40)
-    for i in range(0, 40):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[1 + i], delegate_amount - i, btc_amount)
-    tx_id0 = delegate_btc_success(operators[1], accounts[91], btc_amount, LOCK_SCRIPT, relay=accounts[91])
-    tx_id1 = delegate_btc_success(operators[3], accounts[92], btc_amount, LOCK_SCRIPT, relay=accounts[92])
-    candidate_hub.unregister({'from': operators[-1]})
-    candidate_hub.unregister({'from': operators[-2]})
-    candidate_hub.unregister({'from': operators[-3]})
-    turn_round()
-    set_validator_count(validator_count=31, alternate_count=3)
-    validator_set.setValidatorCount(0)
-    validator_set.setMaintainSlashPercent(10)
-    validators = validator_set.getValidators()
-    assert validator_set.validatorCount() == 0
-    transfer_coin_success(operators[0], operators[2], accounts[50], delegate_amount)
-    transfer_coin_success(operators[2], operators[0], accounts[52], delegate_amount - 2)
-    transfer_btc_success(tx_id0, operators[2], accounts[91])
-    delegate_btc_success(operators[4], accounts[93], btc_amount, LOCK_SCRIPT, relay=accounts[93])
-    delegate_coin_success(operators[0], accounts[50], delegate_amount)
-    turn_round(chain_get_validator_consensus())
-    trackers0 = get_tracker(accounts[50])
-    trackers1 = get_tracker(accounts[91])
-    trackers2 = get_tracker(accounts[92])
-    trackers3 = get_tracker(accounts[93])
-    stake_hub_claim_reward(accounts[50])
-    stake_hub_claim_reward(accounts[91])
-    stake_hub_claim_reward(accounts[92])
-    assert trackers0.delta() == TOTAL_REWARD // 2 - 1
-    assert trackers1.delta() == 0
-    assert trackers2.delta() > 0
-    enter_maintenance(operators[2])
-    transfer_coin_success(operators[2], operators[0], accounts[50], delegate_amount // 2)
-    transfer_btc_success(tx_id0, operators[3], accounts[91])
-    undelegate_coin_success(operators[0], accounts[50], delegate_amount // 4)
-    undelegate_coin_success(operators[2], accounts[50], delegate_amount // 4)
-    turn_round(chain_get_validator_consensus())
-    stake_hub_claim_reward(accounts[50])
-    stake_hub_claim_reward(accounts[91])
-    stake_hub_claim_reward(accounts[92])
-    stake_hub_claim_reward(accounts[93])
-    assert trackers0.delta() > 0
-    assert trackers1.delta() == 0
-    assert trackers2.delta() > 0
-    assert trackers3.delta() > 0
-    turn_round(chain_get_validator_consensus(), round_count=2)
-
 
 def test_update_consensus_address_block_produce_on_old_and_new(validator_set, candidate_hub):
     delegate_amount = MIN_INIT_DELEGATE_VALUE * 100
-    btc_amount = 1000
     operators, consensuses = setup_validators_and_delegates(validator_count=5,
                                                             alternate_count=2,
                                                             candidate_count=7)
     for i in range(7):
-        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i, btc_amount)
-        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i, btc_amount)
+        delegate_validator(operators, i, accounts[50 + i], delegate_amount - i)
+        delegate_validator(operators, i, accounts[57 + i], delegate_amount - i)
     turn_round()
     expect_validator_consensus(consensuses[:5])
     turn_round(chain_get_validator_consensus())

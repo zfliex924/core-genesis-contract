@@ -93,7 +93,6 @@ def get_current_round():
 
 def set_round_tag(round_tag):
     CandidateHubMock[0].setRoundTag(round_tag)
-    BitcoinStakeMock[0].setRoundTag(round_tag)
     CoreAgentMock[0].setRoundTag(round_tag)
 
 

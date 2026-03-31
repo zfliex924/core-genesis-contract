@@ -6,7 +6,7 @@ from eth_account import Account
 from brownie import accounts, UnRegisterReentry
 from brownie.test import given, strategy
 from brownie.network.transaction import Status, TransactionReceipt
-from tests.delegate import delegate_btc_success, delegate_coin_success
+from tests.delegate import delegate_coin_success
 from .constant import Utils
 from .utils import random_address, expect_event, padding_left, update_system_contract_address
 from .common import *
@@ -1796,12 +1796,10 @@ def test_edit_fee_address_by_agent_fail(candidate_hub, accounts):
 
 def test_candidate_update_and_turn_round(candidate_hub, accounts, validator_set, set_candidate):
     accounts[99].transfer(validator_set.address, Web3.to_wei(100000, 'ether'))
-    lock_script = "0480db8767b17576a914574fdd26858c28ede5225a809f747c01fcc1f92a88ac"
     validator_set.updateBlockReward(30000)
     operators, consensuses = set_candidate
     for i, delegator in enumerate(accounts[:3]):
         delegate_coin_success(operators[i], delegator, 10000)
-        delegate_btc_success(operators[i], delegator, 200, lock_script, relay=delegator)
     turn_round()
     validator_count = len(consensuses)
     for i in range(validator_count):

@@ -16,8 +16,6 @@ init_validators = [
 ]
 init_validator_incomes = [0, 0, 0, 0, 0]
 random_address = "0x51BafF77eFF55ac97d170E7449b59b73E95e262e"
-LOCK_SCRIPT = "0480db8767b17576a914574fdd26858c28ede5225a809f747c01fcc1f92a88ac"
-
 account_tracker: AccountTracker = None
 system_reward_tracker: AccountTracker = None
 validator_set_tracker: AccountTracker = None
@@ -2032,29 +2030,20 @@ def test_maintenance_with_less_alternate(validator_set, candidate_hub):
 
 
 def test_delegate_and_transfer_during_maintenance(validator_set, candidate_hub, set_candidate_maintenance):
-    stake_manager = StakeManager()
-    stake_manager.set_lp_rates()
-    stake_manager.set_tlp_rates()
     accounts[99].transfer(validator_set.address, Web3.to_wei(100000, 'ether'))
     operators, consensuses = set_candidate_maintenance
     turn_round()
     operator = operators[0]
     delegator = accounts[20]
-    btc_delegator = accounts[21]
     delegate_amount = 100000
-    btc_amount = 1000
     tx = validator_set.enterMaintenance({'from': operator})
     validator = validator_set.getValidatorExByConsensus(consensuses[0])
     assert validator['enterMaintenanceHeight'] != 0
     delegate_coin_success(operator, delegator, delegate_amount)
-    txid = delegate_btc_success(operator, btc_delegator, btc_amount, LOCK_SCRIPT, relay=btc_delegator)
     transfer_coin_success(operator, operators[1], delegator, delegate_amount // 2)
-    transfer_btc_success(txid, operators[2], btc_delegator)
     undelegate_coin_success(operator, delegator, delegate_amount // 4)
     delegate_coin_success(operator, delegator, delegate_amount // 10)
-    txid2 = delegate_btc_success(operator, btc_delegator, btc_amount // 10, LOCK_SCRIPT, relay=btc_delegator)
     transfer_coin_success(operator, operators[1], delegator, delegate_amount // 20)
-    transfer_btc_success(txid2, operators[2], btc_delegator)
     turn_round(chain_get_validator_consensus())
     stake_hub_claim_reward(delegator)
     turn_round(chain_get_validator_consensus())

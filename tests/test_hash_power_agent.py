@@ -136,7 +136,7 @@ def test_get_power_stake_amounts_success(hash_power_agent, set_candidate):
 
 
 @pytest.mark.parametrize("round_count", [0, 1, 2, 3])
-def test_power_valid_for_one_round(btc_stake, set_candidate, hash_power_agent, round_count):
+def test_power_valid_for_one_round(set_candidate, hash_power_agent, round_count):
     power_value = 1
     operators, consensuses = set_candidate
     delegate_power_success(operators[0], accounts[0], power_value)
