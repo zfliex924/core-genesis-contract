@@ -21,11 +21,10 @@ contract NativeAgentMock is NativeAgent {
         requiredCoinDeposit = newRequiredCoinDeposit;
     }
 
-    function getDelegatorMap(address delegator) external view returns (address[] memory, uint256, uint256) {
+    function getDelegatorMap(address delegator) external view returns (address[] memory, uint256) {
         address[] memory candidates = delegatorMap[delegator].candidates;
         uint256 amount = delegatorMap[delegator].amount;
-        uint256 channelAmount = delegatorMap[delegator].channelAmount;
-        return (candidates, amount, channelAmount);
+        return (candidates, amount);
     }
 
     function getAccruedRewardMap(address validator, uint256 round) external view returns (uint256) {

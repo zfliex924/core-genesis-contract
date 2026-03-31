@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache2.0
 pragma solidity 0.8.4;
 
-import "./interface/IChannel.sol";
 import "./interface/INativeAgent.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/ICandidateHub.sol";
@@ -61,7 +60,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   struct Delegator {
     address[] candidates;
     uint256 amount;
-    uint256 channelAmount;
   }
 
   struct Reward {
@@ -85,11 +83,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   );
   event claimedCoinReward(address indexed delegator, uint256 amount, uint256 accStakedAmount);
   event collectedReward(address indexed candidate, address indexed delegator, uint256 reward, uint256 accStakedAmount);
-
-  modifier onlyInternalCall() {
-    require(msg.sender == CHANNEL_ADDR, "the sender must be Channel contract");
-    _;
-  }
 
   /*********************** Init ********************************/
   function init() external onlyNotInit {
@@ -171,7 +164,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   /*********************** External methods ***************************/
   /// Delegate coin to a validator
   /// @param candidate The operator address of validator
-  function delegateCoin(address candidate) external payable {
+  function delegateCoin(address candidate) external override payable {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(candidate)) {
       revert InactiveCandidate(candidate);
     }
@@ -183,7 +176,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   /// Undelegate coin from a validator
   /// @param candidate The operator address of validator
   /// @param amount The amount of CORE to undelegate
-  function undelegateCoin(address candidate, uint256 amount) public {
+  function undelegateCoin(address candidate, uint256 amount) public override {
     amount = undelegate(candidate, msg.sender, amount);
     Address.sendValue(payable(msg.sender), amount);
   }
@@ -192,7 +185,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   /// @param sourceCandidate The validator to transfer coin stake from
   /// @param targetCandidate The validator to transfer coin stake to
   /// @param amount The amount of CORE to transfer
-  function transferCoin(address sourceCandidate, address targetCandidate, uint256 amount) public {
+  function transferCoin(address sourceCandidate, address targetCandidate, uint256 amount) public override {
     if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(targetCandidate)) {
       revert InactiveCandidate(targetCandidate);
     }
@@ -237,21 +230,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     }
   }
 
-  /// @param candidate the validator candidate address
-  /// @param delegator the delegator address
-  /// @param channelId the channel id
-  function proxyDelegate(address candidate, address delegator, uint32 channelId) external payable override onlyInternalCall {
-    if (!ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(candidate)) {
-      revert InactiveCandidate(candidate);
-    }
-    require(msg.value >= requiredCoinDeposit, "delegate amount is too small");
-    uint256 realtimeAmount = _delegateCoin(candidate, delegator, msg.value, false);
-    emit delegatedCoin(candidate, delegator, msg.value, realtimeAmount);
-    if (channelId != 0) {
-      delegatorMap[delegator].channelAmount += msg.value;
-    }
-  }
-
   /*********************** Internal methods ***************************/
   /// delegate CORE tokens
   /// @param candidate the validator candidate to delegate to
@@ -287,19 +265,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     uint256 dAmount = _undelegateCoin(candidate, delegator, amount, false);
     _deductTransferredAmount(delegator, dAmount);
     emit undelegatedCoin(candidate, delegator, amount);
-
-    Delegator storage d = delegatorMap[delegator];
-    uint256 undelegateAmount = amount;
-    if (amount > d.channelAmount) {
-      undelegateAmount = d.channelAmount;
-      d.channelAmount = 0;
-    } else {
-      d.channelAmount -= amount;
-    }
-    if (undelegateAmount != 0) {
-      IChannel(CHANNEL_ADDR).onUndelegateCoin(delegator, undelegateAmount);
-    }
-
     return amount;
   }
 

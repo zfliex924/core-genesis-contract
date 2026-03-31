@@ -8,8 +8,8 @@ import "./lib/SatoshiPlusHelper.sol";
 import "./interface/IAgent.sol";
 import "./interface/IZecAgent.sol";
 import "./interface/ILightClient.sol";
-import "./interface/ICandidateHub.sol";
 import "./interface/IStakeHub.sol";
+import "./interface/IChannel.sol";
 import "./interface/IParamSubscriber.sol";
 import "./lib/Address.sol";
 import "./System.sol";
@@ -25,12 +25,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   using TypedMemView for bytes29;
   using TypedMemView for uint256;
 
-  // ZEC decimal: 1 ZEC = 1e8 zatoshi
-  uint256 public constant ZEC_DECIMAL = 1e8;
-  uint256 public constant DENOMINATOR = 10000;
 
-  // OP_RETURN magic for ZEC staking
-  uint32 public constant ZEC_STAKE_MAGIC = 0x5A45432b; // "ZEC+"
 
   // Confirmation blocks for ZEC (24 blocks ≈ 30 minutes)
   uint32 public constant ZEC_CONFIRM_BLOCK = 24;
@@ -72,7 +67,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   // Dual staking weight grades
   struct DualStakingGrade {
     uint256 ratio;        // nativeToken / zecAmount threshold (scaled by 1e18)
-    uint256 multiplier;   // weight multiplier (DENOMINATOR = 10000 = 1.0x)
+    uint256 multiplier;   // weight multiplier (SatoshiPlusHelper.DENOMINATOR = 10000 = 1.0x)
   }
 
   // Round tag
@@ -145,9 +140,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint32 outputIndex;
     {
       (,,bytes29 _voutView,) = zecTx.extractTx();
-      (zecAmount, outputIndex, delegator, candidate) = _parseVout(_voutView, script);
+      uint32 version;
+      (zecAmount, outputIndex, delegator, candidate, version) = _parseVout(_voutView, script);
       require(zecAmount != 0, "staked value is zero");
-      require(ICandidateHub(CANDIDATE_HUB_ADDR).canDelegate(candidate), "inactive candidate");
       require(IRelayerHub(RELAYER_HUB_ADDR).isRelayer(msg.sender), "only relayer can submit");
 
       zecTxMap[txid] = ZecTx({
@@ -157,6 +152,13 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
         lockTime: lockTime,
         usedHeight: 0
       });
+
+      // Channel version: delegator becomes Channel address, notify Channel
+      address realDelegator = delegator;
+      if (version == SatoshiPlusHelper.SATOSHI_STAKE_CHANNEL_VERSION) {
+        delegator = CHANNEL_ADDR;
+        IChannel(CHANNEL_ADDR).onZecStake(realDelegator, txid, candidate);
+      }
 
       emit delegated(txid, candidate, delegator, script, outputIndex, zecAmount);
     }
@@ -246,7 +248,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       if (len > 0) {
         historyReward = accruedRewardPerZECMap[validators[i]][cs.continuousRewardEndRounds[len - 1]];
       }
-      uint256 perZecReward = historyReward + rewardList[i] * ZEC_DECIMAL / cs.stakedAmount;
+      uint256 perZecReward = historyReward + rewardList[i] * SatoshiPlusHelper.ZEC_DECIMAL / cs.stakedAmount;
       accruedRewardPerZECMap[validators[i]][round] = perZecReward;
 
       if (len > 0 && cs.continuousRewardEndRounds[len - 1] == round - 1) {
@@ -331,7 +333,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   function _parseVout(
     bytes29 _voutView,
     bytes memory _script
-  ) internal pure returns (uint64 zecAmount, uint32 outputIndex, address delegator, address candidate) {
+  ) internal pure returns (uint64 zecAmount, uint32 outputIndex, address delegator, address candidate, uint32 version) {
     _voutView.assertType(uint40(BitcoinHelper.BTCTypes.Vout));
     uint256 _numberOfOutputs = uint256(_voutView.indexCompactInt(0));
     bool opreturn;
@@ -358,7 +360,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
           outputIndex = uint32(idx);
         }
       } else {
-        (delegator, candidate) = _parsePayload(_arbitraryData);
+        (delegator, candidate, version) = _parsePayload(_arbitraryData);
         opreturn = true;
       }
     }
@@ -367,9 +369,10 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   }
 
   /// Parse OP_RETURN payload: <magic:4> <version:1> <delegator:20> <candidate:20>
-  function _parsePayload(bytes29 payload) internal pure returns (address delegator, address candidate) {
+  function _parsePayload(bytes29 payload) internal pure returns (address delegator, address candidate, uint32 version) {
     require(payload.len() >= 45, "payload too small");
-    require(payload.indexUint(0, 4) == ZEC_STAKE_MAGIC, "wrong magic");
+    require(payload.indexUint(0, 4) == SatoshiPlusHelper.SATOSHI_MAGIC, "wrong magic");
+    version = uint32(payload.indexUint(4, 1));
     delegator = payload.indexAddress(5);
     candidate = payload.indexAddress(25);
   }
@@ -413,11 +416,11 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 accruedAtStart = _getAccruedReward(candidate, drRound);
     if (accruedAtSettle <= accruedAtStart) return (0, expired);
 
-    reward = (accruedAtSettle - accruedAtStart) * ztx.amount / ZEC_DECIMAL;
+    reward = (accruedAtSettle - accruedAtStart) * ztx.amount / SatoshiPlusHelper.ZEC_DECIMAL;
 
     // Apply dual staking multiplier
     if (dualStakeAmount > 0) {
-      reward = reward * _getDualStakingMultiplier(dualStakeAmount, ztx.amount) / DENOMINATOR;
+      reward = reward * _getDualStakingMultiplier(dualStakeAmount, ztx.amount) / SatoshiPlusHelper.DENOMINATOR;
     }
 
     // Update receipt round
@@ -428,9 +431,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
   /// Get dual staking weight multiplier based on nativeToken/ZEC ratio
   function _getDualStakingMultiplier(uint256 nativeAmount, uint64 zecAmount) internal view returns (uint256) {
-    if (nativeAmount == 0 || zecAmount == 0) return DENOMINATOR;
+    if (nativeAmount == 0 || zecAmount == 0) return SatoshiPlusHelper.DENOMINATOR;
     uint256 ratio = nativeAmount * 1e18 / zecAmount;
-    uint256 multiplier = DENOMINATOR;
+    uint256 multiplier = SatoshiPlusHelper.DENOMINATOR;
     for (uint256 i = dualStakingGrades.length; i > 0; --i) {
       if (ratio >= dualStakingGrades[i - 1].ratio) {
         multiplier = dualStakingGrades[i - 1].multiplier;

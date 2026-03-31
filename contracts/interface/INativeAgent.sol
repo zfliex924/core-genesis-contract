@@ -4,8 +4,7 @@ pragma solidity 0.8.4;
 import "./IAgent.sol";
 
 interface INativeAgent is IAgent {
-  /// @param candidate the validator candidate address
-  /// @param delegator the delegator address
-  /// @param channelId the channel id
-  function proxyDelegate(address candidate, address delegator, uint32 channelId) external payable;
+  function delegateCoin(address candidate) external payable;
+  function undelegateCoin(address candidate, uint256 amount) external;
+  function transferCoin(address sourceCandidate, address targetCandidate, uint256 amount) external;
 }
