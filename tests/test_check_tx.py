@@ -15,15 +15,15 @@ def teardown_module():
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_up(system_reward, btc_light_client):
+def set_up(system_reward, zec_light_client):
     register_relayer()
     # deposit to system reward contract
     accounts[0].transfer(system_reward.address, Web3.to_wei(10, 'ether'))
     # set store block header gas price
     global store_block_header_tx_gas_price
-    store_block_header_tx_gas_price = btc_light_client.storeBlockGasPrice()
+    store_block_header_tx_gas_price = zec_light_client.storeBlockGasPrice()
     if store_block_header_tx_gas_price == 0:
-        store_block_header_tx_gas_price = btc_light_client.INIT_STORE_BLOCK_GAS_PRICE()
+        store_block_header_tx_gas_price = zec_light_client.INIT_STORE_BLOCK_GAS_PRICE()
     gas_price(store_block_header_tx_gas_price)
 
 
@@ -1474,64 +1474,64 @@ def get_intermediate_nodes(txids, tx_index: int):
     return intermediate_nodes
 
 
-def test_check_tx_proof_not_confirm(btc_light_client):
-    chain_tip = btc_light_client.getChainTip()
-    idx = btc_light_client.getHeight(chain_tip) - btc_light_client.INIT_CHAIN_HEIGHT()
+def test_check_tx_proof_not_confirm(zec_light_client):
+    chain_tip = zec_light_client.getChainTip()
+    idx = zec_light_client.getHeight(chain_tip) - zec_light_client.INIT_CHAIN_HEIGHT()
 
     for _ in range(0, 6):
-        btc_light_client.storeBlockHeader(btc_block_data[idx])
+        zec_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
 
     nodes = get_intermediate_nodes(txids, 0)
     nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-    result = btc_light_client.checkTxProof(txids[0], 717700, 5, nodes, 0)
+    result = zec_light_client.checkTxProof(txids[0], 717700, 5, nodes, 0)
     assert result is False
 
 
-def test_check_tx_proof_success(btc_light_client):
-    chain_tip = btc_light_client.getChainTip()
-    idx = btc_light_client.getHeight(chain_tip) - btc_light_client.INIT_CHAIN_HEIGHT()
+def test_check_tx_proof_success(zec_light_client):
+    chain_tip = zec_light_client.getChainTip()
+    idx = zec_light_client.getHeight(chain_tip) - zec_light_client.INIT_CHAIN_HEIGHT()
 
     for _ in range(0, 6):
-        btc_light_client.storeBlockHeader(btc_block_data[idx])
+        zec_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
     for i in range(len(txids)):
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        assert btc_light_client.checkTxProof(txids[i], 717700, 2, nodes, i)
+        assert zec_light_client.checkTxProof(txids[i], 717700, 2, nodes, i)
     for _ in range(6, 10):
-        btc_light_client.storeBlockHeader(btc_block_data[idx])
+        zec_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
     for i in range(len(txids)):
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        assert btc_light_client.checkTxProof(txids[i], 717700, 7, nodes, i) is False
+        assert zec_light_client.checkTxProof(txids[i], 717700, 7, nodes, i) is False
 
 
 @pytest.mark.parametrize("confirm_block", [4, 5, 6, 7])
-def test_update_confirm_block_and_check_tx_proof(btc_light_client, confirm_block):
-    chain_tip = btc_light_client.getChainTip()
-    idx = btc_light_client.getHeight(chain_tip) - btc_light_client.INIT_CHAIN_HEIGHT()
+def test_update_confirm_block_and_check_tx_proof(zec_light_client, confirm_block):
+    chain_tip = zec_light_client.getChainTip()
+    idx = zec_light_client.getHeight(chain_tip) - zec_light_client.INIT_CHAIN_HEIGHT()
     height = 717706
     for _ in range(0, 10):
-        btc_light_client.storeBlockHeader(btc_block_data[idx])
+        zec_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
-    assert btc_light_client.getChainTipHeight() == height
+    assert zec_light_client.getChainTipHeight() == height
     for i in range(len(txids)):
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
         check_tx_proof = True
         if confirm_block > 6:
             check_tx_proof = False
-        assert btc_light_client.checkTxProof(txids[i], 717700, confirm_block, nodes, i) is check_tx_proof
+        assert zec_light_client.checkTxProof(txids[i], 717700, confirm_block, nodes, i) is check_tx_proof
 
 
-def test_check_tx_proof_fail(btc_light_client):
-    chain_tip = btc_light_client.getChainTip()
-    idx = btc_light_client.getHeight(chain_tip) - btc_light_client.INIT_CHAIN_HEIGHT()
+def test_check_tx_proof_fail(zec_light_client):
+    chain_tip = zec_light_client.getChainTip()
+    idx = zec_light_client.getHeight(chain_tip) - zec_light_client.INIT_CHAIN_HEIGHT()
 
     for _ in range(0, 6):
-        btc_light_client.storeBlockHeader(btc_block_data[idx])
+        zec_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
 
     for i in range(len(txids)):
@@ -1540,7 +1540,7 @@ def test_check_tx_proof_fail(btc_light_client):
             j = random.randint(0, len(txids) - 1)
         nodes = get_intermediate_nodes(txids, j)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        assert not btc_light_client.checkTxProof(txids[i], 717700, 2, nodes, i)
+        assert not zec_light_client.checkTxProof(txids[i], 717700, 2, nodes, i)
 
     for i in range(len(txids)):
         j = i
@@ -1548,7 +1548,7 @@ def test_check_tx_proof_fail(btc_light_client):
             j = random.randint(0, len(txids) - 1)
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        assert not btc_light_client.checkTxProof(txids[j], 717700, 2, nodes, i)
+        assert not zec_light_client.checkTxProof(txids[j], 717700, 2, nodes, i)
 
     for i in range(len(txids)):
         j = i
@@ -1556,31 +1556,31 @@ def test_check_tx_proof_fail(btc_light_client):
             j = random.randint(0, len(txids) - 1)
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        assert not btc_light_client.checkTxProof(txids[i], 717700, 2, nodes, j)
+        assert not zec_light_client.checkTxProof(txids[i], 717700, 2, nodes, j)
 
 
-def test_check_tx_proof_and_get_time_success(btc_light_client):
-    chain_tip = btc_light_client.getChainTip()
-    idx = btc_light_client.getHeight(chain_tip) - btc_light_client.INIT_CHAIN_HEIGHT()
+def test_check_tx_proof_and_get_time_success(zec_light_client):
+    chain_tip = zec_light_client.getChainTip()
+    idx = zec_light_client.getHeight(chain_tip) - zec_light_client.INIT_CHAIN_HEIGHT()
 
     for _ in range(0, 6):
-        btc_light_client.storeBlockHeader(btc_block_data[idx])
+        zec_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
 
     for i in range(len(txids)):
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        result, block_time = btc_light_client.checkTxProofAndGetTime(txids[i], 717700, 2, nodes, i)
+        result, block_time = zec_light_client.checkTxProofAndGetTime(txids[i], 717700, 2, nodes, i)
         assert result
         assert block_time == json.loads(data)['time']
 
 
-def test_check_tx_proof_and_get_time_fail(btc_light_client):
-    chain_tip = btc_light_client.getChainTip()
-    idx = btc_light_client.getHeight(chain_tip) - btc_light_client.INIT_CHAIN_HEIGHT()
+def test_check_tx_proof_and_get_time_fail(zec_light_client):
+    chain_tip = zec_light_client.getChainTip()
+    idx = zec_light_client.getHeight(chain_tip) - zec_light_client.INIT_CHAIN_HEIGHT()
 
     for _ in range(0, 6):
-        btc_light_client.storeBlockHeader(btc_block_data[idx])
+        zec_light_client.storeBlockHeader(btc_block_data[idx])
         idx += 1
 
     for i in range(len(txids)):
@@ -1589,7 +1589,7 @@ def test_check_tx_proof_and_get_time_fail(btc_light_client):
             j = random.randint(0, len(txids) - 1)
         nodes = get_intermediate_nodes(txids, j)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        result, block_time = btc_light_client.checkTxProofAndGetTime(txids[i], 717700, 2, nodes, i)
+        result, block_time = zec_light_client.checkTxProofAndGetTime(txids[i], 717700, 2, nodes, i)
         assert not result
         assert block_time == 0
 
@@ -1599,7 +1599,7 @@ def test_check_tx_proof_and_get_time_fail(btc_light_client):
             j = random.randint(0, len(txids) - 1)
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        result, block_time = btc_light_client.checkTxProofAndGetTime(txids[j], 717700, 2, nodes, i)
+        result, block_time = zec_light_client.checkTxProofAndGetTime(txids[j], 717700, 2, nodes, i)
         assert not result
         assert block_time == 0
 
@@ -1609,6 +1609,6 @@ def test_check_tx_proof_and_get_time_fail(btc_light_client):
             j = random.randint(0, len(txids) - 1)
         nodes = get_intermediate_nodes(txids, i)
         nodes = ['0x' + binascii.hexlify(node).decode('utf8') for node in nodes]
-        result, block_time = btc_light_client.checkTxProofAndGetTime(txids[i], 717700, 2, nodes, j)
+        result, block_time = zec_light_client.checkTxProofAndGetTime(txids[i], 717700, 2, nodes, j)
         assert not result
         assert block_time == 0

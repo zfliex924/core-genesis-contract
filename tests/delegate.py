@@ -220,7 +220,7 @@ def set_block_time_stamp(timestamp, stake_lock_time, time_type='day'):
     else:
         timestamp = timestamp * Utils.MONTH_TIMESTAMP
         time1 = stake_lock_time - timestamp
-    BtcLightClientMock[0].setCheckResult(True, time1)
+    ZcashLightClientMock[0].setCheckResult(True, time1)
 
 
 def set_last_round_tag(stake_round, time0=None):

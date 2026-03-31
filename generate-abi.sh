@@ -3,7 +3,7 @@ if [ ! -z "$name" ]; then
 	echo "$name"
 	solc @openzeppelin/=$(pwd)/node_modules/@openzeppelin/ --optimize --overwrite --abi -o ./abi contracts/${name}.sol
 else
-  contracts=( "BtcLightClient" "CandidateHub" "Foundation" "GovHub" \
+  contracts=( "CandidateHub" "Foundation" "GovHub" \
     "RelayerHub" "SlashIndicator" "SystemReward" "ValidatorSet" \
     "HashPowerAgent" "NativeAgent" \
     "StakeHub" "Channel" "Configuration")

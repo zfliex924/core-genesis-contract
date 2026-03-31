@@ -13,7 +13,6 @@ contract System {
   address public VALIDATOR_CONTRACT_ADDR;
   address public SLASH_CONTRACT_ADDR;
   address public SYSTEM_REWARD_ADDR;
-  address public LIGHT_CLIENT_ADDR;
   address public RELAYER_HUB_ADDR;
   address public CANDIDATE_HUB_ADDR;
   address public GOV_HUB_ADDR;
@@ -31,7 +30,6 @@ contract System {
     address validator;
     address slash;
     address systemReward;
-    address lightClient;
     address relayerHub;
     address candidateHub;
     address govHub;
@@ -51,7 +49,6 @@ contract System {
     VALIDATOR_CONTRACT_ADDR = systemContractAddr.validator;
     SLASH_CONTRACT_ADDR = systemContractAddr.slash;
     SYSTEM_REWARD_ADDR = systemContractAddr.systemReward;
-    LIGHT_CLIENT_ADDR = systemContractAddr.lightClient;
     RELAYER_HUB_ADDR = systemContractAddr.relayerHub;
     CANDIDATE_HUB_ADDR = systemContractAddr.candidateHub;
     GOV_HUB_ADDR = systemContractAddr.govHub;

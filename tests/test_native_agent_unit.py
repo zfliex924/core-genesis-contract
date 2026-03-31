@@ -11,7 +11,7 @@ MIN_INIT_DELEGATE_VALUE = 0
 CANDIDATE_REGISTER_MARGIN = 0
 candidate_hub_instance = None
 core_agent_instance = None
-btc_light_client_instance = None
+zec_light_client_instance = None
 required_coin_deposit = 0
 TX_FEE = Web3.to_wei(1, 'ether')
 # the tx fee is 1 ether
@@ -21,20 +21,20 @@ BLOCK_REWARD = 0
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_up(min_init_delegate_value, core_agent, candidate_hub, btc_light_client, validator_set, stake_hub):
+def set_up(min_init_delegate_value, core_agent, candidate_hub, zec_light_client, validator_set, stake_hub):
     global MIN_INIT_DELEGATE_VALUE
     global CANDIDATE_REGISTER_MARGIN
     global candidate_hub_instance
     global core_agent_instance
     global required_coin_deposit
-    global btc_light_client_instance
+    global zec_light_client_instance
     global actual_block_reward
     global COIN_REWARD
     global BLOCK_REWARD
 
     candidate_hub_instance = candidate_hub
     core_agent_instance = core_agent
-    btc_light_client_instance = btc_light_client
+    zec_light_client_instance = zec_light_client
     MIN_INIT_DELEGATE_VALUE = min_init_delegate_value
     CANDIDATE_REGISTER_MARGIN = candidate_hub.requiredMargin()
     required_coin_deposit = core_agent.requiredCoinDeposit()

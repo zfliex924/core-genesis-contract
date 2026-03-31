@@ -172,7 +172,6 @@ def get_block_info(height='latest'):
 
 def update_system_contract_address(update_contract,
                                    candidate_hub=None,
-                                   btc_light_client=None,
                                    gov_hub=None,
                                    relay_hub=None,
                                    slash_indicator=None,
@@ -190,8 +189,6 @@ def update_system_contract_address(update_contract,
                                    ):
     if candidate_hub is None:
         candidate_hub = CandidateHubMock[0]
-    if btc_light_client is None:
-        btc_light_client = BtcLightClientMock[0]
     if gov_hub is None:
         gov_hub = GovHubMock[0]
     if relay_hub is None:
@@ -221,7 +218,7 @@ def update_system_contract_address(update_contract,
     if zec_agent is None:
         zec_agent = ZecAgentMock[0]
     contracts = [
-        validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
+        validator_set, slash_indicator, system_reward, relay_hub, candidate_hub, gov_hub,
         burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
         zec_light_client, zec_agent
     ]

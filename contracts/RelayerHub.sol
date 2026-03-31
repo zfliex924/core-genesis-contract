@@ -61,7 +61,7 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
 
   modifier onlyLightClient() {
     require(
-      msg.sender == LIGHT_CLIENT_ADDR || msg.sender == ZEC_LIGHT_CLIENT_ADDR,
+      msg.sender == ZEC_LIGHT_CLIENT_ADDR,
       "the sender must be a light client contract"
     );
     _;

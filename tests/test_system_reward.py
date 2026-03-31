@@ -459,10 +459,10 @@ def test_receive_token_success(system_reward):
     assert len(tx.events.keys()) == 0
 
 
-def test_is_operator_works(system_reward, btc_light_client):
+def test_is_operator_works(system_reward, zec_light_client):
     for account in accounts[:5]:
         assert system_reward.isOperator(account) is False
-    assert system_reward.isOperator(btc_light_client.address) is True
+    assert system_reward.isOperator(zec_light_client.address) is True
 
 
 def test_claim_reward_success(system_reward):

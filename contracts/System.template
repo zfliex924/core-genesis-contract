@@ -13,7 +13,6 @@ contract System {
   address public VALIDATOR_CONTRACT_ADDR;
   address public SLASH_CONTRACT_ADDR;
   address public SYSTEM_REWARD_ADDR;
-  address public LIGHT_CLIENT_ADDR;
   address public RELAYER_HUB_ADDR;
   address public CANDIDATE_HUB_ADDR;
   address public GOV_HUB_ADDR;
@@ -31,7 +30,6 @@ contract System {
     address validator;
     address slash;
     address systemReward;
-    address lightClient;
     address relayerHub;
     address candidateHub;
     address govHub;
@@ -51,7 +49,6 @@ contract System {
     VALIDATOR_CONTRACT_ADDR = systemContractAddr.validator;
     SLASH_CONTRACT_ADDR = systemContractAddr.slash;
     SYSTEM_REWARD_ADDR = systemContractAddr.systemReward;
-    LIGHT_CLIENT_ADDR = systemContractAddr.lightClient;
     RELAYER_HUB_ADDR = systemContractAddr.relayerHub;
     CANDIDATE_HUB_ADDR = systemContractAddr.candidateHub;
     GOV_HUB_ADDR = systemContractAddr.govHub;
@@ -74,7 +71,7 @@ contract System {
   address public constant VALIDATOR_CONTRACT_ADDR = 0x0000000000000000000000000000000000001000;
   address public constant SLASH_CONTRACT_ADDR = 0x0000000000000000000000000000000000001001;
   address public constant SYSTEM_REWARD_ADDR = 0x0000000000000000000000000000000000001002;
-  address public constant LIGHT_CLIENT_ADDR = 0x0000000000000000000000000000000000001003;
+  // 0x0000000000000000000000000000000000001003 deprecated (BtcLightClient removed)
   address public constant RELAYER_HUB_ADDR = 0x0000000000000000000000000000000000001004;
   address public constant CANDIDATE_HUB_ADDR = 0x0000000000000000000000000000000000001005;
   address public constant GOV_HUB_ADDR = 0x0000000000000000000000000000000000001006;

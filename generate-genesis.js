@@ -23,7 +23,6 @@ program.option("--initConsensusStateBytes <initConsensusStateBytes>",
 require("./generate-lib");
 require("./generate-system");
 require("./generate-validatorset");
-require("./generate-btclightclient");
 require("./generate-govhub");
 
 program.version("0.0.1")
@@ -93,11 +92,6 @@ Promise.all([
       "slashContract",
       "contracts/SlashIndicator.sol",
       "SlashIndicator"
-  ),
-  compileContract(
-      "btcLightClient",
-      "contracts/BtcLightClient.sol",
-      "BtcLightClient"
   ),
   compileContract(
       "relayerHub",

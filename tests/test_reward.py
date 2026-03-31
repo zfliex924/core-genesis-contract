@@ -78,11 +78,11 @@ class StateMachine:
     is_turn_round = strategy('bool')
     operate_count = strategy('uint', min_value=10, max_value=20)
 
-    def __init__(self, candidate_hub, validator_set, btc_light_client, slash_indicator,
+    def __init__(self, candidate_hub, validator_set, zec_light_client, slash_indicator,
                  stake_hub, core_agent, relay_hub, gov_hub):
         self.candidate_hub = candidate_hub
         self.validator_set = validator_set
-        self.btc_light_client = btc_light_client
+        self.zec_light_client = zec_light_client
         self.slash_indicator = slash_indicator
         self.stake_hub = stake_hub
         self.relay_hub = relay_hub
@@ -105,7 +105,7 @@ class StateMachine:
         random.seed(time.time_ns())
         self.delegate = {}
         self.candidate_hub.setControlRoundTimeTag(True)
-        self.btc_light_client.setCheckResult(True, 0)
+        self.zec_light_client.setCheckResult(True, 0)
         self.candidate_hub.setRoundTag(7)
         self.candidate_hub.setValidatorCount(21)
         old_turn_round()
@@ -310,13 +310,13 @@ class StateMachine:
                 agents_map[operator]['coin'] += core_amount
 
 
-def test_stateful(state_machine, candidate_hub, validator_set, btc_light_client, slash_indicator,
+def test_stateful(state_machine, candidate_hub, validator_set, zec_light_client, slash_indicator,
                   stake_hub, core_agent, relay_hub, gov_hub):
     state_machine(
         StateMachine,
         candidate_hub,
         validator_set,
-        btc_light_client,
+        zec_light_client,
         slash_indicator,
         stake_hub,
         core_agent,

@@ -22,7 +22,7 @@ TOTAL_REWARD = 0
 
 
 @pytest.fixture(scope="module", autouse=True)
-def set_up(min_init_delegate_value, core_agent, candidate_hub, btc_light_client, validator_set):
+def set_up(min_init_delegate_value, core_agent, candidate_hub, zec_light_client, validator_set):
     global MIN_INIT_DELEGATE_VALUE
     global CANDIDATE_REGISTER_MARGIN
     global candidate_hub_instance

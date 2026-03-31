@@ -40,7 +40,7 @@ def set_candidate():
     return consensus, operator
 
 
-def test_distribute_power_reward_during_turn_round(core_agent, hash_power_agent, stake_hub, btc_light_client,
+def test_distribute_power_reward_during_turn_round(core_agent, hash_power_agent, stake_hub, zec_light_client,
                                                    candidate_hub):
     round_time_tag = 7
     candidate_hub.setControlRoundTimeTag(True)
@@ -57,8 +57,8 @@ def test_distribute_power_reward_during_turn_round(core_agent, hash_power_agent,
     core_agent.delegateCoin(operators[0], {"value": MIN_INIT_DELEGATE_VALUE * 4, "from": clients[1]})
     core_agent.delegateCoin(operators[1], {"value": MIN_INIT_DELEGATE_VALUE * 9, "from": clients[2]})
     round_time_tag = candidate_hub.roundTag() - 6
-    btc_light_client.setMiners(round_time_tag, operators[0], [clients[0]] * 2 + [clients[1]])
-    btc_light_client.setMiners(round_time_tag, operators[1], [clients[2]] * 2)
+    zec_light_client.setMiners(round_time_tag, operators[0], [clients[0]] * 2 + [clients[1]])
+    zec_light_client.setMiners(round_time_tag, operators[1], [clients[2]] * 2)
     turn_round()
     tracker0 = get_tracker(clients[0])
     tracker1 = get_tracker(clients[1])
@@ -89,7 +89,7 @@ def test_distribute_power_reward_during_turn_round(core_agent, hash_power_agent,
     pytest.param(1, id="adjacent rounds"),
     pytest.param(2, id="spanning multiple rounds"),
 ])
-def test_delegate2one_agent_twice_in_different_rounds(candidate_hub, core_agent, btc_light_client, stake_hub,
+def test_delegate2one_agent_twice_in_different_rounds(candidate_hub, core_agent, zec_light_client, stake_hub,
                                                       set_candidate, hash_power_agent,
                                                       internal):
     round_time_tag = 7
@@ -102,7 +102,7 @@ def test_delegate2one_agent_twice_in_different_rounds(candidate_hub, core_agent,
     core_agent.delegateCoin(operator, {"value": MIN_INIT_DELEGATE_VALUE})
     turn_round(round_count=internal)
 
-    btc_light_client.setMiners(candidate_hub.roundTag() - 6, operator, [accounts[0]] * 100)
+    zec_light_client.setMiners(candidate_hub.roundTag() - 6, operator, [accounts[0]] * 100)
     _, _, account_rewards, _ = parse_delegation([{
         "address": operator,
         "active": True,
@@ -118,7 +118,7 @@ def test_delegate2one_agent_twice_in_different_rounds(candidate_hub, core_agent,
     assert tracker.delta() == account_rewards[accounts[0]]
 
 
-def test_scenario1(candidate_hub, core_agent, btc_light_client, stake_hub):
+def test_scenario1(candidate_hub, core_agent, zec_light_client, stake_hub):
     """
     round x delegate coin to N1, delegate power to N2, round x+2 claim reward
     """
@@ -131,8 +131,8 @@ def test_scenario1(candidate_hub, core_agent, btc_light_client, stake_hub):
 
     round_tag = candidate_hub.roundTag() - 7
 
-    btc_light_client.setMiners(round_tag + 1, accounts[2], [accounts[0]])
-    btc_light_client.setMiners(round_tag + 2, accounts[2], [accounts[0]])
+    zec_light_client.setMiners(round_tag + 1, accounts[2], [accounts[0]])
+    zec_light_client.setMiners(round_tag + 2, accounts[2], [accounts[0]])
     core_agent.delegateCoin(accounts[1], {'value': MIN_INIT_DELEGATE_VALUE, 'from': accounts[0]})
 
     _, _, account_rewards, _ = parse_delegation([{
@@ -157,7 +157,7 @@ def test_scenario1(candidate_hub, core_agent, btc_light_client, stake_hub):
     assert tracker.delta() == account_rewards[accounts[0]]
 
 
-def test_scenario2(candidate_hub, core_agent, btc_light_client, stake_hub):
+def test_scenario2(candidate_hub, core_agent, zec_light_client, stake_hub):
     """
     round x delegate coin to N1, round x+1 delegate power to N2, round x+3 claim reward
     """
@@ -172,8 +172,8 @@ def test_scenario2(candidate_hub, core_agent, btc_light_client, stake_hub):
     turn_round()
 
     round_tag = candidate_hub.roundTag() - 7
-    btc_light_client.setMiners(round_tag + 1, accounts[2], [accounts[0]])
-    btc_light_client.setMiners(round_tag + 2, accounts[2], [accounts[0]])
+    zec_light_client.setMiners(round_tag + 1, accounts[2], [accounts[0]])
+    zec_light_client.setMiners(round_tag + 2, accounts[2], [accounts[0]])
     turn_round()
 
     _, _, account_rewards, _ = parse_delegation([{
@@ -197,7 +197,7 @@ def test_scenario2(candidate_hub, core_agent, btc_light_client, stake_hub):
     assert tracker.delta() == account_rewards[accounts[0]]
 
 
-def test_scenario3(candidate_hub, core_agent, stake_hub, btc_light_client, hash_power_agent):
+def test_scenario3(candidate_hub, core_agent, stake_hub, zec_light_client, hash_power_agent):
     """
     round x delegate coin to N1,
     round x+1 delegate power to N2,
@@ -219,9 +219,9 @@ def test_scenario3(candidate_hub, core_agent, stake_hub, btc_light_client, hash_
 
     round_tag = candidate_hub.roundTag() - 7
 
-    btc_light_client.setMiners(round_tag, operators[1], [accounts[0]])
+    zec_light_client.setMiners(round_tag, operators[1], [accounts[0]])
     for i in range(0, 5):
-        btc_light_client.setMiners(round_tag + i, operators[1], [accounts[0]])
+        zec_light_client.setMiners(round_tag + i, operators[1], [accounts[0]])
 
     turn_round()
 
@@ -286,7 +286,7 @@ def test_scenario3(candidate_hub, core_agent, stake_hub, btc_light_client, hash_
     assert tracker.delta() == account_rewards[accounts[0]]
 
 
-def test_scenario4(candidate_hub, core_agent, validator_set, btc_light_client, stake_hub):
+def test_scenario4(candidate_hub, core_agent, validator_set, zec_light_client, stake_hub):
     """
     round
         x P1 delegate coin to N1, power to N2
@@ -307,8 +307,8 @@ def test_scenario4(candidate_hub, core_agent, validator_set, btc_light_client, s
 
     round_tag = candidate_hub.roundTag() - 7
     for i in range(0, 5):
-        btc_light_client.setMiners(round_tag + i, operators[1], [accounts[0]])
-        btc_light_client.setMiners(round_tag + i, operators[0], [accounts[1]] * 2)
+        zec_light_client.setMiners(round_tag + i, operators[1], [accounts[0]])
+        zec_light_client.setMiners(round_tag + i, operators[0], [accounts[1]] * 2)
 
     core_agent.delegateCoin(operators[0], {'value': MIN_INIT_DELEGATE_VALUE * 4, 'from': accounts[0]})
     core_agent.delegateCoin(operators[1], {'value': MIN_INIT_DELEGATE_VALUE, 'from': accounts[1]})
@@ -357,7 +357,7 @@ def test_scenario4(candidate_hub, core_agent, validator_set, btc_light_client, s
     assert tracker1.delta() == account_rewards[accounts[1]]
 
 
-def test_scenario5(candidate_hub, core_agent, validator_set, btc_light_client, stake_hub):
+def test_scenario5(candidate_hub, core_agent, validator_set, zec_light_client, stake_hub):
     """
     round X: N has power, delegate to A
     round X+1: A didn't become validator
@@ -375,7 +375,7 @@ def test_scenario5(candidate_hub, core_agent, validator_set, btc_light_client, s
     consensus2 = register_candidate(operator=operator)
 
     round_time_tag = candidate_hub.roundTag() - 6
-    btc_light_client.setMiners(round_time_tag, operator, [accounts[0]])
+    zec_light_client.setMiners(round_time_tag, operator, [accounts[0]])
 
     candidate_hub.refuseDelegate({'from': operator})
     turn_round()
@@ -451,7 +451,7 @@ def test_scenario6(candidate_hub, core_agent, validator_set, stake_hub):
     assert tracker.delta() == BLOCK_REWARD // 2 * 3 - MIN_INIT_DELEGATE_VALUE
 
 
-def test_scenario7(core_agent, btc_light_client, candidate_hub, set_candidate, stake_hub):
+def test_scenario7(core_agent, zec_light_client, candidate_hub, set_candidate, stake_hub):
     """
     round X: N has power, delegate to A
     round X+1: N has not power
@@ -461,7 +461,7 @@ def test_scenario7(core_agent, btc_light_client, candidate_hub, set_candidate, s
     candidate_hub.setControlRoundTimeTag(True)
     candidate_hub.setRoundTag(round_time_tag)
 
-    btc_light_client.setMiners(candidate_hub.roundTag() - 6, accounts[1], [accounts[0]])
+    zec_light_client.setMiners(candidate_hub.roundTag() - 6, accounts[1], [accounts[0]])
     consensus, operator = set_candidate
     turn_round()
     turn_round([consensus], tx_fee=TX_FEE)

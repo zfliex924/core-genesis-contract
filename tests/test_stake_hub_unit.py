@@ -9,7 +9,7 @@ MIN_INIT_DELEGATE_VALUE = 0
 CANDIDATE_REGISTER_MARGIN = 0
 candidate_hub_instance = None
 core_agent_instance = None
-btc_light_client_instance = None
+zec_light_client_instance = None
 required_coin_deposit = 0
 TX_FEE = Web3.to_wei(1, 'ether')
 # the tx fee is 1 ether
@@ -30,13 +30,13 @@ def set_candidate():
 
 @pytest.fixture(scope="module", autouse=True)
 def set_up(min_init_delegate_value, core_agent, candidate_hub, hash_power_agent,
-           btc_light_client, validator_set, stake_hub, system_reward, gov_hub):
+           zec_light_client, validator_set, stake_hub, system_reward, gov_hub):
     global MIN_INIT_DELEGATE_VALUE
     global CANDIDATE_REGISTER_MARGIN
     global candidate_hub_instance
     global core_agent_instance
     global required_coin_deposit
-    global btc_light_client_instance
+    global zec_light_client_instance
     global actual_block_reward
     global COIN_REWARD
     global BLOCK_REWARD
@@ -48,7 +48,7 @@ def set_up(min_init_delegate_value, core_agent, candidate_hub, hash_power_agent,
     GOV_HUB = gov_hub
     candidate_hub_instance = candidate_hub
     core_agent_instance = core_agent
-    btc_light_client_instance = btc_light_client
+    zec_light_client_instance = zec_light_client
     MIN_INIT_DELEGATE_VALUE = min_init_delegate_value
     CANDIDATE_REGISTER_MARGIN = candidate_hub.requiredMargin()
     required_coin_deposit = core_agent.requiredCoinDeposit()
@@ -90,7 +90,7 @@ def test_only_validator_can_call_add_round_reward(stake_hub):
                                  {'from': accounts[0], 'value': value_sum})
 
 
-def test_add_round_reward_success(validator_set, core_agent, btc_light_client, candidate_hub, stake_hub):
+def test_add_round_reward_success(validator_set, core_agent, zec_light_client, candidate_hub, stake_hub):
     round_tag = 100
     validators = [accounts[1], accounts[2]]
     reward_list = [1000, 2000]
@@ -99,7 +99,7 @@ def test_add_round_reward_success(validator_set, core_agent, btc_light_client, c
     core_value = 100
     for validator in validators:
         core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
-        btc_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
+        zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
     tx = validator_set.addRoundRewardMock(validators, reward_list, round_tag,
                                           {'from': accounts[0], 'value': value_sum})
@@ -107,7 +107,7 @@ def test_add_round_reward_success(validator_set, core_agent, btc_light_client, c
         assert len(round_reward['amount']) == len(validators)
 
 
-def test_no_stake_on_validator(validator_set, core_agent, btc_light_client, candidate_hub, stake_hub):
+def test_no_stake_on_validator(validator_set, core_agent, zec_light_client, candidate_hub, stake_hub):
     round_tag = 100
     validators = [accounts[1], accounts[2]]
     reward_list = [1000, 2000]
@@ -137,7 +137,7 @@ def test_add_round_reward_core_only(validator_set, core_agent, candidate_hub,
     assert tx.events['roundReward'][0]['amount'] == [r * 6000 // 11000 for r in reward_list]
 
 
-def test_reward_without_stake(validator_set, core_agent, btc_light_client, candidate_hub, stake_hub):
+def test_reward_without_stake(validator_set, core_agent, zec_light_client, candidate_hub, stake_hub):
     round_tag = 100
     validators = [accounts[1], accounts[2]]
     reward_list = [0, 0]
@@ -146,7 +146,7 @@ def test_reward_without_stake(validator_set, core_agent, btc_light_client, candi
     core_value = 100
     for validator in validators:
         core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
-        btc_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
+        zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
     tx = validator_set.addRoundRewardMock(validators, reward_list, round_tag,
                                           {'from': accounts[0], 'value': value_sum})
@@ -168,7 +168,7 @@ def test_only_candidate_can_call(validator_set, stake_hub):
     pytest.param({'add_core': 1e18, 'add_hash': 200}, id="core & hash"),
     pytest.param({'add_core': 0, 'add_hash': 0}, id="core & hash zero"),
 ])
-def test_get_hybrid_score_success(core_agent, btc_light_client, candidate_hub, stake_hub,
+def test_get_hybrid_score_success(core_agent, zec_light_client, candidate_hub, stake_hub,
                                   hash_power_agent, zec_agent, test):
     round_tag = 100
     validators = [accounts[1], accounts[2]]
@@ -178,13 +178,13 @@ def test_get_hybrid_score_success(core_agent, btc_light_client, candidate_hub, s
     values = [core_value, power_value, zec_value]
     for validator in validators[:1]:
         core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
-        btc_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
+        zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     tx = candidate_hub.getScoreMock(validators, round_tag)
     scores = tx.return_value
     assert scores[1] == 0
 
 
-def test_calculate_factor_success(core_agent, btc_light_client, candidate_hub, stake_hub,
+def test_calculate_factor_success(core_agent, zec_light_client, candidate_hub, stake_hub,
                                   hash_power_agent):
     round_tag = 100
     validators = [accounts[1]]
@@ -192,11 +192,11 @@ def test_calculate_factor_success(core_agent, btc_light_client, candidate_hub, s
     power_value = 200
     for validator in validators[:1]:
         core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
-        btc_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
+        zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
 
 
-def test_two_rounds_score_calculation_success(core_agent, btc_light_client, candidate_hub, stake_hub,
+def test_two_rounds_score_calculation_success(core_agent, zec_light_client, candidate_hub, stake_hub,
                                               hash_power_agent):
     round_tag = 100
     validators = [accounts[1]]
@@ -204,12 +204,12 @@ def test_two_rounds_score_calculation_success(core_agent, btc_light_client, cand
     power_value = 200
     for validator in validators[:1]:
         core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
-        btc_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
+        zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     candidate_hub.getScoreMock(validators, round_tag)
     candidate_hub.getScoreMock(validators, round_tag)
 
 
-def test_validators_score_calculation_success(core_agent, btc_light_client, candidate_hub, stake_hub,
+def test_validators_score_calculation_success(core_agent, zec_light_client, candidate_hub, stake_hub,
                                               hash_power_agent):
     round_tag = 100
     validators = [accounts[1], accounts[2]]
@@ -217,7 +217,7 @@ def test_validators_score_calculation_success(core_agent, btc_light_client, cand
     power_value = 200
     for validator in validators:
         core_agent.setCandidateMapAmount(validator, core_value, core_value, 0)
-        btc_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
+        zec_light_client.setMiners(round_tag - 7, validator, [accounts[0]] * power_value)
     tx = candidate_hub.getScoreMock(validators, round_tag)
     scores = tx.return_value
     assert len(scores) == len(validators)
@@ -285,7 +285,7 @@ def test_update_param_nonexistent_governance_param_reverts(stake_hub):
         stake_hub.updateParam('error', hex_value)
 
 
-def test_stake_hup_add_round_reward(stake_hub, validator_set, candidate_hub, core_agent, btc_light_client):
+def test_stake_hup_add_round_reward(stake_hub, validator_set, candidate_hub, core_agent, zec_light_client):
     turn_round()
     register_candidate(operator=accounts[1])
     register_candidate(operator=accounts[2])
@@ -353,7 +353,7 @@ def test_stake_hup_add_round_reward(stake_hub, validator_set, candidate_hub, cor
                 core_agent.setCandidateMapAmount(validator, v, v, 0)
         if 'add_pow' in test:
             for v1, v2 in test['add_pow']:
-                btc_light_client.setMiners(test['round'] - 7, v1, v2)
+                zec_light_client.setMiners(test['round'] - 7, v1, v2)
         tx = candidate_hub.getScoreMock(test['validators'], test['round'])
         if test['status'] == 'success':
             tx = validator_set.addRoundRewardMock(test['validators'], test['reward_list'], test['round'],
@@ -366,7 +366,7 @@ def test_stake_hup_add_round_reward(stake_hub, validator_set, candidate_hub, cor
                                                  {'from': accounts[0], 'value': value_sum})
 
 
-def test_stake_hup_get_hybrid_score(stake_hub, validator_set, candidate_hub, core_agent, btc_light_client):
+def test_stake_hup_get_hybrid_score(stake_hub, validator_set, candidate_hub, core_agent, zec_light_client):
     turn_round()
     register_candidate(operator=accounts[1])
     register_candidate(operator=accounts[2])
@@ -391,6 +391,6 @@ def test_stake_hup_get_hybrid_score(stake_hub, validator_set, candidate_hub, cor
                 core_agent.setCandidateMapAmount(validator, v, v, 0)
         if 'add_pow' in test:
             for v1, v2 in test['add_pow']:
-                btc_light_client.setMiners(test['round'] - 7, v1, v2)
+                zec_light_client.setMiners(test['round'] - 7, v1, v2)
         if test['status'] == 'success':
             tx = candidate_hub.getScoreMock(test['validators'], test['round'])

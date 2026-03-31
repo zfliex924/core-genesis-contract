@@ -51,15 +51,6 @@ def candidate_hub(accounts):
 
 
 @pytest.fixture(scope="module")
-def btc_light_client(accounts):
-    c = accounts[0].deploy(BtcLightClientMock)
-    c.init()
-    if is_development:
-        c.developmentInit()
-    return c
-
-
-@pytest.fixture(scope="module")
 def gov_hub(accounts):
     c = accounts[0].deploy(GovHubMock)
     c.init()
@@ -174,7 +165,6 @@ def test_lib_memory(accounts):
 @pytest.fixture(scope="module", autouse=True)
 def set_system_contract_address(
         candidate_hub,
-        btc_light_client,
         gov_hub,
         relay_hub,
         slash_indicator,
@@ -191,7 +181,7 @@ def set_system_contract_address(
         zec_agent
 ):
     contracts = [
-        validator_set, slash_indicator, system_reward, btc_light_client, relay_hub, candidate_hub, gov_hub,
+        validator_set, slash_indicator, system_reward, relay_hub, candidate_hub, gov_hub,
         burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
         zec_light_client, zec_agent
     ]
