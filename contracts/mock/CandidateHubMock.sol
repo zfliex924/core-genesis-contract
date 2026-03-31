@@ -138,7 +138,9 @@ contract CandidateHubMock is CandidateHub {
         uint32 commissionThousandths,
         bytes calldata voteAddr
     ) external payable onlyInit {
+        uint32 id = nextCandidateId++;
         candidateMap[operateAddr] = Candidate({
+            id: id,
             operateAddr: operateAddr,
             consensusAddr: consensusAddr,
             feeAddr: feeAddr,
@@ -152,6 +154,7 @@ contract CandidateHubMock is CandidateHub {
         });
         candidateList.push(operateAddr);
         operateMap[operateAddr] = true;
+        idMap[id] = operateAddr;
         consensusMap[consensusAddr] = operateAddr;
 
         emit registered(operateAddr, consensusAddr, feeAddr, commissionThousandths, msg.value, voteAddr);

@@ -42,8 +42,9 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   uint256 public maxAlternateCount;
   uint256 public roundTag;
 
-  /// @dev Unified candidate struct (replaces old Candidate + CandidateEx)
+  /// @dev Unified candidate struct
   struct Candidate {
+    uint32 id;
     address operateAddr;
     address consensusAddr;
     address payable feeAddr;
@@ -61,8 +62,12 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
   // Address list for enumeration
   address[] public candidateList;
 
+  // Auto-increment candidate ID
+  uint32 public nextCandidateId;
+
   // Reverse lookups
   mapping(address => bool) public operateMap;       // operator exists?
+  mapping(uint32 => address) public idMap;           // candidate id → operator addr
   mapping(address => address) public consensusMap;   // consensus addr → operator addr
   mapping(address => address) public agentMap;       // agent addr → operator addr
   mapping(address => uint256) public jailMap;        // operator addr → release round
@@ -92,6 +97,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     validatorCount = INIT_VALIDATOR_COUNT;
     maxCommissionChange = MAX_COMMISSION_CHANGE;
     roundTag = block.timestamp / SatoshiPlusHelper.ROUND_INTERVAL;
+    nextCandidateId = 1;
     alreadyInit = true;
   }
 
@@ -237,7 +243,9 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
       require(!BytesLib.equal(candidateMap[candidateList[i]].voteAddr, voteAddr), "vote address already exists");
     }
 
+    uint32 id = nextCandidateId++;
     candidateMap[msg.sender] = Candidate({
+      id: id,
       operateAddr: msg.sender,
       consensusAddr: consensusAddr,
       feeAddr: feeAddr,
@@ -251,6 +259,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     });
     candidateList.push(msg.sender);
     operateMap[msg.sender] = true;
+    idMap[id] = msg.sender;
     consensusMap[consensusAddr] = msg.sender;
 
     emit registered(msg.sender, consensusAddr, feeAddr, commissionThousandths, msg.value, voteAddr);
@@ -384,6 +393,7 @@ contract CandidateHub is ICandidateHub, System, IParamSubscriber {
     if (c.agent != address(0)) {
       delete agentMap[c.agent];
     }
+    delete idMap[c.id];
     delete consensusMap[c.consensusAddr];
     delete operateMap[operateAddr];
 
