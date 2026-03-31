@@ -3,7 +3,6 @@ pragma solidity 0.8.4;
 import "./System.sol";
 import "./interface/ISystemReward.sol";
 import "./interface/IParamSubscriber.sol";
-import "./interface/IBurn.sol";
 import "./lib/BytesLib.sol";
 import "./lib/Memory.sol";
 import "./lib/RLPDecode.sol";
@@ -80,7 +79,7 @@ contract SystemReward is System, ISystemReward, IParamSubscriber {
         }
         if (remain != 0) {
           if (isBurn) {
-            IBurn(BURN_ADDR).burn{ value: remain }();
+            payable(BURN_ADDR).transfer(remain);
           } else {
             payable(FOUNDATION_ADDR).transfer(remain);
           }

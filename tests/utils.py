@@ -205,7 +205,7 @@ def update_system_contract_address(update_contract,
     if validator_set is None:
         validator_set = ValidatorSetMock[0]
     if burn is None:
-        burn = Burn[0]
+        burn = accounts[98]
     if foundation is None:
         foundation = Foundation[0]
     if stake_hub is None:

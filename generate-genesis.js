@@ -115,11 +115,6 @@ Promise.all([
       "GovHub"
   ),
   compileContract(
-    "burn",
-    "contracts/Burn.sol",
-    "Burn"
-  ),
-  compileContract(
     "foundation",
     "contracts/Foundation.sol",
     "Foundation"

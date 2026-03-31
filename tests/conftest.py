@@ -103,9 +103,9 @@ def validator_set(accounts):
 
 @pytest.fixture(scope="module")
 def burn(accounts):
-    c = accounts[0].deploy(Burn)
-    c.init()
-    return c
+    # Burn contract removed; BURN_ADDR = address(0)
+    # Use a placeholder account for system contract address array ordering
+    return accounts[98]
 
 
 @pytest.fixture(scope="module")
@@ -211,7 +211,7 @@ def set_system_contract_address(
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
 
-    for c in contracts:
+    for c in [x for x in contracts if hasattr(x, 'updateContractAddr')]:
         getattr(c, "updateContractAddr")(args)
 
     candidate_hub.setControlRoundTimeTag(True)
