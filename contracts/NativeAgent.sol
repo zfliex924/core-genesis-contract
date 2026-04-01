@@ -207,15 +207,17 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     uint256 reward;
     if (roundTag >= stx.lockUntilRound) {
       // Lock completed → full reward at original multiplier
-      reward = _collectReward(stx, roundTag - 1);
+      reward = _collectReward(stx, roundTag - 1) + stx.reward;
     } else {
-      // Early exit → reward at minimum multiplier (1.0x)
+      // Early exit → all rewards (stored + new) discounted to minimum multiplier
       uint256 originalMul = stx.multiplier;
       stx.multiplier = SatoshiPlusHelper.DENOMINATOR;
-      reward = _collectReward(stx, roundTag - 1);
+      uint256 newReward = _collectReward(stx, roundTag - 1);
       stx.multiplier = originalMul; // restore for weighted cleanup
+      // Discount stored reward from full multiplier to minimum
+      uint256 storedReward = originalMul > 0 ? stx.reward * SatoshiPlusHelper.DENOMINATOR / originalMul : 0;
+      reward = newReward + storedReward;
     }
-    reward += stx.reward;
 
     Candidate storage c = candidateMap[candidate];
     c.realtimeAmount -= amount;
