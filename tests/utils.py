@@ -185,7 +185,8 @@ def update_system_contract_address(update_contract,
                                    configuration=None,
                                    channel=None,
                                    zec_light_client=None,
-                                   zec_agent=None
+                                   zec_agent=None,
+                                   grade_manager=None
                                    ):
     if candidate_hub is None:
         candidate_hub = CandidateHubMock[0]
@@ -217,10 +218,12 @@ def update_system_contract_address(update_contract,
         zec_light_client = ZcashLightClientMock[0]
     if zec_agent is None:
         zec_agent = ZecAgentMock[0]
+    if grade_manager is None:
+        grade_manager = GradeManagerMock[0]
     contracts = [
         validator_set, slash_indicator, system_reward, relay_hub, candidate_hub, gov_hub,
         burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
-        zec_light_client, zec_agent
+        zec_light_client, zec_agent, grade_manager
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
     getattr(update_contract, "updateContractAddr")(args)

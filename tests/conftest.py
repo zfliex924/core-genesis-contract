@@ -155,6 +155,12 @@ def zec_agent(accounts):
         c.developmentInit()
     return c
 
+@pytest.fixture(scope="module")
+def grade_manager(accounts):
+    c = accounts[0].deploy(GradeManagerMock)
+    c.init()
+    return c
+
 # test contract
 @pytest.fixture(scope="module")
 def test_lib_memory(accounts):
@@ -178,12 +184,13 @@ def set_system_contract_address(
         configuration,
         channel,
         zec_light_client,
-        zec_agent
+        zec_agent,
+        grade_manager
 ):
     contracts = [
         validator_set, slash_indicator, system_reward, relay_hub, candidate_hub, gov_hub,
         burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
-        zec_light_client, zec_agent
+        zec_light_client, zec_agent, grade_manager
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])
 

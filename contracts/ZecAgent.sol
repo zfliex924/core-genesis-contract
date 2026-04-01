@@ -10,6 +10,7 @@ import "./interface/IZecAgent.sol";
 import "./interface/ILightClient.sol";
 import "./interface/IStakeHub.sol";
 import "./interface/IChannel.sol";
+import "./interface/IGradeManager.sol";
 import "./interface/IParamSubscriber.sol";
 import "./lib/Address.sol";
 import "./System.sol";
@@ -30,8 +31,6 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   // Confirmation blocks for ZEC (24 blocks ≈ 30 minutes)
   uint32 public constant ZEC_CONFIRM_BLOCK = 24;
 
-  // Default parameters
-
   /// @dev ZEC transaction record for staking
   struct ZecTx {
     uint64 amount;           // ZEC amount in zatoshi
@@ -46,14 +45,18 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     address candidate;       // Validator candidate
     address delegator;       // Delegator EVM address
     uint256 round;           // Round when deposit was recorded
+    uint256 lockMultiplier;  // Time-based multiplier fixed at delegate time
+    uint256 dualMultiplier;  // Dual staking multiplier from GradeManager (updated on dualStake)
     uint256 dualStakeAmount; // Native Token amount for dual staking (0 = no dual stake)
     uint256 reward;          // Settled but unclaimed reward (from dualStake multiplier change)
   }
 
   /// @dev Per-candidate staking state
   struct CandidateState {
-    uint256 stakedAmount;    // Snapshotted amount for current round
-    uint256 realtimeAmount;  // Current realtime staked amount
+    uint256 stakedAmount;           // snapshot for current round
+    uint256 realtimeAmount;         // current realtime staked amount
+    uint256 stakedWeightedAmount;   // snapshot: Σ(amount * multiplier)
+    uint256 realtimeWeightedAmount; // realtime: Σ(amount * multiplier)
     uint256[] rewardEndRounds;
   }
 
@@ -64,14 +67,13 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   }
 
 
-  // Dual staking weight grades
-  struct DualStakingGrade {
-    uint256 ratio;        // nativeToken / zecAmount threshold (scaled by 1e18)
-    uint256 multiplier;   // weight multiplier (SatoshiPlusHelper.DENOMINATOR = 10000 = 1.0x)
-  }
-
   // Round tag
   uint256 public roundTag;
+
+  // Dual staking conversion rate: zecEquivalent = dualStakeAmount / dualConversionRate
+  // Combines precision alignment (1e10) + value discount factor
+  // e.g. 1e10 means 1:1 value, 2e10 means native token worth 0.5x ZEC
+  uint256 public dualConversionRate;
 
   // Staking data
   mapping(bytes32 => ZecTx) public zecTxMap;
@@ -85,8 +87,6 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   // Expiration tracking
   mapping(uint256 => ExpireInfo) round2expireInfoMap;
 
-  // Dual staking grades
-  DualStakingGrade[] public dualStakingGrades;
 
   /*********************** events **************************/
   event delegated(bytes32 indexed txid, address indexed candidate, address indexed delegator, bytes script, uint32 outputIndex, uint64 amount);
@@ -97,13 +97,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   /*********************** Init **************************/
   function init() external onlyNotInit {
     roundTag = 1;
-
-    // Default dual staking grades (ratio threshold, multiplier)
-    dualStakingGrades.push(DualStakingGrade(0, 10000));       // 0: 1.0x base
-    dualStakingGrades.push(DualStakingGrade(1e17, 11000));    // 0.1: 1.1x
-    dualStakingGrades.push(DualStakingGrade(2e17, 13000));    // 0.2: 1.3x
-    dualStakingGrades.push(DualStakingGrade(5e17, 15000));    // 0.5: 1.5x
-
+    dualConversionRate = 1e10; // 1:1 value after precision alignment (1e18/1e8)
     alreadyInit = true;
   }
 
@@ -163,16 +157,25 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       emit delegated(txid, candidate, delegator, script, outputIndex, zecAmount);
     }
 
+    // Compute time-based multiplier from lock duration in days (fixed at delegate time)
+    uint256 lockDays = (lockTime - blockTimestamp) / 1 days;
+    uint256 lockMul = IGradeManager(GRADE_MANAGER_ADDR).getMultiplier(lockDays);
+
     receiptMap[txid] = DepositReceipt({
       candidate: candidate,
       delegator: delegator,
       round: roundTag,
+      lockMultiplier: lockMul,
+      dualMultiplier: SatoshiPlusHelper.DENOMINATOR,
       dualStakeAmount: 0,
       reward: 0
     });
 
     delegatorTxids[delegator].push(txid);
-    candidateMap[candidate].realtimeAmount += zecAmount;
+    CandidateState storage cs = candidateMap[candidate];
+    cs.realtimeAmount += zecAmount;
+    // initial: dualMul = DENOMINATOR, dualStakeAmount = 0 → weighted = amount * lockMul
+    cs.realtimeWeightedAmount += _calcWeighted(zecAmount, lockMul, SatoshiPlusHelper.DENOMINATOR, 0);
     _addExpire(candidate, lockTime, zecAmount);
   }
 
@@ -193,7 +196,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     if (dr.dualStakeAmount > 0) {
       uint256 settleRound = roundTag - 1;
       (uint256 settled, ) = _collectReward(
-        txid, dr.candidate, dr.round, settleRound, ztx, dr.dualStakeAmount
+        txid, dr.candidate, dr.round, settleRound, ztx
       );
       if (settled > 0) {
         dr.reward += settled;
@@ -201,7 +204,19 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       dr.round = settleRound;
     }
 
+    // Calculate old weighted before changes
+    uint256 oldWeighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+
     dr.dualStakeAmount += msg.value;
+    // ratio = nativeAmount / zecAmount after precision alignment
+    uint256 ratio = dr.dualStakeAmount / ztx.amount / 1e10;
+    dr.dualMultiplier = IGradeManager(GRADE_MANAGER_ADDR).getDualMultiplier(ratio);
+
+    // Update weighted
+    uint256 newWeighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+    CandidateState storage cs = candidateMap[dr.candidate];
+    cs.realtimeWeightedAmount = cs.realtimeWeightedAmount - oldWeighted + newWeighted;
+
     emit dualStaked(txid, msg.sender, msg.value, dr.dualStakeAmount);
   }
 
@@ -214,7 +229,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 count = candidates.length;
     amounts = new uint256[](count);
     for (uint256 i = 0; i < count; ++i) {
-      amounts[i] = candidateMap[candidates[i]].realtimeAmount;
+      amounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
       totalAmount += amounts[i];
     }
   }
@@ -227,6 +242,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     for (uint256 i = 0; i < validators.length; ++i) {
       CandidateState storage cs = candidateMap[validators[i]];
       cs.stakedAmount = cs.realtimeAmount;
+      cs.stakedWeightedAmount = cs.realtimeWeightedAmount;
     }
   }
 
@@ -238,7 +254,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     for (uint256 i = 0; i < validators.length; ++i) {
       if (rewardList[i] == 0) continue;
       CandidateState storage cs = candidateMap[validators[i]];
-      if (cs.stakedAmount == 0) {
+      if (cs.stakedWeightedAmount == 0) {
         undistributed += rewardList[i];
         continue;
       }
@@ -248,7 +264,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       if (len > 0) {
         historyReward = accruedRewardPerZECMap[validators[i]][cs.rewardEndRounds[len - 1]];
       }
-      uint256 perZecReward = historyReward + rewardList[i] * SatoshiPlusHelper.ZEC_DECIMAL / cs.stakedAmount;
+      uint256 perZecReward = historyReward + rewardList[i] * SatoshiPlusHelper.ZEC_DECIMAL / cs.stakedWeightedAmount;
       accruedRewardPerZECMap[validators[i]][round] = perZecReward;
 
       if (len > 0 && cs.rewardEndRounds[len - 1] == round - 1) {
@@ -278,7 +294,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
       DepositReceipt storage dr = receiptMap[txid];
       (uint256 txReward, bool expired) = _collectReward(
-        txid, dr.candidate, dr.round, settleRound, ztx, dr.dualStakeAmount
+        txid, dr.candidate, dr.round, settleRound, ztx
       );
 
       // Include previously settled reward (from dualStake multiplier change)
@@ -403,8 +419,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     address candidate,
     uint256 drRound,
     uint256 settleRound,
-    ZecTx storage ztx,
-    uint256 dualStakeAmount
+    ZecTx storage ztx
   ) internal returns (uint256 reward, bool expired) {
     (uint256 calculateRound, bool exp) = _getCalculateRound(txid, settleRound);
     expired = exp;
@@ -416,12 +431,10 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 accruedAtStart = _getAccruedReward(candidate, drRound);
     if (accruedAtSettle <= accruedAtStart) return (0, expired);
 
-    reward = (accruedAtSettle - accruedAtStart) * ztx.amount / SatoshiPlusHelper.ZEC_DECIMAL;
-
-    // Apply dual staking multiplier
-    if (dualStakeAmount > 0) {
-      reward = reward * _getDualStakingMultiplier(dualStakeAmount, ztx.amount) / SatoshiPlusHelper.DENOMINATOR;
-    }
+    // reward share = accruedDiff × weighted / ZEC_DECIMAL
+    DepositReceipt storage dr = receiptMap[txid];
+    uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+    reward = (accruedAtSettle - accruedAtStart) * weighted / SatoshiPlusHelper.ZEC_DECIMAL;
 
     // Update receipt round
     receiptMap[txid].round = calculateRound;
@@ -429,18 +442,12 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     emit rewardCollected(txid, receiptMap[txid].delegator, reward, expired);
   }
 
-  /// Get dual staking weight multiplier based on nativeToken/ZEC ratio
-  function _getDualStakingMultiplier(uint256 nativeAmount, uint64 zecAmount) internal view returns (uint256) {
-    if (nativeAmount == 0 || zecAmount == 0) return SatoshiPlusHelper.DENOMINATOR;
-    uint256 ratio = nativeAmount * 1e18 / zecAmount;
-    uint256 multiplier = SatoshiPlusHelper.DENOMINATOR;
-    for (uint256 i = dualStakingGrades.length; i > 0; --i) {
-      if (ratio >= dualStakingGrades[i - 1].ratio) {
-        multiplier = dualStakingGrades[i - 1].multiplier;
-        break;
-      }
-    }
-    return multiplier;
+  /// Calculate weighted amount for a stake
+  /// weighted = zecAmount × lockMul × dualMul / DENOMINATOR + dualStakeAmount × DENOMINATOR / dualConversionRate
+  function _calcWeighted(uint256 zecAmount, uint256 lockMul, uint256 dualMul, uint256 dualAmount) internal view returns (uint256) {
+    uint256 zecPart = zecAmount * lockMul * dualMul / SatoshiPlusHelper.DENOMINATOR;
+    uint256 dualPart = dualConversionRate > 0 ? dualAmount * SatoshiPlusHelper.DENOMINATOR / dualConversionRate : 0;
+    return zecPart + dualPart;
   }
 
   /// Get accrued reward for a candidate at a given round
@@ -468,7 +475,13 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     if (value.length != 32) {
       revert MismatchParamLength(key);
     }
-    revert UnsupportedGovParam(key);
+    if (Memory.compareStrings(key, "dualConversionRate")) {
+      uint256 newRate = BytesToTypes.bytesToUint256(32, value);
+      require(newRate > 0, "zero conversion rate");
+      dualConversionRate = newRate;
+    } else {
+      revert UnsupportedGovParam(key);
+    }
     emit paramChange(key, value);
   }
 
@@ -482,11 +495,4 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     return candidateMap[candidate].rewardEndRounds;
   }
 
-  function getDualStakingGrades() external view returns (DualStakingGrade[] memory) {
-    return dualStakingGrades;
-  }
-
-  function getDualStakingMultiplier(uint256 nativeAmount, uint64 zecAmount) external view returns (uint256) {
-    return _getDualStakingMultiplier(nativeAmount, zecAmount);
-  }
 }

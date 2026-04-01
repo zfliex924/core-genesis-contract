@@ -3,7 +3,7 @@ pragma solidity 0.8.4;
 
 import "./interface/INativeAgent.sol";
 import "./interface/IParamSubscriber.sol";
-import "./lib/RLPDecode.sol";
+import "./interface/IGradeManager.sol";
 import "./interface/ICandidateHub.sol";
 import "./lib/Address.sol";
 import "./lib/Memory.sol";
@@ -15,9 +15,6 @@ import "./System.sol";
 /// Each delegation creates an individual StakeTx identified by a unique stakeId.
 /// Rewards are tracked via accrued-reward-per-unit on each candidate.
 contract NativeAgent is INativeAgent, System, IParamSubscriber {
-
-  using RLPDecode for bytes;
-  using RLPDecode for RLPDecode.RLPItem;
 
   uint256 public constant INIT_REQUIRED_COIN_DEPOSIT = 1e18;
 
@@ -35,12 +32,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     uint256 reward;          // accumulated unclaimed reward (from transfer settlement)
   }
 
-  /// @dev Staking duration grade — longer lock = higher multiplier
-  struct StakeDurationGrade {
-    uint256 lockDays;        // minimum lock duration in days
-    uint256 multiplier;      // reward multiplier (DENOMINATOR = 10000 = 1.0x)
-  }
-  StakeDurationGrade[] public grades;
 
   /// @dev Per-candidate staking state
   struct Candidate {
@@ -73,16 +64,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     requiredCoinDeposit = INIT_REQUIRED_COIN_DEPOSIT;
     roundTag = block.timestamp / SatoshiPlusHelper.ROUND_INTERVAL;
     stakeIdCounter = 1;
-
-    // Default staking duration grades (lockDays, multiplier)
-    grades.push(StakeDurationGrade(1,   10000));  // 1 day:   1.0x
-    grades.push(StakeDurationGrade(7,   10500));  // 7 days:  1.05x
-    grades.push(StakeDurationGrade(15,  11000));  // 15 days: 1.1x
-    grades.push(StakeDurationGrade(30,  12000));  // 30 days: 1.2x
-    grades.push(StakeDurationGrade(90,  14000));  // 90 days: 1.4x
-    grades.push(StakeDurationGrade(180, 17000));  // 180 days: 1.7x
-    grades.push(StakeDurationGrade(365, 20000));  // 365 days: 2.0x
-
     alreadyInit = true;
   }
 
@@ -170,7 +151,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   /// @param lockRound Number of rounds to lock (must match a grade's lockDays)
   function delegateCoin(address candidate, uint256 lockRound) external override payable returns (bytes32 stakeId) {
     require(msg.value >= requiredCoinDeposit, "delegate amount is too small");
-    uint256 multiplier = _getMultiplier(lockRound);
+    uint256 multiplier = IGradeManager(GRADE_MANAGER_ADDR).getMultiplier(lockRound);
 
     stakeId = _createStake(candidate, msg.value, roundTag + lockRound, multiplier);
     emit delegatedCoin(stakeId, candidate, msg.sender, msg.value);
@@ -193,18 +174,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     c.realtimeWeightedAmount += amount * multiplier;
   }
 
-  /// Match lockRound against grades to get multiplier
-  /// Picks the highest grade whose lockDays <= lockRound
-  function _getMultiplier(uint256 lockRound) internal view returns (uint256) {
-    uint256 multiplier = SatoshiPlusHelper.DENOMINATOR;
-    for (uint256 i = grades.length; i > 0; --i) {
-      if (lockRound >= grades[i - 1].lockDays) {
-        multiplier = grades[i - 1].multiplier;
-        break;
-      }
-    }
-    return multiplier;
-  }
 
   /// Undelegate a specific stake by stakeId
   function undelegateCoin(bytes32 stakeId) external override {
@@ -310,23 +279,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
         revert OutOfBounds(key, newRequiredCoinDeposit, 1, type(uint256).max);
       }
       requiredCoinDeposit = newRequiredCoinDeposit;
-    } else if (Memory.compareStrings(key, "grades")) {
-      // value = RLP([ RLP([lockDays, multiplier]), ... ])
-      RLPDecode.RLPItem[] memory items = value.toRLPItem().toList();
-      require(items.length > 0, "empty grades");
-      delete grades;
-      for (uint256 i = 0; i < items.length; i++) {
-        RLPDecode.RLPItem[] memory pair = items[i].toList();
-        uint256 lockDays = RLPDecode.toUint(pair[0]);
-        uint256 multiplier = RLPDecode.toUint(pair[1]);
-        if (i == 0) {
-          require(multiplier >= SatoshiPlusHelper.DENOMINATOR, "multiplier too low");
-        } else {
-          require(lockDays > grades[i - 1].lockDays, "lockDays disorder");
-          require(multiplier > grades[i - 1].multiplier, "multiplier disorder");
-        }
-        grades.push(StakeDurationGrade(lockDays, multiplier));
-      }
     } else {
       revert UnsupportedGovParam(key);
     }
@@ -336,10 +288,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   /*********************** View methods ********************************/
   function getDelegatorStakeIds(address delegator) external view returns (bytes32[] memory) {
     return delegatorStakeIds[delegator];
-  }
-
-  function getGrades() external view returns (StakeDurationGrade[] memory) {
-    return grades;
   }
 
   function getContinuousRewardEndRounds(address candidate) external view returns (uint256[] memory) {
