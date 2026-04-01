@@ -163,9 +163,15 @@ delegateCoin(candidate, lockRound) payable → bytes32 stakeId
   - multiplier 从 GradeManager.getMultiplier(lockRound) 获取并锁定
   - stakeId = bytes32(counter++)
 
+requestUndelegate(stakeId)
+  - 提交赎回申请，记录 undelegateRequestTime = block.timestamp
+  - 每个 stakeId 只能申请一次
+
 undelegateCoin(stakeId)
-  - 要求 roundTag >= lockUntilRound
-  - 发放本金 + 待领奖励
+  - 要求已申请且 block.timestamp >= undelegateRequestTime + 72 hours
+  - 锁定期已满（roundTag >= lockUntilRound）：按原始 multiplier 计算全额奖励
+  - 提前退出：按最低倍率（DENOMINATOR = 1.0x）计算奖励
+  - 发放本金 + 奖励
 
 transferCoin(targetCandidate, stakeId)
   - 结算旧 candidate 奖励存入 stx.reward
