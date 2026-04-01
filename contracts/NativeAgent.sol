@@ -136,9 +136,9 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
       StakeTx storage stx = stakeTxMap[stakeIds[i - 1]];
       if (stx.amount == 0) continue;
 
-      reward += _collectReward(stx, settleRound);
-      reward += stx.reward;
+      uint256 rawReward = _collectReward(stx, settleRound) + stx.reward;
       stx.reward = 0;
+      reward += rawReward * stx.multiplier / SatoshiPlusHelper.DENOMINATOR;
     }
 
     if (reward != 0) {
@@ -203,21 +203,10 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     uint256 amount = stx.amount;
     address candidate = stx.candidate;
 
-    // Collect pending reward
-    uint256 reward;
-    if (roundTag >= stx.lockUntilRound) {
-      // Lock completed → full reward at original multiplier
-      reward = _collectReward(stx, roundTag - 1) + stx.reward;
-    } else {
-      // Early exit → all rewards (stored + new) discounted to minimum multiplier
-      uint256 originalMul = stx.multiplier;
-      stx.multiplier = SatoshiPlusHelper.DENOMINATOR;
-      uint256 newReward = _collectReward(stx, roundTag - 1);
-      stx.multiplier = originalMul; // restore for weighted cleanup
-      // Discount stored reward from full multiplier to minimum
-      uint256 storedReward = originalMul > 0 ? stx.reward * SatoshiPlusHelper.DENOMINATOR / originalMul : 0;
-      reward = newReward + storedReward;
-    }
+    // Collect raw reward + stored raw reward, apply multiplier and decimal
+    uint256 rawReward = _collectReward(stx, roundTag - 1) + stx.reward;
+    uint256 mul = roundTag >= stx.lockUntilRound ? stx.multiplier : SatoshiPlusHelper.DENOMINATOR;
+    uint256 reward = rawReward * mul / SatoshiPlusHelper.DENOMINATOR;
 
     Candidate storage c = candidateMap[candidate];
     c.realtimeAmount -= amount;
@@ -263,8 +252,8 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     uint256 accruedAtStart = _getAccruedReward(stx.candidate, stx.round);
     if (accruedAtSettle <= accruedAtStart) return 0;
 
-    // reward per weighted unit × this stake's weighted amount
-    reward = (accruedAtSettle - accruedAtStart) * stx.amount * stx.multiplier / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
+    // base reward (without multiplier) — caller applies multiplier as needed
+    reward = (accruedAtSettle - accruedAtStart) * stx.amount / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
 
     stx.round = settleRound;
   }
