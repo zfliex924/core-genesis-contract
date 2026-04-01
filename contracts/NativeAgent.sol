@@ -17,6 +17,7 @@ import "./System.sol";
 contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   uint256 public constant INIT_REQUIRED_COIN_DEPOSIT = 1e18;
+  uint256 public constant UNDELEGATE_DELAY = 72 hours;
 
   uint256 public requiredCoinDeposit;
   uint256 public roundTag;
@@ -28,8 +29,9 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     uint256 amount;          // staked amount
     uint256 round;           // round when staked (for reward calculation start)
     uint256 lockUntilRound;  // locked until this round (0 = no lock)
-    uint256 multiplier;      // reward multiplier fixed at delegate time (DENOMINATOR = 10000 = 1.0x)
-    uint256 reward;          // accumulated unclaimed reward (from transfer settlement)
+    uint256 multiplier;              // reward multiplier fixed at delegate time (DENOMINATOR = 10000 = 1.0x)
+    uint256 reward;                  // accumulated unclaimed reward (from transfer settlement)
+    uint256 undelegateRequestTime;   // block.timestamp when undelegate was requested (0 = not requested)
   }
 
 
@@ -55,6 +57,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   /*********************** events **************************/
   event delegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
+  event undelegateRequested(bytes32 indexed stakeId, address indexed delegator, uint256 requestRound);
   event undelegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
   event transferredCoin(bytes32 indexed stakeId, address indexed targetCandidate, address indexed delegator, uint256 amount);
   event claimedReward(address indexed delegator, uint256 reward);
@@ -166,7 +169,8 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
       round: roundTag,
       lockUntilRound: lockUntilRound,
       multiplier: multiplier,
-      reward: 0
+      reward: 0,
+      undelegateRequestTime: 0
     });
     delegatorStakeIds[msg.sender].push(stakeId);
     Candidate storage c = candidateMap[candidate];
@@ -175,27 +179,50 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   }
 
 
-  /// Undelegate a specific stake by stakeId
+  /// Request to undelegate — must wait UNDELEGATE_DELAY rounds before withdrawing
+  function requestUndelegate(bytes32 stakeId) external {
+    StakeTx storage stx = stakeTxMap[stakeId];
+    require(stx.amount > 0, "stake not found");
+    require(stx.delegator == msg.sender, "not the delegator");
+    require(stx.undelegateRequestTime == 0, "already requested");
+
+    stx.undelegateRequestTime = block.timestamp;
+    emit undelegateRequested(stakeId, msg.sender, block.timestamp);
+  }
+
+  /// Withdraw after undelegate delay has passed
+  /// If lock period completed (roundTag >= lockUntilRound): full reward at original multiplier
+  /// If early exit: reward at minimum multiplier (DENOMINATOR = 1.0x)
   function undelegateCoin(bytes32 stakeId) external override {
     StakeTx storage stx = stakeTxMap[stakeId];
     require(stx.amount > 0, "stake not found");
     require(stx.delegator == msg.sender, "not the delegator");
-    require(roundTag >= stx.lockUntilRound, "stake is still locked");
+    require(stx.undelegateRequestTime > 0, "must request first");
+    require(block.timestamp >= stx.undelegateRequestTime + UNDELEGATE_DELAY, "delay not met");
 
     uint256 amount = stx.amount;
     address candidate = stx.candidate;
 
-    // Collect pending reward + stored reward before removing
-    uint256 reward = _collectReward(stx, roundTag - 1) + stx.reward;
+    // Collect pending reward
+    uint256 reward;
+    if (roundTag >= stx.lockUntilRound) {
+      // Lock completed → full reward at original multiplier
+      reward = _collectReward(stx, roundTag - 1);
+    } else {
+      // Early exit → reward at minimum multiplier (1.0x)
+      uint256 originalMul = stx.multiplier;
+      stx.multiplier = SatoshiPlusHelper.DENOMINATOR;
+      reward = _collectReward(stx, roundTag - 1);
+      stx.multiplier = originalMul; // restore for weighted cleanup
+    }
+    reward += stx.reward;
 
     Candidate storage c = candidateMap[candidate];
     c.realtimeAmount -= amount;
     c.realtimeWeightedAmount -= amount * stx.multiplier;
 
-    // Remove stake
     _removeStake(msg.sender, stakeId);
 
-    // Send back staked amount + reward
     uint256 total = amount + reward;
     Address.sendValue(payable(msg.sender), total);
 
