@@ -3,6 +3,7 @@ pragma solidity 0.8.4;
 
 import "./interface/INativeAgent.sol";
 import "./interface/IParamSubscriber.sol";
+import "./interface/IStakeHub.sol";
 import "./interface/IGradeManager.sol";
 import "./interface/ICandidateHub.sol";
 import "./lib/Address.sol";
@@ -213,7 +214,9 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
     _removeStake(msg.sender, stakeId);
 
-    Address.sendValue(payable(msg.sender), amount + reward);
+    // Principal from NativeAgent, reward from StakeHub
+    Address.sendValue(payable(msg.sender), amount);
+    IStakeHub(STAKE_HUB_ADDR).payReward(msg.sender, reward);
 
     emit undelegatedCoin(stakeId, candidate, msg.sender, amount);
   }

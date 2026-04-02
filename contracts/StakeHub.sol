@@ -189,6 +189,20 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     }
   }
 
+  modifier onlyAgent() {
+    require(operators[msg.sender], "the sender must be an agent contract");
+    _;
+  }
+
+  /// Called by agents to pay out reward from StakeHub's balance during undelegate
+  /// @param to Reward recipient
+  /// @param amount Reward amount
+  function payReward(address to, uint256 amount) external override onlyAgent {
+    if (amount != 0) {
+      Address.sendValue(payable(to), amount);
+    }
+  }
+
   /*********************** Governance ********************************/
   /// Update parameters through governance vote
   /// @param key The name of the parameter
