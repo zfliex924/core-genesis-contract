@@ -219,6 +219,9 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     IStakeHub(STAKE_HUB_ADDR).payReward(msg.sender, reward);
 
     emit undelegatedCoin(stakeId, candidate, msg.sender, amount);
+    if (reward > 0) {
+      emit claimedReward(msg.sender, reward);
+    }
   }
 
   /// Transfer a stake to a different candidate
