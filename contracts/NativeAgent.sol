@@ -180,7 +180,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
 
   /// Request to undelegate — must wait UNDELEGATE_DELAY rounds before withdrawing
-  function requestUndelegate(bytes32 stakeId) external {
+  function requestUndelegate(bytes32 stakeId) external override {
     StakeTx storage stx = stakeTxMap[stakeId];
     require(stx.amount > 0, "stake not found");
     require(stx.delegator == msg.sender, "not the delegator");
@@ -193,20 +193,19 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   /// Withdraw after undelegate delay has passed
   /// If lock period completed (roundTag >= lockUntilRound): full reward at original multiplier
   /// If early exit: reward at minimum multiplier (DENOMINATOR = 1.0x)
-  function undelegateCoin(bytes32 stakeId) external override {
+  function undelegateCoin(bytes32 stakeId) external override returns (uint256 amount, uint256 reward) {
     StakeTx storage stx = stakeTxMap[stakeId];
     require(stx.amount > 0, "stake not found");
     require(stx.delegator == msg.sender, "not the delegator");
     require(stx.undelegateRequestTime > 0, "must request first");
     require(block.timestamp >= stx.undelegateRequestTime + UNDELEGATE_DELAY, "delay not met");
 
-    uint256 amount = stx.amount;
+    amount = stx.amount;
     address candidate = stx.candidate;
 
-    // Collect raw reward + stored raw reward, apply multiplier and decimal
     uint256 rawReward = _collectReward(stx, roundTag - 1) + stx.reward;
     uint256 mul = roundTag >= stx.lockUntilRound ? stx.multiplier : SatoshiPlusHelper.DENOMINATOR;
-    uint256 reward = rawReward * mul / SatoshiPlusHelper.DENOMINATOR;
+    reward = rawReward * mul / SatoshiPlusHelper.DENOMINATOR;
 
     Candidate storage c = candidateMap[candidate];
     c.realtimeAmount -= amount;
@@ -214,8 +213,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
     _removeStake(msg.sender, stakeId);
 
-    uint256 total = amount + reward;
-    Address.sendValue(payable(msg.sender), total);
+    Address.sendValue(payable(msg.sender), amount + reward);
 
     emit undelegatedCoin(stakeId, candidate, msg.sender, amount);
   }

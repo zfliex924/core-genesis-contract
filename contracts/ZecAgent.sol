@@ -91,6 +91,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   /*********************** events **************************/
   event delegated(bytes32 indexed txid, address indexed candidate, address indexed delegator, bytes script, uint32 outputIndex, uint64 amount);
   event rewardCollected(bytes32 indexed txid, address indexed delegator, uint256 reward, bool expired);
+  event transferredZec(bytes32 indexed txid, address indexed targetCandidate, address indexed delegator);
   event claimedReward(address indexed delegator, uint256 amount);
   event dualStaked(bytes32 indexed txid, address indexed delegator, uint256 nativeAmount, uint256 totalDualStakeAmount);
 
@@ -134,24 +135,20 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint32 outputIndex;
     {
       (,,bytes29 _voutView,) = zecTx.extractTx();
+      uint32 candidateId;
+      uint32 partnerId;
       uint32 version;
-      (zecAmount, outputIndex, delegator, candidate, version) = _parseVout(_voutView, script);
+      (zecAmount, outputIndex, delegator, candidateId, partnerId, version) = _parseVout(_voutView, script);
       require(zecAmount != 0, "staked value is zero");
       require(IRelayerHub(RELAYER_HUB_ADDR).isRelayer(msg.sender), "only relayer can submit");
 
-      zecTxMap[txid] = ZecTx({
-        amount: zecAmount,
-        outputIndex: outputIndex,
-        blockTimestamp: blockTimestamp,
-        lockTime: lockTime,
-        usedHeight: 0
-      });
+      candidate = _resolveCandidate(candidateId);
 
-      // Channel version: delegator becomes Channel address, notify Channel
-      address realDelegator = delegator;
+      zecTxMap[txid] = ZecTx(zecAmount, outputIndex, blockTimestamp, lockTime, 0);
+
       if (version == SatoshiPlusHelper.SATOSHI_STAKE_CHANNEL_VERSION) {
+        IChannel(CHANNEL_ADDR).onZecStake(delegator, txid, partnerId);
         delegator = CHANNEL_ADDR;
-        IChannel(CHANNEL_ADDR).onZecStake(realDelegator, txid, candidate);
       }
 
       emit delegated(txid, candidate, delegator, script, outputIndex, zecAmount);
@@ -218,6 +215,37 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     cs.realtimeWeightedAmount = cs.realtimeWeightedAmount - oldWeighted + newWeighted;
 
     emit dualStaked(txid, msg.sender, msg.value, dr.dualStakeAmount);
+  }
+
+  /// Transfer a ZEC stake to a different candidate
+  /// @param txid The ZEC staking transaction ID
+  /// @param targetCandidate The target validator candidate
+  function transferZec(bytes32 txid, address targetCandidate) external override {
+    DepositReceipt storage dr = receiptMap[txid];
+    require(dr.delegator == msg.sender, "not the delegator");
+    require(dr.candidate != targetCandidate, "same candidate");
+
+    ZecTx storage ztx = zecTxMap[txid];
+    require(ztx.amount > 0, "zec tx not found");
+
+    // Settle reward from old candidate
+    (uint256 settled, ) = _collectReward(txid, dr.candidate, dr.round, roundTag - 1, ztx);
+    dr.reward += settled;
+    dr.round = roundTag;
+
+    // Move weighted amount
+    uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+    CandidateState storage oldCs = candidateMap[dr.candidate];
+    oldCs.realtimeAmount -= ztx.amount;
+    oldCs.realtimeWeightedAmount -= weighted;
+
+    CandidateState storage newCs = candidateMap[targetCandidate];
+    newCs.realtimeAmount += ztx.amount;
+    newCs.realtimeWeightedAmount += weighted;
+
+    dr.candidate = targetCandidate;
+
+    emit transferredZec(txid, targetCandidate, msg.sender);
   }
 
   /*********************** IAgent Implementation **************************/
@@ -349,7 +377,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   function _parseVout(
     bytes29 _voutView,
     bytes memory _script
-  ) internal pure returns (uint64 zecAmount, uint32 outputIndex, address delegator, address candidate, uint32 version) {
+  ) internal pure returns (uint64 zecAmount, uint32 outputIndex, address delegator, uint32 candidateId, uint32 partnerId, uint32 version) {
     _voutView.assertType(uint40(BitcoinHelper.BTCTypes.Vout));
     uint256 _numberOfOutputs = uint256(_voutView.indexCompactInt(0));
     bool opreturn;
@@ -376,7 +404,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
           outputIndex = uint32(idx);
         }
       } else {
-        (delegator, candidate, version) = _parsePayload(_arbitraryData);
+        (delegator, candidateId, partnerId, version) = _parsePayload(_arbitraryData);
         opreturn = true;
       }
     }
@@ -384,13 +412,21 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     require(opreturn, "no opreturn");
   }
 
-  /// Parse OP_RETURN payload: <magic:4> <version:1> <delegator:20> <candidate:20>
-  function _parsePayload(bytes29 payload) internal pure returns (address delegator, address candidate, uint32 version) {
-    require(payload.len() >= 45, "payload too small");
+  /// Parse OP_RETURN payload: <magic:4> <version:1> <delegator:20> <candidateId:4> <partnerId:4>
+  function _parsePayload(bytes29 payload) internal pure returns (address delegator, uint32 candidateId, uint32 partnerId, uint32 version) {
+    require(payload.len() >= 33, "payload too small");
     require(payload.indexUint(0, 4) == SatoshiPlusHelper.SATOSHI_MAGIC, "wrong magic");
     version = uint32(payload.indexUint(4, 1));
     delegator = payload.indexAddress(5);
-    candidate = payload.indexAddress(25);
+    candidateId = uint32(payload.indexUint(25, 4));
+    partnerId = uint32(payload.indexUint(29, 4));
+  }
+
+  /// Resolve candidateId to operator address via CandidateHub.idMap
+  function _resolveCandidate(uint32 candidateId) internal view returns (address candidate) {
+    (bool ok, bytes memory data) = CANDIDATE_HUB_ADDR.staticcall(abi.encodeWithSignature("idMap(uint32)", candidateId));
+    require(ok && data.length == 32, "idMap call failed");
+    candidate = abi.decode(data, (address));
   }
 
   /// Track stake expiration by lockTime

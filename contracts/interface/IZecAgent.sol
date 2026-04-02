@@ -10,7 +10,8 @@ interface IZecAgent {
   /// @param script redeem script of the CLTV locked output
   function delegate(bytes calldata zecTx, uint32 blockHeight, bytes32[] memory nodes, uint256 index, bytes memory script) external;
 
-  /// Prepare for new round - expire stakes whose lockTime has passed
+  function transferZec(bytes32 txid, address targetCandidate) external;
+
   /// @param round The new round tag
   function prepare(uint256 round) external;
 }
