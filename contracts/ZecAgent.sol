@@ -541,12 +541,8 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     CandidateState storage cs = candidateMap[candidate];
     uint256 len = cs.rewardEndRounds.length;
     for (uint256 i = len; i > 0; --i) {
-      uint256 endRound = cs.rewardEndRounds[i - 1];
-      if (endRound >= round) {
-        uint256 startRound = (i >= 2) ? cs.rewardEndRounds[i - 2] + 1 : 1;
-        if (round >= startRound) {
-          return accruedRewardPerZECMap[candidate][endRound];
-        }
+      if (cs.rewardEndRounds[i - 1] <= round) {
+        return accruedRewardPerZECMap[candidate][cs.rewardEndRounds[i - 1]];
       }
     }
     return 0;

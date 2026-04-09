@@ -281,12 +281,8 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     Candidate storage c = candidateMap[candidate];
     uint256 len = c.rewardEndRounds.length;
     for (uint256 i = len; i > 0; --i) {
-      uint256 endRound = c.rewardEndRounds[i - 1];
-      if (endRound >= round) {
-        uint256 startRound = (i >= 2) ? c.rewardEndRounds[i - 2] + 1 : 1;
-        if (round >= startRound) {
-          return accruedRewardMap[candidate][endRound];
-        }
+      if (c.rewardEndRounds[i - 1] <= round) {
+        return accruedRewardMap[candidate][c.rewardEndRounds[i - 1]];
       }
     }
     return 0;
