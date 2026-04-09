@@ -61,22 +61,11 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     operators[HASH_AGENT_ADDR] = true;
     operators[ZEC_AGENT_ADDR] = true;
 
+    stateMap[NATIVE_AGENT_ADDR] = AssetState(0, 1);
+    stateMap[HASH_AGENT_ADDR]   = AssetState(0, 1e18 * 1e6);  // HASH_UNIT_CONVERSION * 1e6
+    stateMap[ZEC_AGENT_ADDR]    = AssetState(0, 1e8 * 1e4);   // ZEC_UNIT_CONVERSION * 1e4
+
     alreadyInit = true;
-
-    address[] memory validators = IValidatorSet(VALIDATOR_CONTRACT_ADDR).getValidatorOps();
-    uint256[] memory factors = new uint256[](4);
-    factors[0] = 1;
-    // HASH_UNIT_CONVERSION * 1e6
-    factors[1] = 1e18 * 1e6;
-    // BTC_UNIT_CONVERSION * 2e4
-    factors[2] = 1e10 * 2e4;
-    // ZEC factor
-    factors[3] = 1e8 * 1e4;
-
-    uint256 len = assets.length;
-    for (uint256 j = 0; j < len; j++) {
-      stateMap[assets[j].agent] = AssetState(0, factors[j]);
-    }
   }
 
   receive() external payable {

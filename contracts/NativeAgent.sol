@@ -60,7 +60,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   event delegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
   event undelegateRequested(bytes32 indexed stakeId, address indexed delegator, uint256 requestRound);
   event undelegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
-  event transferredCoin(bytes32 indexed stakeId, address indexed targetCandidate, address indexed delegator, uint256 amount);
+  event transferredCoin(bytes32 indexed stakeId, address indexed sourceCandidate, address indexed targetCandidate, address delegator, uint256 amount);
   event claimedReward(address indexed delegator, uint256 reward);
 
   /*********************** Init ********************************/
@@ -113,6 +113,17 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     amounts = new uint256[](candidateSize);
     for (uint256 i = 0; i < candidateSize; ++i) {
       amounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
+      totalAmount += amounts[i];
+    }
+  }
+
+  function getRealtimeAmounts(
+    address[] calldata candidates
+  ) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
+    uint256 candidateSize = candidates.length;
+    amounts = new uint256[](candidateSize);
+    for (uint256 i = 0; i < candidateSize; ++i) {
+      amounts[i] = candidateMap[candidates[i]].realtimeAmount;
       totalAmount += amounts[i];
     }
   }
@@ -229,6 +240,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     StakeTx storage stx = stakeTxMap[stakeId];
     require(stx.amount > 0, "stake not found");
     require(stx.delegator == msg.sender, "not the delegator");
+    require(stx.undelegateRequestTime == 0, "undelegate already requested");
     require(stx.candidate != targetCandidate, "same candidate");
 
     // Settle reward from old candidate, store in StakeTx
@@ -244,7 +256,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     stx.candidate = targetCandidate;
     stx.round = roundTag;
 
-    emit transferredCoin(stakeId, targetCandidate, msg.sender, stx.amount);
+    emit transferredCoin(stakeId, oldCandidate, targetCandidate, msg.sender, stx.amount);
   }
 
   /*********************** Internal methods ***************************/
@@ -314,5 +326,15 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   function getContinuousRewardEndRounds(address candidate) external view returns (uint256[] memory) {
     return candidateMap[candidate].rewardEndRounds;
+  }
+
+  function getDelegatorStakeTxs(address delegator) external view returns (StakeTx[] memory) {
+    bytes32[] storage ids = delegatorStakeIds[delegator];
+    uint256 len = ids.length;
+    StakeTx[] memory result = new StakeTx[](len);
+    for (uint256 i = 0; i < len; ++i) {
+      result[i] = stakeTxMap[ids[i]];
+    }
+    return result;
   }
 }

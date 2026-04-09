@@ -60,10 +60,15 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256[] rewardEndRounds;
   }
 
+  struct ExpireAmount {
+    uint256 amount;
+    uint256 weightedAmount;
+  }
+
   /// @dev Expiration tracking per round
   struct ExpireInfo {
     address[] candidateList;
-    mapping(address => uint256) amountMap;
+    mapping(address => ExpireAmount) amountMap;
   }
 
 
@@ -91,7 +96,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   /*********************** events **************************/
   event delegated(bytes32 indexed txid, address indexed candidate, address indexed delegator, bytes script, uint32 outputIndex, uint64 amount);
   event rewardCollected(bytes32 indexed txid, address indexed delegator, uint256 reward, bool expired);
-  event transferredZec(bytes32 indexed txid, address indexed targetCandidate, address indexed delegator);
+  event transferredZec(bytes32 indexed txid, address indexed sourceCandidate, address indexed targetCandidate, address delegator);
   event claimedReward(address indexed delegator, uint256 amount);
   event dualStaked(bytes32 indexed txid, address indexed delegator, uint256 nativeAmount, uint256 totalDualStakeAmount);
 
@@ -125,16 +130,17 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       (txChecked, blockTimestamp) = ILightClient(ZEC_LIGHT_CLIENT_ADDR)
         .checkTxProofAndGetTime(txid, blockHeight, ZEC_CONFIRM_BLOCK, nodes, index);
       require(txChecked, "zec tx not confirmed");
-      uint256 endRound = lockTime / SatoshiPlusHelper.ROUND_INTERVAL;
-      require(endRound > roundTag + 1, "insufficient locking rounds");
+
+      uint256 expireRound = uint256(lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
+      require(expireRound > roundTag + 1, "insufficient locking rounds");
     }
 
     address delegator;
     address candidate;
     uint64 zecAmount;
-    uint32 outputIndex;
     {
       (,,bytes29 _voutView,) = zecTx.extractTx();
+      uint32 outputIndex;
       uint32 candidateId;
       uint32 partnerId;
       uint32 version;
@@ -172,8 +178,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     CandidateState storage cs = candidateMap[candidate];
     cs.realtimeAmount += zecAmount;
     // initial: dualMul = DENOMINATOR, dualStakeAmount = 0 → weighted = amount * lockMul
-    cs.realtimeWeightedAmount += _calcWeighted(zecAmount, lockMul, SatoshiPlusHelper.DENOMINATOR, 0);
-    _addExpire(candidate, lockTime, zecAmount);
+    uint256 weighted = _calcWeighted(zecAmount, lockMul, SatoshiPlusHelper.DENOMINATOR, 0);
+    cs.realtimeWeightedAmount += weighted;
+    _addExpire(candidate, lockTime, zecAmount, weighted);
   }
 
   /*********************** Dual Staking **************************/
@@ -188,6 +195,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
     ZecTx storage ztx = zecTxMap[txid];
     require(ztx.amount > 0, "zec tx not found");
+
+    uint256 expireRound = uint256(ztx.lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
+    require(expireRound > roundTag + 1, "insufficient locking rounds");
 
     // Settle historical rewards with old multiplier before changing dualStakeAmount
     if (dr.dualStakeAmount > 0) {
@@ -228,6 +238,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     ZecTx storage ztx = zecTxMap[txid];
     require(ztx.amount > 0, "zec tx not found");
 
+    uint256 expireRound = uint256(ztx.lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
+    require(expireRound > roundTag + 1, "insufficient locking rounds");
+
     // Settle reward from old candidate
     (uint256 settled, ) = _collectReward(txid, dr.candidate, dr.round, roundTag - 1, ztx);
     dr.reward += settled;
@@ -243,9 +256,14 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     newCs.realtimeAmount += ztx.amount;
     newCs.realtimeWeightedAmount += weighted;
 
+    // Migrate expiry info to the new candidate
+    address sourceCandidate = dr.candidate;
+    _removeExpire(sourceCandidate, ztx.lockTime, ztx.amount, weighted);
+    _addExpire(targetCandidate, ztx.lockTime, ztx.amount, weighted);
+
     dr.candidate = targetCandidate;
 
-    emit transferredZec(txid, targetCandidate, msg.sender);
+    emit transferredZec(txid, sourceCandidate, targetCandidate, msg.sender);
   }
 
   /*********************** IAgent Implementation **************************/
@@ -258,6 +276,17 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     amounts = new uint256[](count);
     for (uint256 i = 0; i < count; ++i) {
       amounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
+      totalAmount += amounts[i];
+    }
+  }
+
+  function getRealtimeAmounts(
+    address[] calldata candidates
+  ) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
+    uint256 count = candidates.length;
+    amounts = new uint256[](count);
+    for (uint256 i = 0; i < count; ++i) {
+      amounts[i] = candidateMap[candidates[i]].realtimeAmount;
       totalAmount += amounts[i];
     }
   }
@@ -352,9 +381,13 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     ExpireInfo storage expireInfo = round2expireInfoMap[round];
     for (uint256 i = 0; i < expireInfo.candidateList.length; ++i) {
       address candidate = expireInfo.candidateList[i];
-      uint256 amount = expireInfo.amountMap[candidate];
-      if (amount > 0 && candidateMap[candidate].realtimeAmount >= amount) {
-        candidateMap[candidate].realtimeAmount -= amount;
+      ExpireAmount storage ea = expireInfo.amountMap[candidate];
+      CandidateState storage cs = candidateMap[candidate];
+      if (ea.amount > 0 && cs.realtimeAmount >= ea.amount) {
+        cs.realtimeAmount -= ea.amount;
+      }
+      if (ea.weightedAmount > 0 && cs.realtimeWeightedAmount >= ea.weightedAmount) {
+        cs.realtimeWeightedAmount -= ea.weightedAmount;
       }
       delete expireInfo.amountMap[candidate];
     }
@@ -430,13 +463,27 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   }
 
   /// Track stake expiration by lockTime
-  function _addExpire(address candidate, uint32 lockTime, uint256 amount) internal {
-    uint256 endRound = uint256(lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
-    ExpireInfo storage expireInfo = round2expireInfoMap[endRound];
-    if (expireInfo.amountMap[candidate] == 0) {
+  function _addExpire(address candidate, uint32 lockTime, uint256 amount, uint256 weightedAmount) internal {
+    uint256 expireRound = uint256(lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
+    ExpireInfo storage expireInfo = round2expireInfoMap[expireRound];
+    if (expireInfo.amountMap[candidate].amount == 0) {
       expireInfo.candidateList.push(candidate);
     }
-    expireInfo.amountMap[candidate] += amount;
+    expireInfo.amountMap[candidate].amount += amount;
+    expireInfo.amountMap[candidate].weightedAmount += weightedAmount;
+  }
+
+  /// Remove stake expiration record (counterpart of _addExpire)
+  function _removeExpire(address candidate, uint32 lockTime, uint256 amount, uint256 weightedAmount) internal {
+    uint256 expireRound = uint256(lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
+    ExpireInfo storage expireInfo = round2expireInfoMap[expireRound];
+    if (expireInfo.amountMap[candidate].amount >= amount) {
+      expireInfo.amountMap[candidate].amount -= amount;
+    }
+
+    if (expireInfo.amountMap[candidate].weightedAmount >= weightedAmount) {
+      expireInfo.amountMap[candidate].weightedAmount -= weightedAmount;
+    }
   }
 
   /// Determine the reward calculation round and expiry (same logic as BitcoinStake)

@@ -14,4 +14,6 @@ interface IZecAgent {
 
   /// @param round The new round tag
   function prepare(uint256 round) external;
+
+  function getRealtimeAmounts(address[] calldata candidates) external view returns (uint256[] memory amounts, uint256 totalAmount);
 }
