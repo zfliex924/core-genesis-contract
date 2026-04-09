@@ -117,17 +117,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     }
   }
 
-  function getRealtimeAmounts(
-    address[] calldata candidates
-  ) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
-    uint256 candidateSize = candidates.length;
-    amounts = new uint256[](candidateSize);
-    for (uint256 i = 0; i < candidateSize; ++i) {
-      amounts[i] = candidateMap[candidates[i]].realtimeAmount;
-      totalAmount += amounts[i];
-    }
-  }
-
   function setNewRound(
     address[] calldata validators,
     uint256 round

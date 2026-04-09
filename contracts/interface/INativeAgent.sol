@@ -8,5 +8,4 @@ interface INativeAgent is IAgent {
   function requestUndelegate(bytes32 stakeId) external;
   function undelegateCoin(bytes32 stakeId) external returns (uint256 amount, uint256 reward);
   function transferCoin(address targetCandidate, bytes32 stakeId) external;
-  function getRealtimeAmounts(address[] calldata candidates) external view returns (uint256[] memory amounts, uint256 totalAmount);
 }
