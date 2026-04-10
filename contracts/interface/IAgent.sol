@@ -13,9 +13,11 @@ interface IAgent {
   /// Get stake amount
   /// @param candidates List of candidate operator addresses
   /// @param round The new round tag
-  /// @return amounts List of amounts of all special candidates in this round
-  /// @return totalAmount The sum of all amounts of valid/invalid candidates.
-  function getStakeAmounts(address[] calldata candidates, uint256 round) external returns (uint256[] memory amounts, uint256 totalAmount);
+  /// @return amounts List of realtime amounts of all candidates
+  /// @return totalAmount The sum of all realtime amounts
+  /// @return weightedAmounts List of weighted amounts of all candidates
+  /// @return totalWeightedAmount The sum of all weighted amounts
+  function getStakeAmounts(address[] calldata candidates, uint256 round) external returns (uint256[] memory amounts, uint256 totalAmount, uint256[] memory weightedAmounts, uint256 totalWeightedAmount);
 
   /// Start new round, this is called by the StakeHub contract
   /// @param validators List of elected validators in this round

@@ -43,6 +43,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   struct AssetState {
     uint256 amount;
+    uint256 weightedAmount;
     uint256 factor;
   }
 
@@ -61,9 +62,9 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     operators[HASH_AGENT_ADDR] = true;
     operators[ZEC_AGENT_ADDR] = true;
 
-    stateMap[NATIVE_AGENT_ADDR] = AssetState(0, 1);
-    stateMap[HASH_AGENT_ADDR]   = AssetState(0, 1e18 * 1e6);  // HASH_UNIT_CONVERSION * 1e6
-    stateMap[ZEC_AGENT_ADDR]    = AssetState(0, 1e8 * 1e4);   // ZEC_UNIT_CONVERSION * 1e4
+    stateMap[NATIVE_AGENT_ADDR] = AssetState(0, 0, 1);
+    stateMap[HASH_AGENT_ADDR]   = AssetState(0, 0, 1e18 * 1e6);  // HASH_UNIT_CONVERSION * 1e6
+    stateMap[ZEC_AGENT_ADDR]    = AssetState(0, 0, 1e8 * 1e4);   // ZEC_UNIT_CONVERSION * 1e4
 
     alreadyInit = true;
   }
@@ -131,22 +132,23 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
     uint256 assetSize = assets.length;
 
     uint256 factor0;
-    uint256[] memory amounts;
+    uint256[] memory weightedAmounts;
+    uint256[] memory totalWeightedAmounts = new uint256[](assetSize);
     uint256[] memory totalAmounts = new uint256[](assetSize);
     scores = new uint256[](candidateSize);
     for (uint256 i = 0; i < assetSize; ++i) {
-      (amounts, totalAmounts[i]) =
+      (, totalAmounts[i], weightedAmounts, totalWeightedAmounts[i]) =
         IAgent(assets[i].agent).getStakeAmounts(candidates, round);
       uint256 factor = 1;
       if (i == 0) {
         factor0 = factor;
-      } else if (totalAmounts[0] != 0 && totalAmounts[i] != 0) {
-        factor = (factor0 * totalAmounts[0]) * assets[i].hardcap / assets[0].hardcap / totalAmounts[i];
+      } else if (totalWeightedAmounts[0] != 0 && totalWeightedAmounts[i] != 0) {
+        factor = (factor0 * totalWeightedAmounts[0]) * assets[i].hardcap / assets[0].hardcap / totalWeightedAmounts[i];
       }
       for (uint256 j = 0; j < candidateSize; ++j) {
-        scores[j] += amounts[j] * factor;
+        scores[j] += weightedAmounts[j] * factor;
       }
-      stateMap[assets[i].agent] = AssetState(totalAmounts[i], factor);
+      stateMap[assets[i].agent] = AssetState(totalAmounts[i], totalWeightedAmounts[i], factor);
     }
   }
 

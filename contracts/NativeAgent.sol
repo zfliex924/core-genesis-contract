@@ -107,13 +107,16 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   function getStakeAmounts(
     address[] calldata candidates,
-    uint256
-  ) external override view returns (uint256[] memory amounts, uint256 totalAmount) {
+    uint256 round
+  ) external override view returns (uint256[] memory amounts, uint256 totalAmount, uint256[] memory weightedAmounts, uint256 totalWeightedAmount) {
     uint256 candidateSize = candidates.length;
     amounts = new uint256[](candidateSize);
+    weightedAmounts = new uint256[](candidateSize);
     for (uint256 i = 0; i < candidateSize; ++i) {
-      amounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
+      amounts[i] = candidateMap[candidates[i]].realtimeAmount;
       totalAmount += amounts[i];
+      weightedAmounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
+      totalWeightedAmount += weightedAmounts[i];
     }
   }
 

@@ -271,12 +271,15 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   function getStakeAmounts(
     address[] calldata candidates,
     uint256 round
-  ) external override onlyStakeHub returns (uint256[] memory amounts, uint256 totalAmount) {
+  ) external override onlyStakeHub returns (uint256[] memory amounts, uint256 totalAmount, uint256[] memory weightedAmounts, uint256 totalWeightedAmount) {
     uint256 count = candidates.length;
     amounts = new uint256[](count);
+    weightedAmounts = new uint256[](count);
     for (uint256 i = 0; i < count; ++i) {
-      amounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
+      amounts[i] = candidateMap[candidates[i]].realtimeAmount;
       totalAmount += amounts[i];
+      weightedAmounts[i] = candidateMap[candidates[i]].realtimeWeightedAmount;
+      totalWeightedAmount += weightedAmounts[i];
     }
   }
 

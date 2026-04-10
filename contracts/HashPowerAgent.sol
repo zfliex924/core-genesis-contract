@@ -224,7 +224,15 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
   /// i.e. the valid candidates for the round) and totalRoundAmount (every
   /// credited block in the round, bound or unbound) for the subsequent
   /// distributeReward call.
-  function getStakeAmounts(address[] calldata candidates, uint256 roundTag) external override returns (uint256[] memory amounts, uint256 totalAmount) {
+  function getStakeAmounts(
+    address[] calldata candidates,
+    uint256 roundTag
+  ) external override returns (
+    uint256[] memory amounts,
+    uint256 totalAmount,
+    uint256[] memory weightedAmounts,
+    uint256 totalWeightedAmount
+  ) {
     uint256 lookup = roundTag - POWER_ROUND_GAP;
     RoundPower storage r = roundPowerMap[lookup];
     uint256 count = candidates.length;
@@ -240,6 +248,9 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
 
     totalAmount = r.blockCount;
     totalRoundAmount = totalAmount;
+
+    weightedAmounts = amounts;
+    totalWeightedAmount = totalAmount;
   }
 
   /// Distribute rewards to bound miners.
