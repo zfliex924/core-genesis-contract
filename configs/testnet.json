@@ -1,0 +1,31 @@
+{
+  "chainId": 1115,
+  "validators": [
+    { "consensusAddr": "0x01Bca3615D24d3c638836691517b2B9b49b054B1", "feeAddr": "0x3aE030Dc3717C66f63D6e8f1d1508a5C941ff46D" },
+    { "consensusAddr": "0xa458499604A85E90225a14946f36368Ae24df16D", "feeAddr": "0xde442f5ba55687a24f04419424e0dc2593cc9f4c" },
+    { "consensusAddr": "0x5E00C0D5C4C10d4c805aba878D51129A89d513e0", "feeAddr": "0xcb089be171e256acdaac1ebbeb32ffba0dd438ee" },
+    { "consensusAddr": "0x1Cd652bC64Af3f09B490dAae27f46e53726ce230", "feeAddr": "0x0a53b7e0ffd97357e444b85f4d683c1d8e22879a" },
+    { "consensusAddr": "0xDA37ccECBB2D7C83aE27eE2BeBFE8EBCe162c600", "feeAddr": "0xd82c24274ebbfe438788d684dc6034c3c67664a4" }
+  ],
+  "members": [
+    "0x91fb7d8a73d2752830ea189737ea0e007f999b94",
+    "0x48bfbc530e7c54c332b0fae07312fba7078b8789",
+    "0xde60b7d0e6b758ca5dd8c61d377a2c5f1af51ec1"
+  ],
+  "holders": [],
+  "cycle": {
+    "blockPeriod": 3,
+    "epochLength": 200,
+    "roundInterval": 86400,
+    "validatorCount": 21,
+    "turnLength": 1
+  },
+  "zcash": {
+    "initConsensusStateBytes": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "initChainHeight": 1
+  },
+  "gov": {
+    "votingPeriod": 201600,
+    "executingPeriod": 201600
+  }
+}
