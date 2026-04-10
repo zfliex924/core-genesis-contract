@@ -36,11 +36,6 @@ program.option("--testnet <testnet>",
     "use testnet params",
     false)
 
-program.option("--mock <mock>",
-    "if use mock",
-    false);
-
-
 program.parse(process.argv);
 
 const members = require("./init_members")
@@ -57,7 +52,6 @@ const data = {
     initMembersBytes: initMembersBytes,
     votingPeriod: program.votingPeriod,
     executingPeriod: program.executingPeriod,
-    mock: program.mock,
 };
 
 const templateString = fs.readFileSync(program.template).toString();

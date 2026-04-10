@@ -9,7 +9,6 @@ contract System {
 
   event paramChange(string key, bytes value);
 
-
   address public constant VALIDATOR_CONTRACT_ADDR = 0x0000000000000000000000000000000000001000;
   address public constant SLASH_CONTRACT_ADDR = 0x0000000000000000000000000000000000001001;
   address public constant SYSTEM_REWARD_ADDR = 0x0000000000000000000000000000000000001002;
@@ -32,16 +31,12 @@ contract System {
   // 0x0000000000000000000000000000000000010001 is deprecated;
 
   modifier onlyCoinbase() {
-  
     require(msg.sender == block.coinbase, "the message sender must be the block producer");
-  
     _;
   }
 
   modifier onlyZeroGasPrice() {
-    
     require(tx.gasprice == 0 , "gasprice is not zero");
-    
     _;
   }
 

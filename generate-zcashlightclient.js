@@ -23,16 +23,11 @@ program.option("--initChainHeight <initChainHeight>",
     "init Zcash chain height",
     1);
 
-program.option("--mock <mock>",
-    "if use mock",
-    false);
-
 program.parse(process.argv);
 
 const data = {
   initConsensusStateBytes: program.initConsensusStateBytes,
   initChainHeight: program.initChainHeight,
-  mock: program.mock,
 };
 const templateString = fs.readFileSync(program.template).toString();
 const resultString = nunjucks.renderString(templateString, data);

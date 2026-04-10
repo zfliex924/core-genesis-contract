@@ -17,10 +17,6 @@ program.option(
     "./contracts/lib/SatoshiPlusHelper.sol"
 )
 
-program.option("--mock <mock>",
-    "if use mock",
-    false);
-
 program.option("-c, --chainid <chainid>", "chain id", "1116")
 program.option("-d, --coreDecimal <coreDecimal>", "coreDecimal id", "1e18")
 program.option("-s, --coreStakeDecimal <coreStakeDecimal>", "coreStakeDecimal id", "1e24")

@@ -204,12 +204,6 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     bytes32[] calldata nodes,
     uint256 index
   ) public view override returns (bool) {
-{% if mock %}
-    if (checkResult == true) {
-      return checkResult;
-    }
-{% endif %}
-
     bytes32 blockHash = height2HashMap[blockHeight];
     if (blockHeight + confirmBlock > getChainTipHeight() || txid == bytes32(0) || blockHash == bytes32(0)) {
       return false;
@@ -240,12 +234,6 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     uint256 index
   ) external view override returns (bool, uint64) {
     bool r = checkTxProof(txid, blockHeight, confirmBlock, nodes, index);
-
-{% if mock %}
-    if (checkResult == true) {
-      return (checkResult, timesTamp);
-    }
-{% endif %}
 
     if (r) {
       bytes32 blockHash = height2HashMap[blockHeight];
@@ -496,8 +484,4 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     emit paramChange(key, value);
   }
 
-{% if mock %}
-  bool public checkResult;
-  uint64 public timesTamp;
-{% endif %}
 }

@@ -22,10 +22,6 @@ program.option(
     ""
 )
 
-program.option("--mock <mock>",
-    "if use mock",
-    false);
-
 program.parse(process.argv);
 
 const validators = require("./validators")
@@ -36,7 +32,6 @@ if (initValidatorSetBytes == ""){
 const data = {
   initValidatorSetBytes: initValidatorSetBytes,
   initTurnLength: init_cycle.turnLength,
-  mock: program.mock,
 };
 
 const templateString = fs.readFileSync(program.template).toString();
