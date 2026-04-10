@@ -137,6 +137,21 @@ Promise.all([
     "channel",
     "contracts/Channel.sol",
     "Channel"
+  ),
+  compileContract(
+    "zeclightclient",
+    "contracts/ZcashLightClient.sol",
+    "ZcashLightClient"
+  ),
+  compileContract(
+    "zecagent",
+    "contracts/ZecAgent.sol",
+    "ZecAgent"
+  ),
+  compileContract(
+    "grademanager",
+    "contracts/GradeManager.sol",
+    "GradeManager"
   )
 ]).then(result => {
 

@@ -10,7 +10,7 @@ library SatoshiPlusHelper {
   uint256 public constant CORE_DECIMAL = 1e18;
   uint256 public constant CORE_STAKE_DECIMAL = 1e24;
   uint256 public constant ROUND_INTERVAL = 86400;
-  uint256 public constant CHAINID = 1112;
+  uint256 public constant CHAINID = 1116;
   uint32 public constant INIT_BTC_CONFIRM_BLOCK = 6;
 
   uint32 public constant SATOSHI_STAKE_INIT_VERSION = 1;

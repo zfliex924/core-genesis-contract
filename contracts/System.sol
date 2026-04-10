@@ -10,73 +10,37 @@ contract System {
   event paramChange(string key, bytes value);
 
 
-  address public VALIDATOR_CONTRACT_ADDR;
-  address public SLASH_CONTRACT_ADDR;
-  address public SYSTEM_REWARD_ADDR;
-  address public RELAYER_HUB_ADDR;
-  address public CANDIDATE_HUB_ADDR;
-  address public GOV_HUB_ADDR;
-  address public BURN_ADDR;
-  address public FOUNDATION_ADDR;
-  address public STAKE_HUB_ADDR;
-  address public NATIVE_AGENT_ADDR;
-  address public HASH_AGENT_ADDR;
-  address public CONFIGURATION_ADDR;
-  address public CHANNEL_ADDR;
-  address public ZEC_LIGHT_CLIENT_ADDR;
-  address public ZEC_AGENT_ADDR;
-  address public GRADE_MANAGER_ADDR;
+  address public constant VALIDATOR_CONTRACT_ADDR = 0x0000000000000000000000000000000000001000;
+  address public constant SLASH_CONTRACT_ADDR = 0x0000000000000000000000000000000000001001;
+  address public constant SYSTEM_REWARD_ADDR = 0x0000000000000000000000000000000000001002;
+  // 0x0000000000000000000000000000000000001003 deprecated (BtcLightClient removed)
+  address public constant RELAYER_HUB_ADDR = 0x0000000000000000000000000000000000001004;
+  address public constant CANDIDATE_HUB_ADDR = 0x0000000000000000000000000000000000001005;
+  address public constant GOV_HUB_ADDR = 0x0000000000000000000000000000000000001006;
+  address public constant BURN_ADDR = 0x0000000000000000000000000000000000000000;
+  address public constant FOUNDATION_ADDR = 0x0000000000000000000000000000000000001009;
+  address public constant STAKE_HUB_ADDR = 0x0000000000000000000000000000000000001010;
 
-  struct SystemContractAddr {
-    address validator;
-    address slash;
-    address systemReward;
-    address relayerHub;
-    address candidateHub;
-    address govHub;
-    address burn;
-    address foundation;
-    address stakeHub;
-    address nativeAgent;
-    address hashAgent;
-    address configurationContract;
-    address channel;
-    address zecLightClient;
-    address zecAgent;
-    address gradeManager;
-  }
+  address public constant NATIVE_AGENT_ADDR = 0x0000000000000000000000000000000000001011;
+  address public constant HASH_AGENT_ADDR = 0x0000000000000000000000000000000000001012;
+  // 0x0000000000000000000000000000000000001013-1015 deprecated (BitcoinAgent/BitcoinStake removed)
+  address public constant CONFIGURATION_ADDR = 0x0000000000000000000000000000000000001016;
+  address public constant CHANNEL_ADDR = 0x0000000000000000000000000000000000001017;
+  address public constant ZEC_LIGHT_CLIENT_ADDR = 0x0000000000000000000000000000000000001018;
+  address public constant ZEC_AGENT_ADDR = 0x0000000000000000000000000000000000001019;
+  address public constant GRADE_MANAGER_ADDR = 0x000000000000000000000000000000000000101A;
+  // 0x0000000000000000000000000000000000010001 is deprecated;
 
-  function updateContractAddr(bytes memory _systemContractAddr) external {
-    SystemContractAddr memory systemContractAddr = abi.decode(_systemContractAddr, (SystemContractAddr));
-    VALIDATOR_CONTRACT_ADDR = systemContractAddr.validator;
-    SLASH_CONTRACT_ADDR = systemContractAddr.slash;
-    SYSTEM_REWARD_ADDR = systemContractAddr.systemReward;
-    RELAYER_HUB_ADDR = systemContractAddr.relayerHub;
-    CANDIDATE_HUB_ADDR = systemContractAddr.candidateHub;
-    GOV_HUB_ADDR = systemContractAddr.govHub;
-    BURN_ADDR = systemContractAddr.burn;
-    FOUNDATION_ADDR = systemContractAddr.foundation;
-    STAKE_HUB_ADDR = systemContractAddr.stakeHub;
-    NATIVE_AGENT_ADDR = systemContractAddr.nativeAgent;
-    HASH_AGENT_ADDR = systemContractAddr.hashAgent;
-    CONFIGURATION_ADDR = systemContractAddr.configurationContract;
-    CHANNEL_ADDR = systemContractAddr.channel;
-    ZEC_LIGHT_CLIENT_ADDR = systemContractAddr.zecLightClient;
-    ZEC_AGENT_ADDR = systemContractAddr.zecAgent;
-    GRADE_MANAGER_ADDR = systemContractAddr.gradeManager;
-  }
-  
-  function setAlreadyInit(bool value) external {
-    alreadyInit = value;
-  }
-    
-  
   modifier onlyCoinbase() {
+  
+    require(msg.sender == block.coinbase, "the message sender must be the block producer");
   
     _;
   }
 
   modifier onlyZeroGasPrice() {
+    
+    require(tx.gasprice == 0 , "gasprice is not zero");
     
     _;
   }
