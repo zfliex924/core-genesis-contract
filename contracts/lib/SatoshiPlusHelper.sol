@@ -7,8 +7,8 @@ library SatoshiPlusHelper {
   // Protocol MAGIC `SAT+`, represents the short name for Satoshi plus protocol.
   uint256 public constant SATOSHI_MAGIC = 0x5341542b;
   uint256 public constant ZEC_DECIMAL = 1e8;
-  uint256 public constant CORE_DECIMAL = 1e18;
-  uint256 public constant CORE_STAKE_DECIMAL = 1e24;
+  uint256 public constant NATIVE_DECIMAL = 1e18;
+  uint256 public constant NATIVE_STAKE_DECIMAL = 1e24;
   uint256 public constant ROUND_INTERVAL = 86400;
   uint256 public constant CHAINID = 1116;
   uint32 public constant INIT_BTC_CONFIRM_BLOCK = 6;

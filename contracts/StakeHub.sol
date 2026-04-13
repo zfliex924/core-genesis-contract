@@ -19,7 +19,7 @@ import "./lib/SatoshiPlusHelper.sol";
 /// It interacts with CandidateHub.sol and other protocol contracts during the turnround process.
 /// Underneath it interacts with the agent contracts to deal with different staking assets separately.
 ///
-/// Key change from Core Chain: rewards are distributed to agents by fixed hardcap ratio,
+/// Key change from Chain: rewards are distributed to agents by fixed hardcap ratio,
 /// not by per-candidate dynamic scores. candidateScoresMap is removed.
 contract StakeHub is IStakeHub, System, IParamSubscriber {
   using BytesLib for *;
@@ -54,7 +54,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   function init() external onlyNotInit {
     // initialize list of supported assets
-    assets.push(Asset("CORE", NATIVE_AGENT_ADDR, 6000));
+    assets.push(Asset("NATIVE", NATIVE_AGENT_ADDR, 6000));
     assets.push(Asset("HASHPOWER", HASH_AGENT_ADDR, 2000));
     assets.push(Asset("ZEC", ZEC_AGENT_ADDR, 3000));
 
@@ -211,7 +211,7 @@ contract StakeHub is IStakeHub, System, IParamSubscriber {
 
   function _updateHardcap(string calldata key, uint256 newValue) internal returns(bool) {
     uint256 indexplus;
-    if (Memory.compareStrings(key, "coreHardcap")) {
+    if (Memory.compareStrings(key, "nativeHardcap")) {
       indexplus = 1;
     } else if(Memory.compareStrings(key, "hashHardcap")) {
       indexplus = 2;

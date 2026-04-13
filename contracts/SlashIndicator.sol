@@ -12,7 +12,7 @@ import "./interface/ISystemReward.sol";
 import "./lib/RLPDecode.sol";
 import "./lib/RLPEncode.sol";
 
-/// This contract manages slash/jail operations to validators on Core blockchain
+/// This contract manages slash/jail operations to validators on Chain
 contract SlashIndicator is ISlashIndicator,System,IParamSubscriber{
   using RLPDecode for bytes;
   using RLPDecode for RLPDecode.RLPItem;

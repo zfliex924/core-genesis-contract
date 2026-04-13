@@ -104,7 +104,7 @@ contract GovHub is System, IParamSubscriber {
 
   /// Make a new proposal
   /// @param targets List of addresses to interact with
-  /// @param values List of values (CORE amount) to send
+  /// @param values List of values (Native Token amount) to send
   /// @param signatures List of signatures
   /// @param calldatas List of calldata
   /// @param description Description of the proposal

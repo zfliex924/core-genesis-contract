@@ -96,7 +96,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
         lastRewardRound = c.rewardEndRounds[l - 1];
         historyReward = accruedRewardMap[validators[i]][lastRewardRound];
       }
-      accruedRewardMap[validators[i]][round] = historyReward + rewardList[i] * SatoshiPlusHelper.CORE_STAKE_DECIMAL / c.stakedWeightedAmount;
+      accruedRewardMap[validators[i]][round] = historyReward + rewardList[i] * SatoshiPlusHelper.NATIVE_STAKE_DECIMAL / c.stakedWeightedAmount;
       if (lastRewardRound + 1 == round) {
         c.rewardEndRounds[l - 1] = round;
       } else {
@@ -261,7 +261,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     if (accruedAtSettle <= accruedAtStart) return 0;
 
     // base reward (without multiplier) — caller applies multiplier as needed
-    reward = (accruedAtSettle - accruedAtStart) * stx.amount / SatoshiPlusHelper.CORE_STAKE_DECIMAL;
+    reward = (accruedAtSettle - accruedAtStart) * stx.amount / SatoshiPlusHelper.NATIVE_STAKE_DECIMAL;
 
     stx.round = settleRound;
   }

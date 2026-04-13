@@ -13,7 +13,7 @@ import "./interface/ICandidateHub.sol";
 import "./lib/RLPDecode.sol";
 
 /// This contract manages elected validators in each round
-/// All rewards for validators on Core blockchain are minted in genesis block and stored in this contract
+/// All rewards for validators on Chain are minted in genesis block and stored in this contract
 contract ValidatorSet is IValidatorSet, System, IParamSubscriber {
   using RLPDecode for bytes;
   using RLPDecode for RLPDecode.Iterator;
