@@ -3,16 +3,18 @@ pragma solidity 0.8.4;
 
 import "./lib/Memory.sol";
 import "./lib/BytesToTypes.sol";
-import "./lib/SatoshiPlusHelper.sol";
 import "./interface/ILightClient.sol";
-import "./interface/ICandidateHub.sol";
+import "./interface/IHashPowerAgent.sol";
 import "./interface/IRelayerHub.sol";
 import "./interface/IParamSubscriber.sol";
 import "./System.sol";
 
-/// This contract implements a Zcash light client on Z Protocol blockchain
-/// Relayers store Zcash block headers to the blockchain by calling this contract
-/// Which is used for ZEC staking proof verification and miner power tracking
+/// This contract implements a Zcash light client on Z Protocol blockchain.
+/// Relayers store Zcash block headers here so they can be used as proofs by
+/// ZEC staking and so that miner power can be tracked by HashPowerAgent.
+/// Coinbase / miner-power bookkeeping lives in HashPowerAgent; this contract
+/// only stores headers, validates PoW, and notifies HashPowerAgent when the
+/// heaviest chain extends.
 contract ZcashLightClient is ILightClient, System, IParamSubscriber {
 
   // error codes for storeBlockHeader
@@ -25,6 +27,10 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
   // Zcash block header constants
   uint256 public constant HEADER_SIZE = 1487;
   uint256 public constant BASE_HEADER_SIZE = 140;
+
+  // Encoded record layout: [baseHeader (140) | packed (32)]
+  // packed = (scoreBlock << 128) | (uint256(blockHeight) << 96)
+  uint256 internal constant ENCODED_SIZE = 172;
 
   // Zcash difficulty constants
   uint256 public constant AVERAGING_WINDOW = 17;
@@ -39,10 +45,6 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
   address public constant EQUIHASH_PRECOMPILE = address(0x68);
   address public constant BLAKE2B_PRECOMPILE = address(0x69);
 
-  // Confirmation and power tracking
-  uint256 public constant CONFIRM_BLOCK = 24;
-  uint256 public constant POWER_ROUND_GAP = 7;
-
   bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
   uint32 public constant INIT_CHAIN_HEIGHT = 1;
 
@@ -51,30 +53,18 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
   // Chain state
   uint256 public highScore;
   bytes32 public heaviestBlock;
-  bytes32 public initBlockHash;
+  bytes32 public override initBlockHash;
 
   uint256 public storeBlockGasPrice;
-
-  struct CandidatePower {
-    address[] miners;
-    bytes32[] zecBlocks;
-  }
-
-  struct RoundPower {
-    address[] candidates;
-    mapping(address => CandidatePower) powerMap;
-  }
-  mapping(uint256 => RoundPower) roundPowerMap;
 
   // Block storage
   mapping(bytes32 => bytes) public blockChain;
   mapping(bytes32 => address payable) public submitters;
-  mapping(uint32 => bytes32) public height2HashMap;
+  mapping(uint32 => bytes32) public override height2HashMap;
 
   /*********************** events **************************/
   event StoreHeaderFailed(bytes32 indexed blockHash, int256 indexed returnCode);
-  event StoreHeader(bytes32 indexed blockHash, address candidate, address indexed rewardAddr, uint32 indexed height);
-  event AddMinerPower(bytes32 indexed blockHash, address indexed candidate, address indexed miner);
+  event StoreHeader(bytes32 indexed blockHash, uint32 indexed height);
 
   /*********************** init **************************/
   function init() external onlyNotInit {
@@ -85,13 +75,17 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     initBlockHash = blockHash;
 
     bytes memory baseHeader = slice(INIT_CONSENSUS_STATE_BYTES, 0, BASE_HEADER_SIZE);
-    blockChain[blockHash] = encode(baseHeader, address(0), 1, INIT_CHAIN_HEIGHT, address(0));
+    blockChain[blockHash] = encode(baseHeader, 1, INIT_CHAIN_HEIGHT);
     height2HashMap[INIT_CHAIN_HEIGHT] = blockHash;
     storeBlockGasPrice = INIT_STORE_BLOCK_GAS_PRICE;
     alreadyInit = true;
   }
 
-  /// Store a Zcash block header
+  /// Store a Zcash block header.
+  /// Coinbase / miner-power binding for this block is reported separately via
+  /// HashPowerAgent.submitCoinbase; this function only stores the header and
+  /// notifies the agent when the heaviest chain extends so it can credit the
+  /// block that just reached CONFIRM_BLOCK confirmations.
   function storeBlockHeader(bytes calldata headerBytes) external onlyRelayer {
     require(
       tx.gasprice == (storeBlockGasPrice == 0 ? INIT_STORE_BLOCK_GAS_PRICE : storeBlockGasPrice),
@@ -113,86 +107,22 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
 
     require(blockHeight + 720 > getHeight(heaviestBlock), "can't sync header too far in the past");
 
-    address candidateAddr = address(0);
-    address rewardAddr = address(0);
-
-    blockChain[blockHash] = encode(baseHeader, rewardAddr, scoreBlock, blockHeight, candidateAddr);
+    blockChain[blockHash] = encode(baseHeader, scoreBlock, blockHeight);
     submitters[blockHash] = payable(msg.sender);
     height2HashMap[blockHeight] = blockHash;
 
     IRelayerHub(RELAYER_HUB_ADDR).recordHeaderSubmission(msg.sender);
 
     if (scoreBlock >= highScore) {
-      if (blockHeight > getHeight(heaviestBlock)) {
-        addMinerPower(blockHash);
-      }
+      bool extending = blockHeight > getHeight(heaviestBlock);
       heaviestBlock = blockHash;
       highScore = scoreBlock;
-    }
-
-    emit StoreHeader(blockHash, candidateAddr, rewardAddr, blockHeight);
-  }
-
-  /// Store coinbase transaction data for miner binding
-  function storeCoinbaseInfo(
-    bytes32 blockHash,
-    address candidateAddr,
-    address rewardAddr
-  ) external onlyRelayer {
-    require(blockChain[blockHash].length > 0, "block not found");
-
-    bytes memory stored = blockChain[blockHash];
-    uint256 scoreBlock = getScore(blockHash);
-    uint32 blockHeight = getHeight(blockHash);
-    bytes memory baseHeader = slice(stored, 0, BASE_HEADER_SIZE);
-    blockChain[blockHash] = encode(baseHeader, rewardAddr, scoreBlock, blockHeight, candidateAddr);
-
-    if (blockHeight + CONFIRM_BLOCK <= getHeight(heaviestBlock)) {
-      addMinerPowerDirect(blockHash, blockHeight, candidateAddr, rewardAddr);
-    }
-  }
-
-  function addMinerPower(bytes32 blockHash) internal {
-    for (uint256 i = 0; i < CONFIRM_BLOCK; ++i) {
-      if (blockHash == initBlockHash) return;
-      blockHash = getPrevHash(blockHash);
-    }
-
-    uint256 blockRoundTag = getTimestamp(blockHash) / SatoshiPlusHelper.ROUND_INTERVAL;
-    address candidate = getCandidate(blockHash);
-
-    uint256 frozenRoundTag = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag() - POWER_ROUND_GAP;
-    if (candidate != address(0) && blockRoundTag > frozenRoundTag) {
-      address miner = getRewardAddress(blockHash);
-      RoundPower storage r = roundPowerMap[blockRoundTag];
-      uint256 power = r.powerMap[candidate].miners.length;
-      if (power == 0) {
-        r.candidates.push(candidate);
+      if (extending) {
+        IHashPowerAgent(HASH_AGENT_ADDR).onNewTip(blockHash);
       }
-      r.powerMap[candidate].miners.push(miner);
-      r.powerMap[candidate].zecBlocks.push(blockHash);
-      emit AddMinerPower(blockHash, candidate, miner);
     }
-  }
 
-  function addMinerPowerDirect(
-    bytes32 blockHash,
-    uint32 blockHeight,
-    address candidate,
-    address miner
-  ) internal {
-    uint256 blockRoundTag = getTimestamp(blockHash) / SatoshiPlusHelper.ROUND_INTERVAL;
-    uint256 frozenRoundTag = ICandidateHub(CANDIDATE_HUB_ADDR).getRoundTag() - POWER_ROUND_GAP;
-    if (candidate != address(0) && blockRoundTag > frozenRoundTag) {
-      RoundPower storage r = roundPowerMap[blockRoundTag];
-      uint256 power = r.powerMap[candidate].miners.length;
-      if (power == 0) {
-        r.candidates.push(candidate);
-      }
-      r.powerMap[candidate].miners.push(miner);
-      r.powerMap[candidate].zecBlocks.push(blockHash);
-      emit AddMinerPower(blockHash, candidate, miner);
-    }
+    emit StoreHeader(blockHash, blockHeight);
   }
 
   /*********************** Tx Proof Verification **************************/
@@ -296,35 +226,30 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     return _output;
   }
 
+  /// Pack a stored block record as: 140-byte base header followed by a
+  /// 32-byte word with scoreBlock in the high 16 bytes and blockHeight in
+  /// the next 4 bytes. Total size 172 bytes.
   function encode(
     bytes memory baseHeader,
-    address rewardAddr,
     uint256 scoreBlock,
-    uint32 blockHeight,
-    address candidateAddr
+    uint32 blockHeight
   ) internal pure returns (bytes memory nodeBytes) {
-    nodeBytes = new bytes(204);
-    uint256 rewardAddrValue = uint256(uint160(rewardAddr)) << 64;
-    uint256 v = (scoreBlock << 128) + (uint256(blockHeight) << 96);
-    uint256 candidateValue = uint256(uint160(candidateAddr)) << 96;
-
+    nodeBytes = new bytes(ENCODED_SIZE);
+    uint256 packed = (scoreBlock << 128) | (uint256(blockHeight) << 96);
     assembly {
-      let mc := add(nodeBytes, 0x20)
-      let end := add(mc, 140)
-      for {
-        let cc := add(baseHeader, 0x20)
-      } lt(mc, end) {
-        mc := add(mc, 0x20)
-        cc := add(cc, 0x20)
-      } {
-        mstore(mc, mload(cc))
-      }
-      mc := add(add(nodeBytes, 0x20), 144)
-      mstore(mc, rewardAddrValue)
-      mc := add(mc, 24)
-      mstore(mc, v)
-      mc := add(mc, 20)
-      mstore(mc, candidateValue)
+      // copy base header (140 bytes -> 5 * 32-byte words; the trailing
+      // 20 bytes of the last word are overwritten below by the packed word)
+      let dest := add(nodeBytes, 0x20)
+      let src := add(baseHeader, 0x20)
+      mstore(dest, mload(src))
+      mstore(add(dest, 0x20), mload(add(src, 0x20)))
+      mstore(add(dest, 0x40), mload(add(src, 0x40)))
+      mstore(add(dest, 0x60), mload(add(src, 0x60)))
+      // last 12 bytes of base header (offsets 128..140)
+      let last := mload(add(src, 0x80))
+      mstore(add(dest, 0x80), last)
+      // overwrite from offset 140 with the packed score/height word
+      mstore(add(dest, 140), packed)
     }
     return nodeBytes;
   }
@@ -344,7 +269,11 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
       return (blockHeight, scoreBlock, ERR_BLOCK_ALREADY_EXISTS);
     }
 
-    uint32 bits = uint32(loadInt256(104, baseHeader) >> 224);
+    // nBits is at base-header byte offset 104; loadInt256(_offst, _input) reads
+    // 32 bytes starting at memory address (_input + _offst), which is data
+    // offset (_offst - 32). To read the 32-byte word starting at data offset
+    // 104 we therefore pass 104 + 32 = 136.
+    uint32 bits = uint32(loadInt256(136, baseHeader) >> 224);
     uint256 target = targetFromBits(bits);
 
     if (blockHash == bytes32(0) || uint256(blockHash) > target) {
@@ -360,15 +289,17 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
 
   /*********************** Getters **************************/
 
-  function getTimestamp(bytes32 hash) public view returns (uint64) {
-    return uint32(loadInt256(100, blockChain[hash]) >> 224);
+  // See checkProofOfWork for the explanation of the +32 offset convention used
+  // by loadInt256. nTime is at base-header offset 100, nBits at 104.
+  function getTimestamp(bytes32 hash) public view override returns (uint64) {
+    return uint32(loadInt256(132, blockChain[hash]) >> 224);
   }
 
   function getBits(bytes32 hash) public view returns (uint32) {
-    return uint32(loadInt256(104, blockChain[hash]) >> 224);
+    return uint32(loadInt256(136, blockChain[hash]) >> 224);
   }
 
-  function getPrevHash(bytes32 hash) public view returns (bytes32) {
+  function getPrevHash(bytes32 hash) public view override returns (bytes32) {
     return bytes32(loadInt256(36, blockChain[hash]));
   }
 
@@ -376,23 +307,19 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     return bytes32(loadInt256(68, blockChain[hash]));
   }
 
-  function getCandidate(bytes32 hash) public view returns (address) {
-    return address(uint160(loadInt256(220, blockChain[hash]) >> 96));
-  }
-
-  function getRewardAddress(bytes32 hash) public view returns (address) {
-    return address(uint160(loadInt256(176, blockChain[hash]) >> 96));
-  }
-
+  // The packed score/height word lives at data offset 140, so loadInt256 is
+  // called with 140 + 32 = 172.
   function getScore(bytes32 hash) public view returns (uint256) {
-    return (loadInt256(200, blockChain[hash]) >> 128);
+    return loadInt256(172, blockChain[hash]) >> 128;
   }
 
-  function getHeight(bytes32 hash) public view returns (uint32) {
-    return uint32(loadInt256(216, blockChain[hash]) >> 224);
+  function getHeight(bytes32 hash) public view override returns (uint32) {
+    bytes memory data = blockChain[hash];
+    if (data.length == 0) return 0;
+    return uint32(loadInt256(172, data) >> 96);
   }
 
-  function getChainTipHeight() public view returns (uint32) {
+  function getChainTipHeight() public view override returns (uint32) {
     return getHeight(heaviestBlock);
   }
 
@@ -415,46 +342,10 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     }
   }
 
-  /*********************** ILightClient Interface **************************/
-
-  function getRoundPowers(
-    uint256 roundTimeTag,
-    address[] calldata candidates
-  ) external override view returns (uint256[] memory powers, uint256 totalPower) {
-    uint256 count = candidates.length;
-    powers = new uint256[](count);
-    RoundPower storage r = roundPowerMap[roundTimeTag];
-    for (uint256 i = 0; i < count; ++i) {
-      powers[i] = r.powerMap[candidates[i]].miners.length;
-      totalPower += powers[i];
-    }
-    return (powers, totalPower);
-  }
-
-  function getRoundMiners(
-    uint256 roundTimeTag,
-    address candidate
-  ) external override view returns (address[] memory miners) {
-    return roundPowerMap[roundTimeTag].powerMap[candidate].miners;
-  }
-
-  function getRoundBlocks(
-    uint256 roundTimeTag,
-    address candidate
-  ) external view returns (bytes32[] memory blocks) {
-    return roundPowerMap[roundTimeTag].powerMap[candidate].zecBlocks;
-  }
-
-  function getRoundCandidates(
-    uint256 roundTimeTag
-  ) external override view returns (address[] memory candidates) {
-    return roundPowerMap[roundTimeTag].candidates;
-  }
-
   /*********************** Query Methods **************************/
 
   function isHeaderSynced(bytes32 zecHash) external view returns (bool) {
-    return getHeight(zecHash) >= INIT_CHAIN_HEIGHT;
+    return blockChain[zecHash].length > 0;
   }
 
   function getSubmitter(bytes32 zecHash) external view returns (address payable) {
