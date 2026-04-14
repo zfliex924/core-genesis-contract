@@ -134,13 +134,6 @@ contract Channel is IChannel, System, IParamSubscriber {
     emit DelegatedCoin(msg.sender, candidate, partnerId, msg.value);
   }
 
-  /// Request undelegate through Channel
-  function requestUndelegate(bytes32 stakeId) external {
-    StakeInfo storage info = stakeInfoMap[stakeId];
-    require(info.delegator == msg.sender, "not the delegator");
-    INativeAgent(NATIVE_AGENT_ADDR).requestUndelegate(stakeId);
-  }
-
   /// Undelegate a native coin stake through Channel
   /// Receives ETH from NativeAgent, deducts partner commission, forwards to real delegator
   function undelegateCoin(bytes32 stakeId) external {

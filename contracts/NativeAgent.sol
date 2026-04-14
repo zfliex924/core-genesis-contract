@@ -18,7 +18,6 @@ import "./System.sol";
 contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   uint256 public constant INIT_REQUIRED_COIN_DEPOSIT = 1e18;
-  uint256 public constant UNDELEGATE_DELAY = 72 hours;
 
   uint256 public requiredCoinDeposit;
   uint256 public roundTag;
@@ -32,7 +31,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     uint256 lockUntilRound;  // locked until this round (0 = no lock)
     uint256 multiplier;              // reward multiplier fixed at delegate time (DENOMINATOR = 10000 = 1.0x)
     uint256 reward;                  // accumulated unclaimed reward (from transfer settlement)
-    uint256 undelegateRequestTime;   // block.timestamp when undelegate was requested (0 = not requested)
   }
 
 
@@ -58,7 +56,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   /*********************** events **************************/
   event delegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
-  event undelegateRequested(bytes32 indexed stakeId, address indexed delegator, uint256 requestRound);
   event undelegatedCoin(bytes32 indexed stakeId, address indexed candidate, address indexed delegator, uint256 amount);
   event transferredCoin(bytes32 indexed stakeId, address indexed sourceCandidate, address indexed targetCandidate, address delegator, uint256 amount);
   event claimedReward(address indexed delegator, uint256 reward);
@@ -173,8 +170,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
       round: roundTag,
       lockUntilRound: lockUntilRound,
       multiplier: multiplier,
-      reward: 0,
-      undelegateRequestTime: 0
+      reward: 0
     });
     delegatorStakeIds[msg.sender].push(stakeId);
     Candidate storage c = candidateMap[candidate];
@@ -182,34 +178,18 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     c.realtimeWeightedAmount += amount * multiplier;
   }
 
-
-  /// Request to undelegate — must wait UNDELEGATE_DELAY rounds before withdrawing
-  function requestUndelegate(bytes32 stakeId) external override {
-    StakeTx storage stx = stakeTxMap[stakeId];
-    require(stx.amount > 0, "stake not found");
-    require(stx.delegator == msg.sender, "not the delegator");
-    require(stx.undelegateRequestTime == 0, "already requested");
-
-    stx.undelegateRequestTime = block.timestamp;
-    emit undelegateRequested(stakeId, msg.sender, block.timestamp);
-  }
-
-  /// Withdraw after undelegate delay has passed
-  /// If lock period completed (roundTag >= lockUntilRound): full reward at original multiplier
-  /// If early exit: reward at minimum multiplier (DENOMINATOR = 1.0x)
+  /// Undelegate a native coin stake, only allowed after lock expires
   function undelegateCoin(bytes32 stakeId) external override returns (uint256 amount, uint256 reward) {
     StakeTx storage stx = stakeTxMap[stakeId];
     require(stx.amount > 0, "stake not found");
     require(stx.delegator == msg.sender, "not the delegator");
-    require(stx.undelegateRequestTime > 0, "must request first");
-    require(block.timestamp >= stx.undelegateRequestTime + UNDELEGATE_DELAY, "delay not met");
+    require(stx.lockUntilRound <= roundTag, "lock period not expired");
 
     amount = stx.amount;
     address candidate = stx.candidate;
 
     uint256 rawReward = _collectReward(stx, roundTag - 1) + stx.reward;
-    uint256 mul = roundTag >= stx.lockUntilRound ? stx.multiplier : SatoshiPlusHelper.DENOMINATOR;
-    reward = rawReward * mul / SatoshiPlusHelper.DENOMINATOR;
+    reward = rawReward * stx.multiplier / SatoshiPlusHelper.DENOMINATOR;
 
     Candidate storage c = candidateMap[candidate];
     c.realtimeAmount -= amount;
@@ -232,7 +212,6 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     StakeTx storage stx = stakeTxMap[stakeId];
     require(stx.amount > 0, "stake not found");
     require(stx.delegator == msg.sender, "not the delegator");
-    require(stx.undelegateRequestTime == 0, "undelegate already requested");
     require(stx.candidate != targetCandidate, "same candidate");
 
     // Settle reward from old candidate, store in StakeTx
