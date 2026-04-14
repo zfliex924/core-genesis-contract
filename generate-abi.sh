@@ -5,8 +5,8 @@ if [ ! -z "$name" ]; then
 else
   contracts=( "CandidateHub" "Foundation" "GovHub" \
     "RelayerHub" "SlashIndicator" "SystemReward" "ValidatorSet" \
-    "HashPowerAgent" "NativeAgent" \
-    "StakeHub" "Channel" "Configuration")
+    "HashPowerAgent" "NativeAgent" "ZecAgent" \
+    "StakeHub" "Channel" "GradeManager" "ZcashLightClient")
 
   for e in ${contracts[@]}
   do
@@ -17,4 +17,3 @@ fi
 #~/Downloads/solc-macos --bin -o ./TC_$name contracts/$name.sol
 
 #abigen --bin=./$name/$name.bin --abi=./$name/$name.abi --pkg=$name --out=./$name/$name.go
-
