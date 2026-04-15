@@ -182,7 +182,6 @@ def update_system_contract_address(update_contract,
                                    stake_hub=None,
                                    core_agent=None,
                                    hash_power_agent=None,
-                                   configuration=None,
                                    channel=None,
                                    zec_light_client=None,
                                    zec_agent=None,
@@ -210,8 +209,6 @@ def update_system_contract_address(update_contract,
         core_agent = NativeAgentMock[0]
     if hash_power_agent is None:
         hash_power_agent = HashPowerAgentMock[0]
-    if configuration is None:
-        configuration = ConfigurationMock[0]
     if channel is None:
         channel = Channel[0]
     if zec_light_client is None:
@@ -222,7 +219,7 @@ def update_system_contract_address(update_contract,
         grade_manager = GradeManagerMock[0]
     contracts = [
         validator_set, slash_indicator, system_reward, relay_hub, candidate_hub, gov_hub,
-        burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
+        burn, foundation, stake_hub, core_agent, hash_power_agent, channel,
         zec_light_client, zec_agent, grade_manager
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])

@@ -6,7 +6,7 @@ else
   contracts=( "CandidateHub" "Foundation" "GovHub" \
     "RelayerHub" "SlashIndicator" "SystemReward" "ValidatorSet" \
     "HashPowerAgent" "NativeAgent" \
-    "StakeHub" "Channel" "Configuration")
+    "StakeHub" "Channel")
 
   for e in ${contracts[@]}
   do

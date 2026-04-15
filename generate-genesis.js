@@ -75,7 +75,6 @@ async function main() {
     compileContract('stakehub',             'contracts/StakeHub.sol',        'StakeHub'),
     compileContract('nativeagent',          'contracts/NativeAgent.sol',     'NativeAgent'),
     compileContract('hashpoweragent',       'contracts/HashPowerAgent.sol',  'HashPowerAgent'),
-    compileContract('configuration',        'contracts/Configuration.sol',   'Configuration'),
     compileContract('channel',              'contracts/Channel.sol',         'Channel'),
     compileContract('zeclightclient',       'contracts/ZcashLightClient.sol','ZcashLightClient'),
     compileContract('zecagent',             'contracts/ZecAgent.sol',        'ZecAgent'),

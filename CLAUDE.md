@@ -81,7 +81,6 @@ The config source of truth is `configs/<network>.json`. `generate-genesis.js` ca
 | `StakeHub.sol` | `0x1010` | Calculates hybrid scores; manages reward distribution across agents |
 | `NativeAgent.sol` | `0x1011` | CORE token staking (per-stake `StakeTx` records) |
 | `HashPowerAgent.sol` | `0x1012` | Bitcoin hash power staking |
-| `Configuration.sol` | `0x1016` | System-wide parameters adjustable via governance |
 | `Channel.sol` | `0x1017` | Partner/channel delegator proxy; tracks commission and partner relationships |
 | `ZcashLightClient.sol` | `0x1018` | Zcash light client for cross-chain verification |
 | `ZecAgent.sol` | `0x1019` | ZEC staking; supports dual staking with CORE multiplier |
