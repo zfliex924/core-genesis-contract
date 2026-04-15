@@ -128,12 +128,6 @@ def hash_power_agent(accounts):
 
 
 @pytest.fixture(scope="module")
-def configuration(accounts):
-    c = accounts[0].deploy(ConfigurationMock)
-    c.init()
-    return c
-
-@pytest.fixture(scope="module")
 def channel(accounts):
     c = accounts[0].deploy(Channel)
     c.init()
@@ -181,7 +175,6 @@ def set_system_contract_address(
         stake_hub,
         core_agent,
         hash_power_agent,
-        configuration,
         channel,
         zec_light_client,
         zec_agent,
@@ -189,7 +182,7 @@ def set_system_contract_address(
 ):
     contracts = [
         validator_set, slash_indicator, system_reward, relay_hub, candidate_hub, gov_hub,
-        burn, foundation, stake_hub, core_agent, hash_power_agent, configuration, channel,
+        burn, foundation, stake_hub, core_agent, hash_power_agent, channel,
         zec_light_client, zec_agent, grade_manager
     ]
     args = encode(['address'] * len(contracts), [c.address for c in contracts])

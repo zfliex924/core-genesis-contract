@@ -19,5 +19,4 @@
 | BitcoinAgent    |0x0000000000000000000000000000000000001013 | [bitcoinagent](BitcoinAgent.abi)       |
 | BitcoinStake    |0x0000000000000000000000000000000000001014 | [bitcoinstake](BitcoinStake.abi)       |
 | BitcoinLSTStake    |0x0000000000000000000000000000000000001015 | [bitcoinlststake](BitcoinLSTStake.abi)       |
-| Configuration    |0x0000000000000000000000000000000000001016 | [configuration](Configuration.abi)       |
 | BitcoinLSTToken    |0x0000000000000000000000000000000000010001 | [bitcoinlsttoken](BitcoinLSTToken.abi)       |
