@@ -29,19 +29,32 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
 
   // Relayer reward state
   uint256 constant public INIT_REWARD_FOR_SYNC_HEADER = 1e19;
+  uint256 constant public INIT_REWARD_FOR_COINBASE_SUBMISSION = 1e19;
+  uint256 constant public INIT_REWARD_FOR_DELEGATE_SUBMISSION = 1e19;
   uint256 public constant INIT_CALLER_COMPENSATION_MOLECULE = 50;
-  uint256 public constant INIT_ROUND_SIZE = 100;
+  uint256 public constant INIT_HEADER_ROUND_SIZE = 100;
+  uint256 public constant INIT_SUBMISSION_ROUND_SIZE = 20;
   uint256 public constant INIT_MAXIMUM_WEIGHT = 20;
 
   uint256 public rewardForSyncHeader;
+  uint256 public rewardForCoinbaseSubmission;
+  uint256 public rewardForDelegateSubmission;
   uint256 public callerCompensationMolecule;
-  uint256 public roundSize;
   uint256 public maxWeight;
-  uint256 public countInRound;
-  uint256 public collectedRewardForHeaderRelayer;
 
-  address payable[] public headerRelayerAddressRecord;
-  mapping(address => uint256) public headerRelayersSubmitCount;
+  // Per-pool accumulator. Header submissions and user-action submissions
+  // (coinbase + delegate) accumulate and distribute independently because
+  // header throughput is much higher than user-action throughput.
+  struct RewardPool {
+    uint256 collected;
+    uint256 countInRound;
+    uint256 roundSize;
+    address payable[] addressRecord;
+    mapping(address => uint256) submitCount;
+  }
+  RewardPool internal headerPool;       // recordHeaderSubmission
+  RewardPool internal submissionPool;   // recordCoinbaseSubmission + recordDelegateSubmission
+
   mapping(address => uint256) public relayerRewardVault;
 
   modifier noExist() {
@@ -59,14 +72,6 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
     _;
   }
 
-  modifier onlyLightClient() {
-    require(
-      msg.sender == ZEC_LIGHT_CLIENT_ADDR,
-      "the sender must be a light client contract"
-    );
-    _;
-  }
-
   event relayerRegister(address indexed relayer);
   event relayerUnRegister(address indexed relayer);
 
@@ -74,8 +79,11 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
     requiredDeposit = INIT_REQUIRED_DEPOSIT;
     dues = INIT_DUES;
     rewardForSyncHeader = INIT_REWARD_FOR_SYNC_HEADER;
+    rewardForCoinbaseSubmission = INIT_REWARD_FOR_COINBASE_SUBMISSION;
+    rewardForDelegateSubmission = INIT_REWARD_FOR_DELEGATE_SUBMISSION;
     callerCompensationMolecule = INIT_CALLER_COMPENSATION_MOLECULE;
-    roundSize = INIT_ROUND_SIZE;
+    headerPool.roundSize = INIT_HEADER_ROUND_SIZE;
+    submissionPool.roundSize = INIT_SUBMISSION_ROUND_SIZE;
     maxWeight = INIT_MAXIMUM_WEIGHT;
     alreadyInit = true;
   }
@@ -100,19 +108,34 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
 
   /*********************** Relayer Reward Management ********************************/
 
-  /// Record a header submission by a relayer, called by LightClient contracts
-  /// Triggers reward distribution when round is complete
-  /// @param relayer The relayer who submitted the header
-  function recordHeaderSubmission(address relayer) external override onlyLightClient {
-    collectedRewardForHeaderRelayer += rewardForSyncHeader;
-    if (headerRelayersSubmitCount[relayer] == 0) {
-      headerRelayerAddressRecord.push(payable(relayer));
+  /// Record a header submission, called by ZcashLightClient.
+  function recordHeaderSubmission(address relayer) external override onlyCaller(ZEC_LIGHT_CLIENT_ADDR) {
+    _recordSubmission(headerPool, relayer, rewardForSyncHeader);
+  }
+
+  /// Record a coinbase submission, called by HashPowerAgent.
+  function recordCoinbaseSubmission(address relayer) external override onlyCaller(HASH_AGENT_ADDR) {
+    _recordSubmission(submissionPool, relayer, rewardForCoinbaseSubmission);
+  }
+
+  /// Record a ZEC delegate submission, called by ZecAgent.
+  function recordDelegateSubmission(address relayer) external override onlyCaller(ZEC_AGENT_ADDR) {
+    _recordSubmission(submissionPool, relayer, rewardForDelegateSubmission);
+  }
+
+  /// Accumulate `reward` for `relayer` into `pool` and trigger that pool's
+  /// distribution when its countInRound reaches roundSize. The caller of the
+  /// boundary submission receives the caller-compensation cut.
+  function _recordSubmission(RewardPool storage pool, address relayer, uint256 reward) internal {
+    pool.collected += reward;
+    if (pool.submitCount[relayer] == 0) {
+      pool.addressRecord.push(payable(relayer));
     }
-    headerRelayersSubmitCount[relayer]++;
-    if (++countInRound >= roundSize) {
-      uint256 callerHeaderReward = _distributeRelayerReward();
-      relayerRewardVault[relayer] += callerHeaderReward;
-      countInRound = 0;
+    pool.submitCount[relayer]++;
+    if (++pool.countInRound >= pool.roundSize) {
+      uint256 callerReward = _distributeRelayerReward(pool);
+      relayerRewardVault[relayer] += callerReward;
+      pool.countInRound = 0;
     }
   }
 
@@ -126,16 +149,17 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
     ISystemReward(SYSTEM_REWARD_ADDR).claimRewards(recipient, reward);
   }
 
-  /// Distribute relayer rewards within a round
+  /// Distribute the accumulated rewards in `pool` to its participating
+  /// relayers and reset the pool's per-round state.
   /// @return The caller compensation reward
-  function _distributeRelayerReward() internal returns (uint256) {
-    uint256 totalReward = collectedRewardForHeaderRelayer;
+  function _distributeRelayerReward(RewardPool storage pool) internal returns (uint256) {
+    uint256 totalReward = pool.collected;
     uint256 totalWeight = 0;
-    address payable[] memory _relayers = headerRelayerAddressRecord;
+    address payable[] memory _relayers = pool.addressRecord;
     uint256 relayerSize = _relayers.length;
     uint256[] memory relayerWeight = new uint256[](relayerSize);
     for (uint256 index = 0; index < relayerSize; index++) {
-      uint256 weight = calculateRelayerWeight(headerRelayersSubmitCount[_relayers[index]]);
+      uint256 weight = calculateRelayerWeight(pool.submitCount[_relayers[index]]);
       relayerWeight[index] = weight;
       totalWeight += weight;
     }
@@ -150,12 +174,30 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
     }
     relayerRewardVault[_relayers[0]] += remainReward;
 
-    collectedRewardForHeaderRelayer = 0;
+    pool.collected = 0;
     for (uint256 index = 0; index < relayerSize; index++) {
-      delete headerRelayersSubmitCount[_relayers[index]];
+      delete pool.submitCount[_relayers[index]];
     }
-    delete headerRelayerAddressRecord;
+    delete pool.addressRecord;
     return callerReward;
+  }
+
+  /*********************** Pool view helpers ********************************/
+
+  function getHeaderPoolState() external view returns (uint256 collected, uint256 countInRound, uint256 roundSize) {
+    return (headerPool.collected, headerPool.countInRound, headerPool.roundSize);
+  }
+
+  function getSubmissionPoolState() external view returns (uint256 collected, uint256 countInRound, uint256 roundSize) {
+    return (submissionPool.collected, submissionPool.countInRound, submissionPool.roundSize);
+  }
+
+  function getHeaderPoolSubmitCount(address relayer) external view returns (uint256) {
+    return headerPool.submitCount[relayer];
+  }
+
+  function getSubmissionPoolSubmitCount(address relayer) external view returns (uint256) {
+    return submissionPool.submitCount[relayer];
   }
 
   /// Calculate relayer weight based on number of blocks relayed
@@ -193,20 +235,35 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
       uint256 newRewardForSyncHeader = BytesToTypes.bytesToUint256(32, value);
       require(newRewardForSyncHeader > 0 && newRewardForSyncHeader <= 1e20, "the rewardForSyncHeader out of range");
       rewardForSyncHeader = newRewardForSyncHeader;
+    } else if (Memory.compareStrings(key,"rewardForCoinbaseSubmission")) {
+      require(value.length == 32, "length of rewardForCoinbaseSubmission mismatch");
+      uint256 newReward = BytesToTypes.bytesToUint256(32, value);
+      require(newReward > 0 && newReward <= 1e20, "the rewardForCoinbaseSubmission out of range");
+      rewardForCoinbaseSubmission = newReward;
+    } else if (Memory.compareStrings(key,"rewardForDelegateSubmission")) {
+      require(value.length == 32, "length of rewardForDelegateSubmission mismatch");
+      uint256 newReward = BytesToTypes.bytesToUint256(32, value);
+      require(newReward > 0 && newReward <= 1e20, "the rewardForDelegateSubmission out of range");
+      rewardForDelegateSubmission = newReward;
     } else if (Memory.compareStrings(key,"callerCompensationMolecule")) {
       require(value.length == 32, "length of callerCompensationMolecule mismatch");
       uint256 newCallerCompensationMolecule = BytesToTypes.bytesToUint256(32, value);
       require(newCallerCompensationMolecule <= 10000, "the callerCompensationMolecule out of range");
       callerCompensationMolecule = newCallerCompensationMolecule;
-    } else if (Memory.compareStrings(key,"roundSize")) {
-      require(value.length == 32, "length of roundSize mismatch");
+    } else if (Memory.compareStrings(key,"headerRoundSize")) {
+      require(value.length == 32, "length of headerRoundSize mismatch");
       uint256 newRoundSize = BytesToTypes.bytesToUint256(32, value);
-      require(newRoundSize >= maxWeight, "the roundSize out of range");
-      roundSize = newRoundSize;
+      require(newRoundSize >= maxWeight, "the headerRoundSize out of range");
+      headerPool.roundSize = newRoundSize;
+    } else if (Memory.compareStrings(key,"submissionRoundSize")) {
+      require(value.length == 32, "length of submissionRoundSize mismatch");
+      uint256 newRoundSize = BytesToTypes.bytesToUint256(32, value);
+      require(newRoundSize >= maxWeight, "the submissionRoundSize out of range");
+      submissionPool.roundSize = newRoundSize;
     } else if (Memory.compareStrings(key,"maxWeight")) {
       require(value.length == 32, "length of maxWeight mismatch");
       uint256 newMaxWeight = BytesToTypes.bytesToUint256(32, value);
-      require(newMaxWeight > 0 && newMaxWeight <= roundSize, "the maxWeight out of range");
+      require(newMaxWeight > 0 && newMaxWeight <= headerPool.roundSize && newMaxWeight <= submissionPool.roundSize, "the maxWeight out of range");
       maxWeight = newMaxWeight;
     } else {
       revert UnsupportedGovParam(key);

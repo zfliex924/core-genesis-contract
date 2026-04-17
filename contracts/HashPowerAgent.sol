@@ -6,6 +6,7 @@ import "./interface/IHashPowerAgent.sol";
 import "./interface/ICandidateHub.sol";
 import "./interface/ILightClient.sol";
 import "./interface/IParamSubscriber.sol";
+import "./interface/IRelayerHub.sol";
 import "./lib/BitcoinHelper.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./lib/TypedMemView.sol";
@@ -31,7 +32,6 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
 
   uint256 public constant CONFIRM_BLOCK = 24;
   uint256 public constant POWER_ROUND_GAP = 3;
-
   // Coinbase OP_RETURN payload layout:
   //   <magic (4)> <version (1)> <candidateId (4)> <miner (20)>  = 29 bytes
   uint256 internal constant COINBASE_PAYLOAD_SIZE = 29;
@@ -130,10 +130,11 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
     });
     emit coinbaseSubmitted(blockHash, candidate, miner);
 
-    if (candidate != address(0) &&
-        blockHeight + CONFIRM_BLOCK <= ILightClient(ZEC_LIGHT_CLIENT_ADDR).getChainTipHeight()) {
+    if (blockHeight + CONFIRM_BLOCK <= ILightClient(ZEC_LIGHT_CLIENT_ADDR).getChainTipHeight()) {
       _credit(blockHash);
     }
+
+    IRelayerHub(RELAYER_HUB_ADDR).recordCoinbaseSubmission(msg.sender);
   }
 
   /// A Bitcoin/Zcash coinbase transaction has exactly one input whose outpoint

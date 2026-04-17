@@ -12,6 +12,7 @@ import "./interface/IStakeHub.sol";
 import "./interface/IChannel.sol";
 import "./interface/IGradeManager.sol";
 import "./interface/IParamSubscriber.sol";
+import "./interface/IRelayerHub.sol";
 import "./lib/Address.sol";
 import "./System.sol";
 
@@ -118,7 +119,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     bytes32[] memory nodes,
     uint256 index,
     bytes memory script
-  ) external override {
+  ) external override onlyRelayer {
     require(script[0] == bytes1(uint8(0x04)) && script[5] == bytes1(uint8(0xb1)), "not a valid redeem script");
     bytes32 txid = zecTx.calculateTxId();
     require(zecTxMap[txid].amount == 0, "already delegated");
@@ -146,8 +147,6 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       uint32 version;
       (zecAmount, outputIndex, delegator, candidateId, partnerId, version) = _parseVout(_voutView, script);
       require(zecAmount != 0, "staked value is zero");
-      require(IRelayerHub(RELAYER_HUB_ADDR).isRelayer(msg.sender), "only relayer can submit");
-
       candidate = _resolveCandidate(candidateId);
 
       zecTxMap[txid] = ZecTx(zecAmount, outputIndex, blockTimestamp, lockTime, 0);
@@ -181,6 +180,8 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 weighted = _calcWeighted(zecAmount, lockMul, SatoshiPlusHelper.DENOMINATOR, 0);
     cs.realtimeWeightedAmount += weighted;
     _addExpire(candidate, lockTime, zecAmount, weighted);
+
+    IRelayerHub(RELAYER_HUB_ADDR).recordDelegateSubmission(msg.sender);
   }
 
   /*********************** Dual Staking **************************/
