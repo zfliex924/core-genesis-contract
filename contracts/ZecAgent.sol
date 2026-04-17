@@ -571,4 +571,8 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     return candidateMap[candidate].rewardEndRounds;
   }
 
+  function getExpireAmount(uint256 round, address candidate) external view returns (uint256) {
+    return round2expireInfoMap[round].amountMap[candidate].amount;
+  }
+
 }
