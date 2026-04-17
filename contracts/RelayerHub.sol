@@ -28,9 +28,10 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
   }
 
   // Relayer reward state
-  uint256 constant public INIT_REWARD_FOR_SYNC_HEADER = 1e19;
-  uint256 constant public INIT_REWARD_FOR_COINBASE_SUBMISSION = 1e19;
-  uint256 constant public INIT_REWARD_FOR_DELEGATE_SUBMISSION = 1e19;
+  // Single default rate for all three relayer task types. The three runtime
+  // variables (rewardForSyncHeader / rewardForCoinbaseSubmission /
+  // rewardForDelegateSubmission) are still independently governable.
+  uint256 public constant INIT_REWARD = 1e18;
   uint256 public constant INIT_CALLER_COMPENSATION_MOLECULE = 50;
   uint256 public constant INIT_HEADER_ROUND_SIZE = 100;
   uint256 public constant INIT_SUBMISSION_ROUND_SIZE = 20;
@@ -78,9 +79,9 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
   function init() external onlyNotInit{
     requiredDeposit = INIT_REQUIRED_DEPOSIT;
     dues = INIT_DUES;
-    rewardForSyncHeader = INIT_REWARD_FOR_SYNC_HEADER;
-    rewardForCoinbaseSubmission = INIT_REWARD_FOR_COINBASE_SUBMISSION;
-    rewardForDelegateSubmission = INIT_REWARD_FOR_DELEGATE_SUBMISSION;
+    rewardForSyncHeader = INIT_REWARD;
+    rewardForCoinbaseSubmission = INIT_REWARD;
+    rewardForDelegateSubmission = INIT_REWARD;
     callerCompensationMolecule = INIT_CALLER_COMPENSATION_MOLECULE;
     headerPool.roundSize = INIT_HEADER_ROUND_SIZE;
     submissionPool.roundSize = INIT_SUBMISSION_ROUND_SIZE;
@@ -200,9 +201,17 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
     return submissionPool.submitCount[relayer];
   }
 
-  /// Calculate relayer weight based on number of blocks relayed
-  /// @param count The number of blocks relayed by a specific relayer
-  /// @return The relayer weight
+  /// Compute a relayer's distribution weight from their submission count
+  /// within the current pool round. Shared across all three task types
+  /// (header / coinbase / delegate). The piecewise curve rewards consistent
+  /// participation while penalising hyperactive relayers, so a single
+  /// relayer cannot monopolise the pool by spamming submissions:
+  ///   count ∈ [0, maxWeight]              → weight = count                (linear)
+  ///   count ∈ (maxWeight, 2·maxWeight]    → weight = maxWeight             (capped)
+  ///   count ∈ (2·maxWeight, 2.75·maxWeight] → weight = 3·maxWeight − count (decay)
+  ///   count > 2.75·maxWeight              → weight = count / 4             (penalised)
+  /// @param count Submissions made by the relayer in this round
+  /// @return The relayer's weight used to split the round's reward pool
   function calculateRelayerWeight(uint256 count) public view returns (uint256) {
     if (count <= maxWeight) {
       return count;

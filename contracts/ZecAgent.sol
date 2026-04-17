@@ -32,6 +32,12 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   // Confirmation blocks for ZEC (24 blocks ≈ 30 minutes)
   uint32 public constant ZEC_CONFIRM_BLOCK = 24;
 
+  // Minimum stake amount (in zatoshi) that earns the relayer a delegate
+  // submission reward. Below this threshold the delegation is still accepted
+  // but does not consume the relayer reward pool — prevents a relayer-staker
+  // from farming the reward with dust delegations.
+  uint64 public constant MIN_REWARDABLE_DELEGATE_AMOUNT = 1e8; // 1 ZEC
+
   /// @dev ZEC transaction record for staking
   struct ZecTx {
     uint64 amount;           // ZEC amount in zatoshi
@@ -181,7 +187,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     cs.realtimeWeightedAmount += weighted;
     _addExpire(candidate, lockTime, zecAmount, weighted);
 
-    IRelayerHub(RELAYER_HUB_ADDR).recordDelegateSubmission(msg.sender);
+    if (zecAmount > MIN_REWARDABLE_DELEGATE_AMOUNT) {
+      IRelayerHub(RELAYER_HUB_ADDR).recordDelegateSubmission(msg.sender);
+    }
   }
 
   /*********************** Dual Staking **************************/

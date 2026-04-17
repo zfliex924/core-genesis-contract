@@ -134,7 +134,12 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
       _credit(blockHash);
     }
 
-    IRelayerHub(RELAYER_HUB_ADDR).recordCoinbaseSubmission(msg.sender);
+    // Only reward submissions that bind a real candidate. Otherwise any
+    // historical Zcash block could be relayed for a payout, draining
+    // SystemReward.
+    if (candidate != address(0)) {
+      IRelayerHub(RELAYER_HUB_ADDR).recordCoinbaseSubmission(msg.sender);
+    }
   }
 
   /// A Bitcoin/Zcash coinbase transaction has exactly one input whose outpoint
