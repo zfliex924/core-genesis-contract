@@ -68,7 +68,7 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
 
   /*********************** init **************************/
   function init() external onlyNotInit {
-    bytes32 blockHash = blake2b256(INIT_CONSENSUS_STATE_BYTES);
+    bytes32 blockHash = doubleShaFlip(INIT_CONSENSUS_STATE_BYTES);
 
     highScore = 1;
     heaviestBlock = blockHash;
@@ -93,7 +93,7 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     );
     require(headerBytes.length == HEADER_SIZE, "invalid header length");
 
-    bytes32 blockHash = blake2b256(headerBytes);
+    bytes32 blockHash = doubleShaFlip(headerBytes);
     require(submitters[blockHash] == address(0), "can't sync duplicated header");
 
     require(verifyEquihash(headerBytes), "invalid Equihash solution");
@@ -258,7 +258,7 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     bytes memory baseHeader,
     bytes32 blockHash
   ) internal view returns (uint32 blockHeight, uint256 scoreBlock, int256 errCode) {
-    bytes32 hashPrevBlock = bytes32(loadInt256(36, baseHeader));
+    bytes32 hashPrevBlock = flip32Bytes(bytes32(loadInt256(36, baseHeader)));
 
     uint256 scorePrevBlock = getScore(hashPrevBlock);
     if (scorePrevBlock == 0) {
@@ -273,7 +273,7 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     // 32 bytes starting at memory address (_input + _offst), which is data
     // offset (_offst - 32). To read the 32-byte word starting at data offset
     // 104 we therefore pass 104 + 32 = 136.
-    uint32 bits = uint32(loadInt256(136, baseHeader) >> 224);
+    uint32 bits = flip4Bytes(uint32(loadInt256(136, baseHeader) >> 224));
     uint256 target = targetFromBits(bits);
 
     if (blockHash == bytes32(0) || uint256(blockHash) > target) {
@@ -287,24 +287,58 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     return (blockHeight, scoreBlock, 0);
   }
 
+  // reverse 32 bytes given by value
+  function flip32Bytes(bytes32 input) internal pure returns (bytes32 v) {
+    v = input;
+
+    // swap bytes
+    v = ((v & 0xFF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00) >> 8) |
+        ((v & 0x00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF) << 8);
+
+    // swap 2-byte long pairs
+    v = ((v & 0xFFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000) >> 16) |
+        ((v & 0x0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF) << 16);
+
+    // swap 4-byte long pairs
+    v = ((v & 0xFFFFFFFF00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF00000000) >> 32) |
+        ((v & 0x00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF) << 32);
+
+    // swap 8-byte long pairs
+    v = ((v & 0xFFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF0000000000000000) >> 64) |
+        ((v & 0x0000000000000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF) << 64);
+
+    // swap 16-byte long pairs
+    v = (v >> 128) | (v << 128);
+  }
+
+  function flip4Bytes(uint32 input) internal pure returns (uint32 v) {
+    v = input;
+    v = ((v & 0xFF00FF00) >> 8) | ((v & 0x00FF00FF) << 8);
+    v = (v >> 16) | (v << 16);
+  }
+
+  function doubleShaFlip(bytes memory dataBytes) internal pure returns (bytes32) {
+    return flip32Bytes(sha256(abi.encodePacked(sha256(dataBytes))));
+  }
+
   /*********************** Getters **************************/
 
   // See checkProofOfWork for the explanation of the +32 offset convention used
   // by loadInt256. nTime is at base-header offset 100, nBits at 104.
   function getTimestamp(bytes32 hash) public view override returns (uint64) {
-    return uint32(loadInt256(132, blockChain[hash]) >> 224);
+    return flip4Bytes(uint32(loadInt256(132, blockChain[hash]) >> 224));
   }
 
   function getBits(bytes32 hash) public view returns (uint32) {
-    return uint32(loadInt256(136, blockChain[hash]) >> 224);
+    return flip4Bytes(uint32(loadInt256(136, blockChain[hash]) >> 224));
   }
 
   function getPrevHash(bytes32 hash) public view override returns (bytes32) {
-    return bytes32(loadInt256(36, blockChain[hash]));
+    return flip32Bytes(bytes32(loadInt256(36, blockChain[hash])));
   }
 
   function getMerkleRoot(bytes32 hash) public view returns (bytes32) {
-    return bytes32(loadInt256(68, blockChain[hash]));
+    return flip32Bytes(bytes32(loadInt256(68, blockChain[hash])));
   }
 
   // The packed score/height word lives at data offset 140, so loadInt256 is
