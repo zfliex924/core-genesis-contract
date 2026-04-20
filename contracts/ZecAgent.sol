@@ -127,7 +127,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     bytes memory script
   ) external override onlyRelayer {
     require(script[0] == bytes1(uint8(0x04)) && script[5] == bytes1(uint8(0xb1)), "not a valid redeem script");
-    bytes32 txid = zecTx.calculateTxId();
+    // Parse once; reuse the struct for txid computation and output inspection.
+    BitcoinHelper.ZcashTx memory parsedTx = zecTx.extractTx();
+    bytes32 txid = BitcoinHelper.calculateTxId(parsedTx);
     require(zecTxMap[txid].amount == 0, "already delegated");
 
     uint32 lockTime = _parseLockTime(script);
@@ -146,12 +148,11 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     address candidate;
     uint64 zecAmount;
     {
-      (,,bytes29 _voutView,) = zecTx.extractTx();
       uint32 outputIndex;
       uint32 candidateId;
       uint32 partnerId;
       uint32 version;
-      (zecAmount, outputIndex, delegator, candidateId, partnerId, version) = _parseVout(_voutView, script);
+      (zecAmount, outputIndex, delegator, candidateId, partnerId, version) = _parseVout(parsedTx.voutView, script);
       require(zecAmount != 0, "staked value is zero");
       candidate = _resolveCandidate(candidateId);
 

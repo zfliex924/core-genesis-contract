@@ -4,13 +4,11 @@ pragma solidity 0.8.4;
 import "./TypedMemView.sol";
 import "./SafeCast.sol";
 
+// Zcash transparent address types only; SegWit (P2WPKH, P2WSH) and Taproot (P2TR) are not supported.
 enum ScriptTypes {
-    P2PK, // 32 bytes
+    P2PK,  // 32 bytes
     P2PKH, // 20 bytes
-    P2SH, // 20 bytes
-    P2WPKH, // 20 bytes
-    P2WSH, // 32 bytes
-    P2TR // 32 bytes
+    P2SH   // 20 bytes
 }
 
 library BitcoinHelper {
@@ -48,7 +46,24 @@ library BitcoinHelper {
         HeaderArray,        // 0x11
         MerkleNode,         // 0x12
         MerkleStep,         // 0x13
-        MerkleArray         // 0x14
+        MerkleArray,        // 0x14
+        ZcashHeader,        // 0x15 - Zcash v5 header fields (nVersionGroupId + nConsensusBranchId + nLockTime + nExpiryHeight)
+        ZcashShieldedData   // 0x16 - Sapling/Orchard bundle tail (ignored in transparent-only parsing)
+    }
+
+    /// @notice             parses a Zcash v5 transparent transaction and returns its fields
+    /// Bundling into a struct keeps caller stack depth low when fields are forwarded together.
+    struct ZcashTx {
+        // ─── 1. Header Area (20 bytes total in wire format) ──────
+        uint32  version;           // fOverwintered bit stripped
+        uint32  versionGroupId;    // e.g., 0x26A7270A for v5
+        uint32  consensusBranchId; // Prevents replay attacks
+        uint32  lockTime;          // Block height or timestamp
+        uint32  expiryHeight;      // Block height expiration
+
+        // ─── 2. Transparent Bundle Area (Variable length) ────────
+        bytes29 vinView;           // BTCTypes.Vin (inputs)
+        bytes29 voutView;          // BTCTypes.Vout (outputs)
     }
 
     /// @notice             requires `memView` to be of a specified type
@@ -114,14 +129,33 @@ library BitcoinHelper {
         return _outpoint.index(0, 32);
     }
 
-    /// @notice                      Calculates the required transaction Id from the transaction details
-    /// @dev                         Calculates the hash of transaction details two consecutive times
-    /// @param _tx                   The Bitcoin transaction
-    /// @return                      Transaction Id of the transaction (in LE form)
-    function calculateTxId(bytes memory _tx) internal pure returns (bytes32) {
-        bytes32 inputHash1 = sha256(_tx);
-        bytes32 inputHash2 = sha256(abi.encodePacked(inputHash1));
-        return inputHash2;
+    // ──────────────────────────────────────────────────────────────────────────
+    // BLAKE2b precompile (address 0x69 on Z Protocol chain)
+    // The precompile interprets the first 16 bytes of its input as the BLAKE2b-256
+    // personalisation string; the remainder is the message body.
+    // ──────────────────────────────────────────────────────────────────────────
+    address private constant BLAKE2B_PRECOMPILE = address(0x69);
+
+    function blake2b256(bytes memory _input) private view returns (bytes32 result) {
+        address precompile = BLAKE2B_PRECOMPILE;
+        uint256 inputLen = _input.length;
+        assembly {
+            let ptr := add(_input, 0x20)
+            if iszero(staticcall(gas(), precompile, ptr, inputLen, result, 0x20)) {
+                revert(0, 0)
+            }
+            result := mload(result)
+        }
+    }
+
+    /// @notice  Serialises a uint32 as 4 little-endian bytes (matching Zcash wire format).
+    function _leBytes4(uint32 v) private pure returns (bytes4) {
+        return bytes4(
+            (uint32(uint8(v))         << 24) |
+            (uint32(uint8(v >>  8))   << 16) |
+            (uint32(uint8(v >> 16))   <<  8) |
+             uint32(uint8(v >> 24))
+        );
     }
 
     /// @notice                      Reverts a Bytes32 input
@@ -321,30 +355,15 @@ library BitcoinHelper {
         bytes29 output = indexVout(_voutView, _voutIndex);
         bytes29 _scriptPubkey = scriptPubkey(output);
 
-        if (_scriptType == ScriptTypes.P2TR) {
-            // note: first two bytes are OP_1 and Pushdata Bytelength.
-            // note: script hash length is 32.
-            bitcoinAmount = keccak256(_script) == keccak256(abi.encodePacked(_scriptPubkey.index(2, 32))) ? value(output) : 0;
-        } else if (_scriptType == ScriptTypes.P2PK) {
-            // note: first byte is Pushdata Bytelength.
-            // note: public key length is 32.
+        if (_scriptType == ScriptTypes.P2PK) {
+            // note: first byte is Pushdata Bytelength; public key length is 32.
             bitcoinAmount = keccak256(_script) == keccak256(abi.encodePacked(_scriptPubkey.index(1, 32))) ? value(output) : 0;
         } else if (_scriptType == ScriptTypes.P2PKH) {
-            // note: first three bytes are OP_DUP, OP_HASH160, Pushdata Bytelength.
-            // note: public key hash length is 20.
+            // note: first three bytes are OP_DUP, OP_HASH160, Pushdata Bytelength; pkh length is 20.
             bitcoinAmount = keccak256(_script) == keccak256(abi.encodePacked(_scriptPubkey.indexAddress(3))) ? value(output) : 0;
         } else if (_scriptType == ScriptTypes.P2SH) {
-            // note: first two bytes are OP_HASH160, Pushdata Bytelength
-            // note: script hash length is 20.
+            // note: first two bytes are OP_HASH160, Pushdata Bytelength; script hash length is 20.
             bitcoinAmount = keccak256(_script) == keccak256(abi.encodePacked(_scriptPubkey.indexAddress(2))) ? value(output) : 0;
-        } else if (_scriptType == ScriptTypes.P2WPKH) {
-            // note: first two bytes are OP_0, Pushdata Bytelength
-            // note: segwit public key hash length is 20.
-            bitcoinAmount = keccak256(_script) == keccak256(abi.encodePacked(_scriptPubkey.indexAddress(2))) ? value(output) : 0;
-        } else if (_scriptType == ScriptTypes.P2WSH) {
-            // note: first two bytes are OP_0, Pushdata Bytelength
-            // note: segwit script hash length is 32.
-            bitcoinAmount = keccak256(_script) == keccak256(abi.encodePacked(_scriptPubkey.index(2, 32))) ? value(output) : 0;
         }
 
     }
@@ -479,12 +498,12 @@ library BitcoinHelper {
             if(_arbitraryData == TypedMemView.NULL) {
                 // Output is not an arbitrary data
                 if (
-                    (_scriptPubkeyView.len() == 23 && 
+                    (_scriptPubkeyView.len() == 23 &&
                     _scriptPubkeyView.indexUint(0, 1) == 0xa9 &&
                     _scriptPubkeyView.indexUint(1, 1) == 0x14 &&
                     _scriptPubkeyView.indexUint(22, 1) == 0x87 &&
                     bytes20(_scriptPubkeyView.indexAddress(2)) == ripemd160(abi.encode(sha256(_script)))) ||
-                    (_scriptPubkeyView.len() == 34 && 
+                    (_scriptPubkeyView.len() == 34 &&
                     _scriptPubkeyView.indexUint(0, 1) == 0 &&
                     _scriptPubkeyView.indexUint(1, 1) == 32 &&
                     _scriptPubkeyView.index(2, 32) == sha256(_script))
@@ -595,12 +614,12 @@ library BitcoinHelper {
         if (_skp.indexUint(1, 1) == 0x6a) {
             if (_skp.indexUint(2, 1) == 0x4c) {
                 uint64 _payloadLen = _skp.indexUint(3, 1).toUint64();
-                require(_payloadLen == _bodyLength - 3 && 
+                require(_payloadLen == _bodyLength - 3 &&
                     _bodyLength <= 83 && _bodyLength >= 79, "BitcoinHelper: invalid opreturn");
                 return _skp.slice(4, _payloadLen, uint40(BTCTypes.OpReturnPayload));
             } else {
                 uint64 _payloadLen = _skp.indexUint(2, 1).toUint64();
-                require(_payloadLen == _bodyLength - 2 && 
+                require(_payloadLen == _bodyLength - 2 &&
                     _bodyLength <= 77 && _bodyLength >= 4, "BitcoinHelper: invalid opreturn");
                 return _skp.slice(3, _payloadLen, uint40(BTCTypes.OpReturnPayload));
             }
@@ -889,30 +908,86 @@ library BitcoinHelper {
         return _offset;
     }
 
-    /// @notice             extracts tx details from the given tx bytes
-    /// @param _tx          the transaction bytes
-    /// @return _version    parsed tx version
-    /// @return _vinView    parsed tx vin
-    /// @return _voutView   parsed tx vout
-    /// @return _lockTime   parsed tx lock time
-    function extractTx(bytes memory _tx) internal pure returns (uint32 _version, bytes29 _vinView, bytes29 _voutView, uint32 _lockTime) {
+    /// @notice                    Parses a Zcash v5 (ZIP-225/NU5) transparent transaction.
+    /// @dev                       Wire layout: [nVersion(4)] [nVersionGroupId(4)] [nConsensusBranchId(4)]
+    ///                            [vin] [vout] [nLockTime(4)] [nExpiryHeight(4)] [shielded data (ignored)]
+    ///                            Bit 31 of the version word is the fOverwintered flag; it is stripped before
+    ///                            storing into version.  Trailing Sapling/Orchard bundle bytes are silently ignored.
+    /// @param _tx                 Raw Zcash v5 transaction bytes
+    /// @return _parsedTx            Parsed transaction fields
+    function extractTx(bytes memory _tx) internal pure returns (ZcashTx memory _parsedTx) {
         bytes29 _txView = _tx.ref(uint40(BTCTypes.Unknown));
 
-        _version = _txView.indexLEUint(0, 4).toUint32();
-        uint256 _offset = 4;
+        // nVersion word: bit 31 = fOverwintered flag (always set for Zcash v3+)
+        _parsedTx.version          = (_txView.indexLEUint(0, 4).toUint32()) & 0x7FFFFFFF;
+        _parsedTx.versionGroupId   = _txView.indexLEUint(4, 4).toUint32();
+        _parsedTx.consensusBranchId = _txView.indexLEUint(8, 4).toUint32();
+        uint256 _offset = 12;
 
         bytes29 _remaining = _txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown));
         uint256 _vinLen = getVinLength(_remaining);
-        _vinView = _txView.slice(_offset, _vinLen, uint40(BTCTypes.Vin));
+        _parsedTx.vinView = _txView.slice(_offset, _vinLen, uint40(BTCTypes.Vin));
         _offset += _vinLen;
 
         _remaining = _txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown));
         uint256 _voutLen = getVoutLength(_remaining);
-        _voutView = _txView.slice(_offset, _voutLen, uint40(BTCTypes.Vout));
+        _parsedTx.voutView = _txView.slice(_offset, _voutLen, uint40(BTCTypes.Vout));
         _offset += _voutLen;
 
-        _lockTime = _txView.indexLEUint(_offset, 4).toUint32();
-        require(_offset + 4 == _txView.len(), "BitcoinHelper: invalid tx");
+        require(_offset + 8 <= _txView.len(), "BitcoinHelper: tx too short");
+        _parsedTx.lockTime    = _txView.indexLEUint(_offset,     4).toUint32();
+        _parsedTx.expiryHeight = _txView.indexLEUint(_offset + 4, 4).toUint32();
+        // Bytes after _offset + 8 are Sapling/Orchard shielded bundle data; ignored here.
+    }
+
+    /// @notice  Computes the Zcash v5 ZIP-244 txid from a parsed ZcashTx struct.
+    /// @dev     Call extractTx first so the raw bytes are parsed exactly once.
+    ///          ZcashTx memory pointer occupies a single stack slot, leaving room for the
+    ///          loop locals without hitting the EVM 16-slot limit.
+    ///          Zcash v3+ always has fOverwintered (bit 31) set in the wire nVersion word.
+    function calculateTxId(ZcashTx memory _tx) internal view returns (bytes32) {
+        // Collect prevouts and sequences in a single pass over inputs.
+        bytes memory _prevoutsData;
+        bytes memory _seqData;
+        {
+            uint256 _nIns = uint256(indexCompactInt(_tx.vinView, 0));
+            for (uint256 _i = 0; _i < _nIns; _i++) {
+                bytes29 _input = indexVin(_tx.vinView, _i);
+                _prevoutsData = abi.encodePacked(_prevoutsData, outpoint(_input).clone());
+
+                uint64 _scriptLen = indexCompactInt(_input, 36);
+                _seqData = abi.encodePacked(_seqData,
+                    bytes4(_input.index(36 + compactIntLength(_scriptLen) + _scriptLen, 4)));
+            }
+        }
+
+        bytes memory _outsData;
+        {
+            uint256 _nOuts = uint256(indexCompactInt(_tx.voutView, 0));
+            for (uint256 _i = 0; _i < _nOuts; _i++) {
+                _outsData = abi.encodePacked(_outsData, indexVout(_tx.voutView, _i).clone());
+            }
+        }
+
+        return blake2b256(abi.encodePacked(
+            bytes9("ZTxIdHash"), bytes7(0),
+            blake2b256(abi.encodePacked(
+                bytes16("ZTxIdHeadersHash"),
+                _leBytes4(_tx.version | 0x80000000),
+                _leBytes4(_tx.versionGroupId),
+                _leBytes4(_tx.consensusBranchId),
+                _leBytes4(_tx.lockTime),
+                _leBytes4(_tx.expiryHeight)
+            )),
+            blake2b256(abi.encodePacked(
+                bytes16("ZTxIdTranspaHash"),
+                blake2b256(abi.encodePacked(bytes16("ZTxIdPrevoutHash"), _prevoutsData)),
+                blake2b256(abi.encodePacked(bytes12("ZTxIdSeqHash"), bytes4(0), _seqData)),
+                blake2b256(abi.encodePacked(bytes16("ZTxIdOutputsHash"), _outsData))
+            )),
+            blake2b256(abi.encodePacked(bytes16("ZTxIdSaplingHash"))),
+            blake2b256(abi.encodePacked(bytes16("ZTxIdOrchardHash")))
+        ));
     }
 
     /// @notice             Parses the BTC vin and set btcReceipt as used.

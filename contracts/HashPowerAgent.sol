@@ -99,9 +99,11 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
     uint32 blockHeight,
     bytes32[] calldata nodes
   ) external override onlyRelayer {
-    // Coinbase is the first transaction in the block, so the merkle leaf
-    // index is fixed to 0.
-    bytes32 txid = BitcoinHelper.calculateTxId(coinbaseTx);
+    // Parse the transaction once; reuse the struct for txid computation and payload inspection.
+    BitcoinHelper.ZcashTx memory parsedTx = coinbaseTx.extractTx();
+
+    // Coinbase is the first transaction in the block, so the merkle leaf index is fixed to 0.
+    bytes32 txid = BitcoinHelper.calculateTxId(parsedTx);
     require(
       ILightClient(ZEC_LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, 0, nodes, 0),
       "coinbase proof failed"
@@ -110,13 +112,12 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
     bytes32 blockHash = ILightClient(ZEC_LIGHT_CLIENT_ADDR).height2HashMap(blockHeight);
     require(!coinbaseMap[blockHash].submitted, "coinbase already submitted");
 
-    (, bytes29 vinView, bytes29 voutView, ) = BitcoinHelper.extractTx(coinbaseTx);
-    require(_isCoinbaseVin(vinView), "not a coinbase tx");
+    require(_isCoinbaseVin(parsedTx.vinView), "not a coinbase tx");
 
     // Coinbases without a SAT+ OP_RETURN are still recorded so a relayer can
     // mark a block as processed exactly once; they simply contribute no miner
     // power and never get credited.
-    (uint32 candidateId, address miner) = _parseCoinbasePayload(voutView);
+    (uint32 candidateId, address miner) = _parseCoinbasePayload(parsedTx.voutView);
     address candidate;
     if (miner != address(0)) {
       candidate = _resolveCandidate(candidateId);
@@ -343,7 +344,7 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
   }
 
   /*********************** Governance ********************************/
-  function updateParam(string calldata key, bytes calldata value) external override onlyInit onlyGov view {
+  function updateParam(string calldata key, bytes calldata /*value*/) external override onlyInit onlyGov view {
     revert UnsupportedGovParam(key);
   }
 }
