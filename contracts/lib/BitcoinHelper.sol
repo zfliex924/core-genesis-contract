@@ -926,17 +926,17 @@ library BitcoinHelper {
         _parsedTx.versionGroupId     = _txView.indexLEUint(4, 4).toUint32();
         _parsedTx.consensusBranchId  = _txView.indexLEUint(8, 4).toUint32();
 
-        uint256 _offset = 12;
+        _parsedTx.lockTime     = _txView.indexLEUint(12, 4).toUint32();
+        _parsedTx.expiryHeight = _txView.indexLEUint(16, 4).toUint32();
+
+        uint256 _offset = 20; // start of vin
+
         uint256 _vinLen = getVinLength(_txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown)));
         _parsedTx.vinView = _txView.slice(_offset, _vinLen, uint40(BTCTypes.Vin));
         _offset += _vinLen;
 
         uint256 _voutLen = getVoutLength(_txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown)));
         _parsedTx.voutView = _txView.slice(_offset, _voutLen, uint40(BTCTypes.Vout));
-        _offset += _voutLen;
-
-        _parsedTx.lockTime    = _txView.indexLEUint(_offset, 4).toUint32();
-        _parsedTx.expiryHeight = _txView.indexLEUint(_offset + 4, 4).toUint32();
 
         // Trailing bytes are Sapling/Orchard shielded bundle data; ignored for transparent parsing.
     }
