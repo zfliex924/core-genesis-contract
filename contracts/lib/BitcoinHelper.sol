@@ -945,48 +945,57 @@ library BitcoinHelper {
     /// @dev     Requires the on-chain BLAKE2b precompile at address 0x69.
     ///          Call extractTx first so the raw bytes are parsed exactly once.
     function calculateTxId(ZcashTx memory _tx) internal view returns (bytes32) {
-        // v5 (NU5): ZIP-244 BLAKE2b tree-hash.
-        // Collect prevouts and sequences in a single pass over inputs.
         bytes memory _prevoutsData;
         bytes memory _seqData;
         {
             uint256 _nIns = uint256(indexCompactInt(_tx.vinView, 0));
-            for (uint256 _i = 0; _i < _nIns; _i++) {
-                bytes29 _input = indexVin(_tx.vinView, _i);
+            for (uint256 i = 0; i < _nIns; i++) {
+                bytes29 _input = indexVin(_tx.vinView, i);
                 _prevoutsData = abi.encodePacked(_prevoutsData, outpoint(_input).clone());
 
                 uint64 _scriptLen = indexCompactInt(_input, 36);
-                _seqData = abi.encodePacked(_seqData,
-                    bytes4(_input.index(36 + compactIntLength(_scriptLen) + _scriptLen, 4)));
+                uint256 _seqOffset = 36 + compactIntLength(_scriptLen) + _scriptLen;
+                _seqData = abi.encodePacked(_seqData, bytes4(_input.index(_seqOffset, 4)));
             }
         }
 
         bytes memory _outsData;
         {
             uint256 _nOuts = uint256(indexCompactInt(_tx.voutView, 0));
-            for (uint256 _i = 0; _i < _nOuts; _i++) {
-                _outsData = abi.encodePacked(_outsData, indexVout(_tx.voutView, _i).clone());
+            for (uint256 i = 0; i < _nOuts; i++) {
+                _outsData = abi.encodePacked(_outsData, indexVout(_tx.voutView, i).clone());
             }
         }
 
+        bytes32 headerHash = blake2b256(abi.encodePacked(
+            bytes16("ZTxIdHeadersHash"),
+            _leBytes4(_tx.version | 0x80000000),
+            _leBytes4(_tx.versionGroupId),
+            _leBytes4(_tx.consensusBranchId),
+            _leBytes4(_tx.lockTime),
+            _leBytes4(_tx.expiryHeight)
+        ));
+
+        bytes32 prevoutsHash = blake2b256(abi.encodePacked(bytes16("ZTxIdPrevoutHash"), _prevoutsData));
+        bytes32 sequenceHash = blake2b256(abi.encodePacked(bytes16("ZTxIdSequencHash"), _seqData));
+        bytes32 outputsHash  = blake2b256(abi.encodePacked(bytes16("ZTxIdOutputsHash"), _outsData));
+
+        bytes32 transparentHash = blake2b256(abi.encodePacked(
+            bytes16("ZTxIdTranspaHash"),
+            prevoutsHash,
+            sequenceHash,
+            outputsHash
+        ));
+
+        bytes32 saplingHash = blake2b256(abi.encodePacked(bytes16("ZTxIdSaplingHash")));
+        bytes32 orchardHash = blake2b256(abi.encodePacked(bytes16("ZTxIdOrchardHash")));
+
         return blake2b256(abi.encodePacked(
-            bytes9("ZTxIdHash"), bytes7(0),
-            blake2b256(abi.encodePacked(
-                bytes16("ZTxIdHeadersHash"),
-                _leBytes4(_tx.version | 0x80000000),
-                _leBytes4(_tx.versionGroupId),
-                _leBytes4(_tx.consensusBranchId),
-                _leBytes4(_tx.lockTime),
-                _leBytes4(_tx.expiryHeight)
-            )),
-            blake2b256(abi.encodePacked(
-                bytes16("ZTxIdTranspaHash"),
-                blake2b256(abi.encodePacked(bytes16("ZTxIdPrevoutHash"), _prevoutsData)),
-                blake2b256(abi.encodePacked(bytes12("ZTxIdSeqHash"), bytes4(0), _seqData)),
-                blake2b256(abi.encodePacked(bytes16("ZTxIdOutputsHash"), _outsData))
-            )),
-            blake2b256(abi.encodePacked(bytes16("ZTxIdSaplingHash"))),
-            blake2b256(abi.encodePacked(bytes16("ZTxIdOrchardHash")))
+            bytes12("ZcashTxHash_"), _leBytes4(_tx.consensusBranchId),
+            headerHash,
+            transparentHash,
+            saplingHash,
+            orchardHash
         ));
     }
 
