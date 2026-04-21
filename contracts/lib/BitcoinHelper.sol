@@ -54,10 +54,10 @@ library BitcoinHelper {
     /// @notice             parses a Zcash v5 transparent transaction and returns its fields
     /// Bundling into a struct keeps caller stack depth low when fields are forwarded together.
     struct ZcashTx {
-        // ─── 1. Header Area (20 bytes total in wire format) ──────
+        // ─── 1. Header Area ──────────────────────────────────────
         uint32  version;           // fOverwintered bit stripped
-        uint32  versionGroupId;    // e.g., 0x26A7270A for v5
-        uint32  consensusBranchId; // Prevents replay attacks
+        uint32  versionGroupId;    // 0x26A7270A for v5 (NU5)
+        uint32  consensusBranchId;
         uint32  lockTime;          // Block height or timestamp
         uint32  expiryHeight;      // Block height expiration
 
@@ -908,44 +908,44 @@ library BitcoinHelper {
         return _offset;
     }
 
-    /// @notice                    Parses a Zcash v5 (ZIP-225/NU5) transparent transaction.
+    /// @notice                    Parses a Zcash v5 (NU5) transparent transaction.
     /// @dev                       Wire layout: [nVersion(4)] [nVersionGroupId(4)] [nConsensusBranchId(4)]
-    ///                            [vin] [vout] [nLockTime(4)] [nExpiryHeight(4)] [shielded data (ignored)]
+    ///                                         [vin] [vout] [nLockTime(4)] [nExpiryHeight(4)] [Sapling/Orchard data (ignored)]
     ///                            Bit 31 of the version word is the fOverwintered flag; it is stripped before
-    ///                            storing into version.  Trailing Sapling/Orchard bundle bytes are silently ignored.
+    ///                            storing into version.  Trailing shielded bundle bytes are silently ignored.
     /// @param _tx                 Raw Zcash v5 transaction bytes
-    /// @return _parsedTx            Parsed transaction fields
+    /// @return _parsedTx          Parsed transaction fields
     function extractTx(bytes memory _tx) internal pure returns (ZcashTx memory _parsedTx) {
         bytes29 _txView = _tx.ref(uint40(BTCTypes.Unknown));
 
-        // nVersion word: bit 31 = fOverwintered flag (always set for Zcash v3+)
-        _parsedTx.version          = (_txView.indexLEUint(0, 4).toUint32()) & 0x7FFFFFFF;
-        _parsedTx.versionGroupId   = _txView.indexLEUint(4, 4).toUint32();
-        _parsedTx.consensusBranchId = _txView.indexLEUint(8, 4).toUint32();
-        uint256 _offset = 12;
+        uint32 _rawVersion = _txView.indexLEUint(0, 4).toUint32();
+        require(_rawVersion & 0x80000000 != 0, "BitcoinHelper: fOverwintered flag not set");
+        _parsedTx.version = _rawVersion & 0x7FFFFFFF;
+        require(_parsedTx.version == 5, "BitcoinHelper: unsupported tx version");
 
-        bytes29 _remaining = _txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown));
-        uint256 _vinLen = getVinLength(_remaining);
+        _parsedTx.versionGroupId     = _txView.indexLEUint(4, 4).toUint32();
+        _parsedTx.consensusBranchId  = _txView.indexLEUint(8, 4).toUint32();
+
+        uint256 _offset = 12;
+        uint256 _vinLen = getVinLength(_txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown)));
         _parsedTx.vinView = _txView.slice(_offset, _vinLen, uint40(BTCTypes.Vin));
         _offset += _vinLen;
 
-        _remaining = _txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown));
-        uint256 _voutLen = getVoutLength(_remaining);
+        uint256 _voutLen = getVoutLength(_txView.postfix(_txView.len() - _offset, uint40(BTCTypes.Unknown)));
         _parsedTx.voutView = _txView.slice(_offset, _voutLen, uint40(BTCTypes.Vout));
         _offset += _voutLen;
 
-        require(_offset + 8 <= _txView.len(), "BitcoinHelper: tx too short");
-        _parsedTx.lockTime    = _txView.indexLEUint(_offset,     4).toUint32();
+        _parsedTx.lockTime    = _txView.indexLEUint(_offset, 4).toUint32();
         _parsedTx.expiryHeight = _txView.indexLEUint(_offset + 4, 4).toUint32();
-        // Bytes after _offset + 8 are Sapling/Orchard shielded bundle data; ignored here.
+
+        // Trailing bytes are Sapling/Orchard shielded bundle data; ignored for transparent parsing.
     }
 
-    /// @notice  Computes the Zcash v5 ZIP-244 txid from a parsed ZcashTx struct.
-    /// @dev     Call extractTx first so the raw bytes are parsed exactly once.
-    ///          ZcashTx memory pointer occupies a single stack slot, leaving room for the
-    ///          loop locals without hitting the EVM 16-slot limit.
-    ///          Zcash v3+ always has fOverwintered (bit 31) set in the wire nVersion word.
+    /// @notice  Computes the txid for a Zcash v5 (NU5) transaction via ZIP-244 BLAKE2b tree-hash.
+    /// @dev     Requires the on-chain BLAKE2b precompile at address 0x69.
+    ///          Call extractTx first so the raw bytes are parsed exactly once.
     function calculateTxId(ZcashTx memory _tx) internal view returns (bytes32) {
+        // v5 (NU5): ZIP-244 BLAKE2b tree-hash.
         // Collect prevouts and sequences in a single pass over inputs.
         bytes memory _prevoutsData;
         bytes memory _seqData;
