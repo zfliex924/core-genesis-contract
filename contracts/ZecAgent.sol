@@ -49,6 +49,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
   /// @dev Deposit receipt linking txid to candidate/delegator
   struct DepositReceipt {
+    address sourceCandidate;   // Previous candidate for transferZec (address(0) if not transferred)
     address candidate;       // Validator candidate
     address delegator;       // Delegator EVM address
     uint256 round;           // Round when deposit was recorded
@@ -171,6 +172,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 lockMul = IGradeManager(GRADE_MANAGER_ADDR).getMultiplier(lockDays);
 
     receiptMap[txid] = DepositReceipt({
+      sourceCandidate: address(0),
       candidate: candidate,
       delegator: delegator,
       round: roundTag,
@@ -251,14 +253,20 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 expireRound = uint256(ztx.lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
     require(expireRound > roundTag + 1, "insufficient locking rounds");
 
+    address sourceCandidate = dr.candidate;
+
     // Settle reward from old candidate
-    (uint256 settled, ) = _collectReward(txid, dr.candidate, dr.round, roundTag - 1, ztx);
+    (uint256 settled, ) = _collectReward(txid, sourceCandidate, dr.round, roundTag - 1, ztx);
     dr.reward += settled;
+
+    if (dr.sourceCandidate == address(0)) {
+      dr.sourceCandidate = sourceCandidate;
+    }
     dr.round = roundTag;
 
     // Move weighted amount
     uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
-    CandidateState storage oldCs = candidateMap[dr.candidate];
+    CandidateState storage oldCs = candidateMap[sourceCandidate];
     oldCs.realtimeAmount -= ztx.amount;
     oldCs.realtimeWeightedAmount -= weighted;
 
@@ -267,7 +275,6 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     newCs.realtimeWeightedAmount += weighted;
 
     // Migrate expiry info to the new candidate
-    address sourceCandidate = dr.candidate;
     _removeExpire(sourceCandidate, ztx.lockTime, ztx.amount, weighted);
     _addExpire(targetCandidate, ztx.lockTime, ztx.amount, weighted);
 
@@ -384,7 +391,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
   /// Prepare for new round — remove expired stakes from realtime amounts
   function prepare(uint256 round) external override {
-    require(msg.sender == STAKE_HUB_ADDR || msg.sender == CANDIDATE_HUB_ADDR, "not authorized");
+    require(msg.sender == STAKE_HUB_ADDR, "not authorized");
     ExpireInfo storage expireInfo = round2expireInfoMap[round];
     for (uint256 i = 0; i < expireInfo.candidateList.length; ++i) {
       address candidate = expireInfo.candidateList[i];
@@ -511,23 +518,35 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 settleRound,
     ZecTx storage ztx
   ) internal returns (uint256 reward, bool expired) {
-    (uint256 calculateRound, bool exp) = _getCalculateRound(txid, settleRound);
-    expired = exp;
+    uint256 calculateRound;
 
-    if (calculateRound <= drRound) return (0, expired);
+    (calculateRound, expired) = _getCalculateRound(txid, settleRound);
+    if (calculateRound < drRound) return (0, expired);
 
-    // Base reward
-    uint256 accruedAtSettle = _getAccruedReward(candidate, calculateRound);
-    uint256 accruedAtStart = _getAccruedReward(candidate, drRound);
-    if (accruedAtSettle <= accruedAtStart) return (0, expired);
-
-    // reward share = accruedDiff × weighted / ZEC_DECIMAL
     DepositReceipt storage dr = receiptMap[txid];
-    uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
-    reward = (accruedAtSettle - accruedAtStart) * weighted / SatoshiPlusHelper.ZEC_DECIMAL;
+    if (dr.sourceCandidate != address(0)) {
+      uint256 accruedAtSettle = _getAccruedReward(dr.sourceCandidate, drRound);
+      uint256 accruedAtStart = _getAccruedReward(dr.sourceCandidate, drRound-1);
+      if (accruedAtSettle > accruedAtStart) {
+        uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+        reward = (accruedAtSettle - accruedAtStart) * weighted / SatoshiPlusHelper.ZEC_DECIMAL;
+      }
+      dr.sourceCandidate = address(0);
+    }
 
-    // Update receipt round
-    receiptMap[txid].round = calculateRound;
+    if (calculateRound > drRound) {
+      // Base reward
+      uint256 accruedAtSettle = _getAccruedReward(candidate, calculateRound);
+      uint256 accruedAtStart = _getAccruedReward(candidate, drRound);
+      if (accruedAtSettle > accruedAtStart) {
+      // reward share = accruedDiff × weighted / ZEC_DECIMAL
+        uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+        reward += (accruedAtSettle - accruedAtStart) * weighted / SatoshiPlusHelper.ZEC_DECIMAL;
+      }
+
+      // Update receipt round
+      receiptMap[txid].round = calculateRound;
+    }
 
     emit rewardCollected(txid, receiptMap[txid].delegator, reward, expired);
   }

@@ -24,6 +24,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   /// @dev Individual stake record
   struct StakeTx {
+    address sourceCandidate;   // for transfer settlement: original candidate (address(0) if not transferred)
     address candidate;       // validator candidate
     address delegator;       // stake owner
     uint256 amount;          // staked amount
@@ -169,6 +170,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   function _createStake(address candidate, uint256 amount, uint256 lockUntilRound, uint256 multiplier) internal returns (bytes32 stakeId) {
     stakeId = bytes32(stakeIdCounter++);
     stakeTxMap[stakeId] = StakeTx({
+      sourceCandidate: address(0),
       candidate: candidate,
       delegator: msg.sender,
       amount: amount,
@@ -230,6 +232,9 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     candidateMap[targetCandidate].realtimeAmount += stx.amount;
     candidateMap[targetCandidate].realtimeWeightedAmount += weighted;
     stx.candidate = targetCandidate;
+    if (stx.sourceCandidate == address(0)) {
+      stx.sourceCandidate = oldCandidate;
+    }
     stx.round = roundTag;
 
     emit transferredCoin(stakeId, oldCandidate, targetCandidate, msg.sender, stx.amount);
@@ -238,16 +243,27 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
   /*********************** Internal methods ***************************/
 
   function _collectReward(StakeTx storage stx, uint256 settleRound) internal returns (uint256 reward) {
-    if (stx.round >= settleRound) return 0;
+    if (stx.round > settleRound) return 0;
 
-    uint256 accruedAtSettle = _getAccruedReward(stx.candidate, settleRound);
-    uint256 accruedAtStart = _getAccruedReward(stx.candidate, stx.round);
-    if (accruedAtSettle <= accruedAtStart) return 0;
+    if (stx.sourceCandidate != address(0)) {
+      uint256 accruedAtSettle = _getAccruedReward(stx.sourceCandidate, stx.round);
+      uint256 accruedAtStart = _getAccruedReward(stx.sourceCandidate, stx.round - 1);
+      if (accruedAtSettle > accruedAtStart) {
+        reward += (accruedAtSettle - accruedAtStart) * stx.amount / SatoshiPlusHelper.NATIVE_STAKE_DECIMAL;
+      }
+      stx.sourceCandidate = address(0);
+    }
 
-    // base reward (without multiplier) — caller applies multiplier as needed
-    reward = (accruedAtSettle - accruedAtStart) * stx.amount / SatoshiPlusHelper.NATIVE_STAKE_DECIMAL;
+    if (stx.round < settleRound) {
+      uint256 accruedAtSettle = _getAccruedReward(stx.candidate, settleRound);
+      uint256 accruedAtStart = _getAccruedReward(stx.candidate, stx.round);
+      if (accruedAtSettle > accruedAtStart) {
+        // base reward (without multiplier) — caller applies multiplier as needed
+        reward += (accruedAtSettle - accruedAtStart) * stx.amount / SatoshiPlusHelper.NATIVE_STAKE_DECIMAL;
+      }
 
-    stx.round = settleRound;
+      stx.round = settleRound;
+    }
   }
 
   function _getAccruedReward(address candidate, uint256 round) internal view returns (uint256) {

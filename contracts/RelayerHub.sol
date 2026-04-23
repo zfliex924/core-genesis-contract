@@ -145,13 +145,15 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
   function claimRelayerReward(address relayer) external override onlyInit {
     uint256 reward = relayerRewardVault[relayer];
     require(reward != 0, "no relayer reward");
-    relayerRewardVault[relayer] = 0;
     address payable recipient = payable(relayer);
-    ISystemReward(SYSTEM_REWARD_ADDR).claimRewards(recipient, reward);
+    uint256 actualAmount = ISystemReward(SYSTEM_REWARD_ADDR).claimRewards(recipient, reward);
+    relayerRewardVault[relayer] -= actualAmount;
   }
 
   /// Distribute the accumulated rewards in `pool` to its participating
   /// relayers and reset the pool's per-round state.
+  /// Any precision loss (dust) from integer division during distribution
+  /// is allocated to the first relayer of the round as a first-mover bonus.
   /// @return The caller compensation reward
   function _distributeRelayerReward(RewardPool storage pool) internal returns (uint256) {
     uint256 totalReward = pool.collected;
@@ -165,14 +167,20 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
       totalWeight += weight;
     }
 
+    // 1. Deduct the compensation for the boundary caller first
     uint256 callerReward = totalReward * callerCompensationMolecule / 10000;
     totalReward -= callerReward;
     uint256 remainReward = totalReward;
+
+    // 2. Distribute rewards proportionally to relayers from index 1
     for (uint256 index = 1; index < relayerSize; index++) {
       uint256 reward = relayerWeight[index] * totalReward / totalWeight;
       relayerRewardVault[_relayers[index]] += reward;
       remainReward -= reward;
     }
+
+    // 3. Allocate the first relayer's exact share PLUS any division dust.
+    // _relayers[0] is the first submitter of this round, acting as the dust collector.
     relayerRewardVault[_relayers[0]] += remainReward;
 
     pool.collected = 0;
@@ -220,7 +228,7 @@ contract RelayerHub is IRelayerHub, System, IParamSubscriber{
     } else if (2 * maxWeight < count && count <= (2 * maxWeight + 3 * maxWeight / 4)) {
       return 3 * maxWeight - count;
     } else {
-      return count / 4;
+      return count >= 4 ? count / 4 : 1;
     }
   }
 
