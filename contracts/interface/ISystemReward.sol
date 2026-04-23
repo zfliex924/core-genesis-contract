@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache2.0
-pragma solidity 0.8.4;
+pragma solidity 0.8.24;
 
 interface ISystemReward {
   function claimRewards(address payable to, uint256 amount) external returns(uint256 actualAmount);

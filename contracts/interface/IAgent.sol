@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache2.0
-pragma solidity 0.8.4;
+pragma solidity 0.8.24;
 
 interface IAgent {
   /// The validator candidate is inactive, it is expected to be active

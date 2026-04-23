@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache2.0
-pragma solidity 0.8.4;
+pragma solidity 0.8.24;
 
 contract delegateCoinProxy {
     address public pledgeAgent;

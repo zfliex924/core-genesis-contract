@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache2.0
-pragma solidity 0.8.4;
+pragma solidity 0.8.24;
 
 interface IHashPowerAgent {
   /// Submit the coinbase transaction of a Zcash block, with a Merkle proof

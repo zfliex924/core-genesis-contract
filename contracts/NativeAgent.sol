@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache2.0
-pragma solidity 0.8.4;
+pragma solidity 0.8.24;
 
 import "./interface/INativeAgent.sol";
 import "./interface/IParamSubscriber.sol";
@@ -105,7 +105,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
   function getStakeAmounts(
     address[] calldata candidates,
-    uint256 round
+    uint256 /*round*/
   ) external override view returns (
     uint256[] memory amounts,
     uint256 totalAmount,

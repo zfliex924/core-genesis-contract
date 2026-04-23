@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.4;
+pragma solidity 0.8.24;
 
 library SatoshiPlusHelper {
   uint256 public constant DENOMINATOR = 1e4;
