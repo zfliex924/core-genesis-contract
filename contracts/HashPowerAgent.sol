@@ -234,7 +234,7 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
   function getStakeAmounts(
     address[] calldata candidates,
     uint256 roundTag
-  ) external override returns (
+  ) external override onlyStakeHub returns (
     uint256[] memory amounts,
     uint256 totalAmount,
     uint256[] memory weightedAmounts,
