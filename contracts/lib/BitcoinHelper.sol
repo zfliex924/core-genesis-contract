@@ -130,11 +130,11 @@ library BitcoinHelper {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // BLAKE2b precompile (address 0x69 on Z Protocol chain)
+    // BLAKE2b precompile (address 0x67 on Z Protocol chain)
     // The precompile interprets the first 16 bytes of its input as the BLAKE2b-256
     // personalisation string; the remainder is the message body.
     // ──────────────────────────────────────────────────────────────────────────
-    address private constant BLAKE2B_PRECOMPILE = address(0x69);
+    address private constant BLAKE2B_PRECOMPILE = address(0x67);
 
     function blake2b256(bytes memory _input) private view returns (bytes32 result) {
         address precompile = BLAKE2B_PRECOMPILE;
@@ -942,7 +942,7 @@ library BitcoinHelper {
     }
 
     /// @notice  Computes the txid for a Zcash v5 (NU5) transaction via ZIP-244 BLAKE2b tree-hash.
-    /// @dev     Requires the on-chain BLAKE2b precompile at address 0x69.
+    /// @dev     Requires the on-chain BLAKE2b precompile at address 0x67.
     ///          Call extractTx first so the raw bytes are parsed exactly once.
     function calculateTxId(ZcashTx memory _tx) internal view returns (bytes32) {
         bytes memory _prevoutsData;
