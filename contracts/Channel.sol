@@ -178,7 +178,11 @@ contract Channel is IChannel, System, IParamSubscriber {
     IZecAgent(ZEC_AGENT_ADDR).transferZec(txid, targetCandidate);
   }
 
-  /*********************** ZEC Stake Tracking **************************/
+  /// Add native coin dual stake to a ZEC position staked through Channel
+  function dualStake(bytes32 txid) external payable {
+    require(stakeInfoMap[txid].delegator == msg.sender, "not the delegator");
+    IZecAgent(ZEC_AGENT_ADDR).dualStake{value: msg.value}(txid);
+  }
 
   /// Called by ZecAgent when version == SATOSHI_STAKE_CHANNEL_VERSION
   /// The ZecAgent sets Channel as the delegator; Channel tracks the real user
@@ -194,6 +198,36 @@ contract Channel is IChannel, System, IParamSubscriber {
     emit ZecStakeRecorded(txid, realDelegator, address(0), partnerId);
   }
 
+  /// Claim staking reward for a single ZEC position staked through Channel.
+  /// Deducts partner commission from the staking reward; refunds the dual-stake
+  /// principal in full if the stake has expired.
+  function claimZecReward(bytes32 txid) external {
+    StakeInfo storage info = stakeInfoMap[txid];
+    require(info.delegator == msg.sender, "not the delegator");
+
+    (uint256 reward, uint256 refund, bool expired) = IZecAgent(ZEC_AGENT_ADDR).claimTxReward(txid);
+
+    uint256 commission;
+    uint32 partnerId = info.partnerId;
+    if (partnerId != 0 && reward > 0) {
+      Partner storage p = partners[partnerId];
+      if (p.status == 1) {
+        commission = reward * p.zecCommissionRate / SatoshiPlusHelper.DENOMINATOR;
+        p.commission += commission;
+      }
+    }
+
+    if (expired) {
+      _removeStake(msg.sender, txid);
+      delete stakeInfoMap[txid];
+    }
+
+    uint256 payout = reward - commission + refund;
+    if (payout > 0) {
+      Address.sendValue(payable(msg.sender), payout);
+    }
+  }
+
   /// Partner claims accumulated commission
   function claimCommission(uint32 partnerId) external {
     Partner storage p = partners[partnerId];
@@ -205,6 +239,7 @@ contract Channel is IChannel, System, IParamSubscriber {
     Address.sendValue(payable(FOUNDATION_ADDR), half);
     Address.sendValue(p.feeAddr, amount - half);
   }
+
 
   /*********************** Internal **************************/
 

@@ -12,6 +12,14 @@ interface IZecAgent {
 
   function transferZec(bytes32 txid, address targetCandidate) external;
 
+  function dualStake(bytes32 txid) external payable;
+
+  /// Settle and claim reward for a single ZEC stake txid.
+  /// @return reward    Staking reward paid to msg.sender via StakeHub
+  /// @return refund Dual-stake principal refunded on stake expiry
+  /// @return expired   True if the stake has expired and been cleaned up
+  function claimTxReward(bytes32 txid) external returns (uint256 reward, uint256 refund, bool expired);
+
   /// @param round The new round tag
   function prepare(uint256 round) external;
 }

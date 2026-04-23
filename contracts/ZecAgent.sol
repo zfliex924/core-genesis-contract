@@ -199,7 +199,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
   /// Add or increase dual stake: lock Native Tokens paired with an existing ZEC stake
   /// When increasing, historical rewards are settled first with the old multiplier.
-  function dualStake(bytes32 txid) external payable {
+  function dualStake(bytes32 txid) external override payable {
     require(msg.value > 0, "zero dual stake amount");
     DepositReceipt storage dr = receiptMap[txid];
     require(dr.delegator != address(0), "receipt not found");
@@ -343,6 +343,47 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       } else {
         cs.rewardEndRounds.push(round);
       }
+    }
+  }
+
+  /// Settle and claim reward for a single ZEC stake. Callable by the delegator
+  /// directly or by Channel on behalf of a channel staker.
+  /// Returns the staking reward, any dual-stake principal refund (on expiry),
+  /// and whether the stake has expired and been cleaned up.
+  function claimTxReward(bytes32 txid) external override returns (uint256 reward, uint256 refund, bool expired) {
+    DepositReceipt storage dr = receiptMap[txid];
+    require(dr.delegator == msg.sender, "not the delegator");
+    ZecTx storage ztx = zecTxMap[txid];
+    require(ztx.amount > 0, "zec tx not found");
+
+    (uint256 settled, bool exp) = _collectReward(txid, dr.candidate, dr.round, roundTag - 1, ztx);
+    expired = exp;
+    reward = settled + dr.reward;
+    dr.reward = 0;
+
+    if (expired) {
+      if (dr.dualStakeAmount > 0) {
+        refund = dr.dualStakeAmount;
+        dr.dualStakeAmount = 0;
+      }
+      delete receiptMap[txid];
+      bytes32[] storage txids = delegatorTxids[msg.sender];
+      for (uint256 i = 0; i < txids.length; i++) {
+        if (txids[i] == txid) {
+          txids[i] = txids[txids.length - 1];
+          txids.pop();
+          break;
+        }
+      }
+    }
+
+    if (refund > 0) {
+      Address.sendValue(payable(msg.sender), refund);
+    }
+
+    if (reward > 0) {
+      IStakeHub(STAKE_HUB_ADDR).payReward(msg.sender, reward);
+      emit claimedReward(msg.sender, reward);
     }
   }
 
