@@ -42,7 +42,6 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
   uint256 public constant MAX_ACTUAL_TIMESPAN = AVERAGING_WINDOW_TIMESPAN * (100 + 32) / 100;
 
   // Precompile addresses
-  address public constant BLAKE2B_PRECOMPILE = address(0x67);
   address public constant EQUIHASH_PRECOMPILE = address(0x68);
 
   bytes public constant INIT_CONSENSUS_STATE_BYTES = hex"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
@@ -173,18 +172,6 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
   }
 
   /*********************** Cryptographic Helpers **************************/
-
-  function blake2b256(bytes memory input) internal view returns (bytes32 result) {
-    address precompile = BLAKE2B_PRECOMPILE;
-    uint256 inputLen = input.length;
-    assembly {
-      let ptr := add(input, 0x20)
-      if iszero(staticcall(gas(), precompile, ptr, inputLen, result, 0x20)) {
-        revert(0, 0)
-      }
-      result := mload(result)
-    }
-  }
 
   function verifyEquihash(bytes memory headerBytes) internal view returns (bool) {
     address precompile = EQUIHASH_PRECOMPILE;

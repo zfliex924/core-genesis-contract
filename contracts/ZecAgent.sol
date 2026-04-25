@@ -3,7 +3,7 @@ pragma solidity 0.8.24;
 
 import "./lib/Memory.sol";
 import "./lib/BytesToTypes.sol";
-import "./lib/BitcoinHelper.sol";
+import "./lib/ZcashHelper.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./interface/IAgent.sol";
 import "./interface/IZecAgent.sol";
@@ -21,8 +21,8 @@ import "./System.sol";
 /// Supports dual staking with Native Token weight multiplier.
 contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
-  using BitcoinHelper for bytes;
-  using BitcoinHelper for bytes29;
+  using ZcashHelper for bytes;
+  using ZcashHelper for bytes29;
   using TypedMemView for bytes;
   using TypedMemView for bytes29;
   using TypedMemView for uint256;
@@ -129,8 +129,8 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
   ) external override onlyRelayer {
     require(script[0] == bytes1(uint8(0x04)) && script[5] == bytes1(uint8(0xb1)), "not a valid redeem script");
     // Parse once; reuse the struct for txid computation and output inspection.
-    BitcoinHelper.ZcashTx memory parsedTx = zecTx.extractTx();
-    bytes32 txid = BitcoinHelper.calculateTxId(parsedTx);
+    ZcashHelper.ZcashTx memory parsedTx = zecTx.extractTx();
+    bytes32 txid = ZcashHelper.calculateTxId(parsedTx);
     require(zecTxMap[txid].amount == 0, "already delegated");
 
     uint32 lockTime = _parseLockTime(script);
@@ -466,7 +466,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     bytes29 _voutView,
     bytes memory _script
   ) internal pure returns (uint64 zecAmount, uint32 outputIndex, address delegator, uint32 candidateId, uint32 partnerId, uint32 version) {
-    _voutView.assertType(uint40(BitcoinHelper.BTCTypes.Vout));
+    _voutView.assertType(uint40(ZcashHelper.MemViewType.Vout));
     uint256 _numberOfOutputs = uint256(_voutView.indexCompactInt(0));
     bool opreturn;
 
