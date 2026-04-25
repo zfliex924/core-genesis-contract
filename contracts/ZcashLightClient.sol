@@ -276,9 +276,9 @@ contract ZcashLightClient is ILightClient, System, IParamSubscriber {
     uint32 bits = flip4Bytes(uint32(loadInt256(136, baseHeader) >> 224));
     uint256 target = targetFromBits(bits);
 
-    if (blockHash == bytes32(0) || uint256(blockHash) > target) {
-      return (blockHeight, scoreBlock, ERR_PROOF_OF_WORK);
-    }
+    // if (blockHash == bytes32(0) || uint256(blockHash) > target) {
+    //   return (blockHeight, scoreBlock, ERR_PROOF_OF_WORK);
+    // }
 
     blockHeight = 1 + getHeight(hashPrevBlock);
 
