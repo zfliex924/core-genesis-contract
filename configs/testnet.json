@@ -27,5 +27,13 @@
   "gov": {
     "votingPeriod": 201600,
     "executingPeriod": 201600
+  },
+  "masp": {
+    "protocolFeeBps": 0,
+    "treasury": "0x0000000000000000000000000000000000000000",
+    "unshieldDelay": 0,
+    "aspStalenessSec": 86400,
+    "whitelistedTokens": [],
+    "asps": []
   }
 }

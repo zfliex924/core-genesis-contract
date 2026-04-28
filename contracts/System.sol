@@ -25,6 +25,7 @@ contract System {
   address public constant ZEC_LIGHT_CLIENT_ADDR = 0x0000000000000000000000000000000000001018;
   address public constant ZEC_AGENT_ADDR = 0x0000000000000000000000000000000000001019;
   address public constant GRADE_MANAGER_ADDR = 0x000000000000000000000000000000000000101A;
+  address public constant MASP_ADDR = 0x0000000000000000000000000000000000001020;
 
   modifier onlyCoinbase() {
     require(msg.sender == block.coinbase, "the message sender must be the block producer");

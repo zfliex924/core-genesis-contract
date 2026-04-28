@@ -12,16 +12,21 @@ program.option('-t, --template <template>', 'Genesis template json', './genesis-
 program.version('0.0.1');
 program.parse(process.argv);
 
+// Resolve solc binary: $SOLC_BIN > $SOLC > "solc" (must be 0.8.24+ for MASP contracts).
+const SOLC_BIN = process.env.SOLC_BIN || process.env.SOLC || 'solc';
+
 // compile contract
 function compileContract(key, contractFile, contractName) {
   return new Promise((resolve, reject) => {
-    const ls = spawn('solc', [
+    const ls = spawn(SOLC_BIN, [
       '@openzeppelin/=./node_modules/@openzeppelin/',
       '--bin-runtime',
       '/=/',
       '--optimize',
       '--optimize-runs',
       '10000',
+      '--evm-version',
+      'cancun',
       contractFile,
     ]);
 
@@ -79,6 +84,7 @@ async function main() {
     compileContract('zeclightclient',       'contracts/ZcashLightClient.sol','ZcashLightClient'),
     compileContract('zecagent',             'contracts/ZecAgent.sol',        'ZecAgent'),
     compileContract('grademanager',         'contracts/GradeManager.sol',    'GradeManager'),
+    compileContract('masp',                 'contracts/MASP.sol',            'MASP'),
   ]);
 
   const data = {
