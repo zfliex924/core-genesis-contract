@@ -60,6 +60,18 @@ function extraDataSerialize(validators) {
 
 function buildPatches(raw) {
   const validators = normalizeValidators(raw.validators || []);
+  const masp = raw.masp || {};
+  const initWhitelistedTokens = masp.whitelistedTokens || [];
+  const initASPs              = masp.asps || [];
+
+  // RLP-encode initial whitelist as list of [tokenType (1B), tokenAddress (20B), tokenSubID (32B)]
+  const tokenItems = initWhitelistedTokens.map(t => [
+    Buffer.from([t.tokenType & 0xff]),
+    Buffer.from(web3.utils.hexToBytes(t.address)),
+    Buffer.from(web3.utils.padLeft(web3.utils.numberToHex(t.subId || 0), 64).slice(2), 'hex'),
+  ]);
+  const aspItems = initASPs.map(a => Buffer.from(web3.utils.hexToBytes(a)));
+
   return {
     'ZcashLightClient.INIT_CONSENSUS_STATE_BYTES': { hex: raw.zcash.initConsensusStateBytes },
     'ZcashLightClient.INIT_CHAIN_HEIGHT':          raw.zcash.initChainHeight,
@@ -69,6 +81,12 @@ function buildPatches(raw) {
     'GovHub.INIT_MEMBERS':                         { hex: membersRlpEncode(raw.members || []) },
     'SatoshiPlusHelper.ROUND_INTERVAL':            raw.cycle.roundInterval,
     'SatoshiPlusHelper.CHAINID':                   raw.chainId,
+    'MASP.INIT_PROTOCOL_FEE_BPS':                  masp.protocolFeeBps   || 0,
+    'MASP.INIT_TREASURY':                          masp.treasury         || '0x0000000000000000000000000000000000000000',
+    'MASP.INIT_UNSHIELD_DELAY':                    masp.unshieldDelay    || 0,
+    'MASP.INIT_ASP_STALENESS':                     masp.aspStalenessSec  || 86400,
+    'MASP.INIT_WHITELIST_TOKENS':                  { hex: web3.utils.bytesToHex(RLP.encode(tokenItems)).slice(2) },
+    'MASP.INIT_ASP_LIST':                          { hex: web3.utils.bytesToHex(RLP.encode(aspItems)).slice(2) },
   };
 }
 

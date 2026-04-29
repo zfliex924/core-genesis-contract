@@ -7,7 +7,7 @@ import "./interface/ICandidateHub.sol";
 import "./interface/ILightClient.sol";
 import "./interface/IParamSubscriber.sol";
 import "./interface/IRelayerHub.sol";
-import "./lib/BitcoinHelper.sol";
+import "./lib/ZcashHelper.sol";
 import "./lib/SatoshiPlusHelper.sol";
 import "./lib/TypedMemView.sol";
 import "./System.sol";
@@ -26,8 +26,8 @@ import "./System.sol";
 /// never submitted) is returned as undistributed (burned by StakeHub).
 contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
 
-  using BitcoinHelper for bytes;
-  using BitcoinHelper for bytes29;
+  using ZcashHelper for bytes;
+  using ZcashHelper for bytes29;
   using TypedMemView for bytes29;
 
   uint256 public constant CONFIRM_BLOCK = 24;
@@ -100,10 +100,10 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
     bytes32[] calldata nodes
   ) external override onlyRelayer {
     // Parse the transaction once; reuse the struct for txid computation and payload inspection.
-    BitcoinHelper.ZcashTx memory parsedTx = coinbaseTx.extractTx();
+    ZcashHelper.ZcashTx memory parsedTx = coinbaseTx.extractTx();
 
     // Coinbase is the first transaction in the block, so the merkle leaf index is fixed to 0.
-    bytes32 txid = BitcoinHelper.calculateTxId(parsedTx);
+    bytes32 txid = ZcashHelper.calculateTxId(parsedTx);
     require(
       ILightClient(ZEC_LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, 0, nodes, 0),
       "coinbase proof failed"

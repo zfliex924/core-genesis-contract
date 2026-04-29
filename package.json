@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "generate-mainnet": "node generate-genesis.js --network mainnet",
-    "generate-testnet": "node generate-genesis.js --network testnet"
+    "generate-testnet": "node generate-genesis.js --network testnet",
+    "generate-devnet": "node generate-genesis.js --network devnet",
+    "build-masp-consts": "node scripts/build-masp-consts.js"
   },
   "author": "",
   "license": "MIT",
@@ -16,5 +18,9 @@
     "nunjucks": "^3.2.4",
     "rlp": "^2.2.7",
     "web3": "^4.11.1"
+  },
+  "devDependencies": {
+    "circomlibjs": "^0.1.7",
+    "ethers": "^6.16.0"
   }
 }
