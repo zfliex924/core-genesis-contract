@@ -30,7 +30,7 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
   using ZcashHelper for bytes29;
   using TypedMemView for bytes29;
 
-  uint256 public constant CONFIRM_BLOCK = 24;
+  uint32 public constant CONFIRM_BLOCK = 24;
   uint256 public constant POWER_ROUND_GAP = 3;
   // Coinbase OP_RETURN payload layout:
   //   <magic (4)> <version (1)> <candidateId (4)> <miner (20)>  = 29 bytes
@@ -105,7 +105,7 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
     // Coinbase is the first transaction in the block, so the merkle leaf index is fixed to 0.
     bytes32 txid = ZcashHelper.calculateTxId(parsedTx);
     require(
-      ILightClient(ZEC_LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, 0, nodes, 0),
+      ILightClient(ZEC_LIGHT_CLIENT_ADDR).checkTxProof(txid, blockHeight, CONFIRM_BLOCK, nodes, 0),
       "coinbase proof failed"
     );
 
@@ -131,9 +131,7 @@ contract HashPowerAgent is IAgent, IHashPowerAgent, System, IParamSubscriber {
     });
     emit coinbaseSubmitted(blockHash, candidate, miner);
 
-    if (blockHeight + CONFIRM_BLOCK <= ILightClient(ZEC_LIGHT_CLIENT_ADDR).getChainTipHeight()) {
-      _credit(blockHash);
-    }
+    _credit(blockHash);
 
     // Reward all valid coinbase submissions, including unbound blocks (no SAT+
     // OP_RETURN), because they still increment r.blockCount and keep the
