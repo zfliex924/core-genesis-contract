@@ -143,9 +143,8 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
       StakeTx storage stx = stakeTxMap[stakeIds[i - 1]];
       if (stx.amount == 0) continue;
 
-      uint256 rawReward = _collectReward(stx, settleRound) + stx.reward;
+      reward += _collectReward(stx, settleRound) + stx.reward;
       stx.reward = 0;
-      reward += rawReward * stx.multiplier;
     }
 
     if (reward != 0) {
@@ -195,8 +194,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     amount = stx.amount;
     address candidate = stx.candidate;
 
-    uint256 rawReward = _collectReward(stx, roundTag - 1) + stx.reward;
-    reward = rawReward * stx.multiplier;
+    reward = _collectReward(stx, roundTag - 1) + stx.reward;
 
     Candidate storage c = candidateMap[candidate];
     c.realtimeAmount -= amount;
@@ -258,12 +256,13 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
       uint256 accruedAtSettle = _getAccruedReward(stx.candidate, settleRound);
       uint256 accruedAtStart = _getAccruedReward(stx.candidate, stx.round);
       if (accruedAtSettle > accruedAtStart) {
-        // base reward (without multiplier) — caller applies multiplier as needed
         reward += (accruedAtSettle - accruedAtStart) * stx.amount / SatoshiPlusHelper.NATIVE_STAKE_DECIMAL;
       }
 
       stx.round = settleRound;
     }
+
+    reward *= stx.multiplier;
   }
 
   function _getAccruedReward(address candidate, uint256 round) internal view returns (uint256) {
