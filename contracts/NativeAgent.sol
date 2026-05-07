@@ -145,7 +145,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
 
       uint256 rawReward = _collectReward(stx, settleRound) + stx.reward;
       stx.reward = 0;
-      reward += rawReward * stx.multiplier / SatoshiPlusHelper.DENOMINATOR;
+      reward += rawReward * stx.multiplier;
     }
 
     if (reward != 0) {
@@ -196,7 +196,7 @@ contract NativeAgent is INativeAgent, System, IParamSubscriber {
     address candidate = stx.candidate;
 
     uint256 rawReward = _collectReward(stx, roundTag - 1) + stx.reward;
-    reward = rawReward * stx.multiplier / SatoshiPlusHelper.DENOMINATOR;
+    reward = rawReward * stx.multiplier;
 
     Candidate storage c = candidateMap[candidate];
     c.realtimeAmount -= amount;
