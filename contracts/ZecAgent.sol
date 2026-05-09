@@ -110,7 +110,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
   /*********************** Init **************************/
   function init() external onlyNotInit {
-    roundTag = 1;
+    roundTag = block.timestamp / SatoshiPlusHelper.ROUND_INTERVAL;
     dualConversionRate = 1e10; // 1:1 value after precision alignment (1e18/1e8)
     alreadyInit = true;
   }
