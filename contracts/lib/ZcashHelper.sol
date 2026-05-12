@@ -452,7 +452,7 @@ library ZcashHelper {
                 ) {
                     amount = value(output);
                 }
-            } else {
+            } else if (arbitraryDataView.len() > 0) {
                 arbitraryData = arbitraryDataView.clone();
             }
         }
@@ -496,7 +496,7 @@ library ZcashHelper {
                     amount = value(outputView);
                     outputIndex = uint32(i);
                 }
-            } else {
+            } else if (arbitraryDataView.len() > 0) {
                 arbitraryData = arbitraryDataView;
             }
         }
@@ -592,23 +592,32 @@ library ZcashHelper {
     }
 
     /// @notice             extracts the Op Return Payload
-    /// @dev                structure of the input is: 1 byte op return + 2 bytes indicating the length of payload + max length for op return payload is 80 bytes
+    /// @dev                Three possible return values:
+    ///                     - len > 0 (type == OpReturnPayload): valid payload, process it
+    ///                     - len == 0 (type == OpReturnPayload): script starts with 0x6a but
+    ///                       payload length is out of range; treat as unspendable, skip entirely.
+    ///                       Encoded as bytes29(uint232(uint40(MemViewType.OpReturnPayload)) << 192):
+    ///                       a zero-length OpReturnPayload view, distinct from TypedMemView.NULL.
+    ///                     - TypedMemView.NULL (all-0xFF bytes29): not an OP_RETURN output; safe
+    ///                       to inspect as a regular locking-script output.
     /// @param _skp         the scriptPubkey
-    /// @return             the Op Return Payload (or null if not a valid Op Return output)
+    /// @return             the Op Return Payload, a zero-length OpReturnPayload view, or TypedMemView.NULL
     function opReturnPayload(bytes29 _skp) internal pure typeAssert(_skp, MemViewType.ScriptPubkey) returns (bytes29) {
         uint64 bodyLength = indexCompactInt(_skp, 0);
         if (_skp.indexUint(1, 1) == 0x6a) {
             if (_skp.indexUint(2, 1) == 0x4c) {
                 uint64 payloadLen = _skp.indexUint(3, 1).toUint64();
-                require(payloadLen == bodyLength - 3 &&
-                    bodyLength <= 83 && bodyLength >= 79, "ZcashHelper: invalid opreturn");
-                return _skp.slice(4, payloadLen, uint40(MemViewType.OpReturnPayload));
+                if (payloadLen == bodyLength - 3 && bodyLength <= 83 && bodyLength >= 79) {
+                    return _skp.slice(4, payloadLen, uint40(MemViewType.OpReturnPayload));
+                }
             } else {
                 uint64 payloadLen = _skp.indexUint(2, 1).toUint64();
-                require(payloadLen == bodyLength - 2 &&
-                    bodyLength <= 77 && bodyLength >= 4, "ZcashHelper: invalid opreturn");
-                return _skp.slice(3, payloadLen, uint40(MemViewType.OpReturnPayload));
+                if (payloadLen == bodyLength - 2 && bodyLength <= 77 && bodyLength >= 4) {
+                    return _skp.slice(3, payloadLen, uint40(MemViewType.OpReturnPayload));
+                }
             }
+            // 0x6a detected but OP_RETURN format invalid: zero-length OpReturnPayload view (len=0, type=OpReturnPayload)
+            return bytes29(uint232(uint40(MemViewType.OpReturnPayload)) << 192);
         }
         return TypedMemView.nullView();
     }
