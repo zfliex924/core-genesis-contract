@@ -57,6 +57,9 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 dualMultiplier;  // Dual staking multiplier from GradeManager (updated on dualStake)
     uint256 dualStakeAmount; // Native Token amount for dual staking (0 = no dual stake)
     uint256 reward;          // Settled but unclaimed reward (from dualStake multiplier change)
+    uint256 dualStakeUpdateRound; // round when dualStake was last called (0 = no pending transition)
+    uint256 prevDualMultiplier;   // dualMultiplier before last dualStake update
+    uint256 prevDualStakeAmount;  // dualStakeAmount before last dualStake update
   }
 
   /// @dev Per-candidate staking state
@@ -110,7 +113,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
 
   /*********************** Init **************************/
   function init() external onlyNotInit {
-    roundTag = 1;
+    roundTag = block.timestamp / SatoshiPlusHelper.ROUND_INTERVAL;
     dualConversionRate = 1e10; // 1:1 value after precision alignment (1e18/1e8)
     alreadyInit = true;
   }
@@ -179,7 +182,10 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
       lockMultiplier: lockMul,
       dualMultiplier: SatoshiPlusHelper.DENOMINATOR,
       dualStakeAmount: 0,
-      reward: 0
+      reward: 0,
+      dualStakeUpdateRound: 0,
+      prevDualMultiplier: 0,
+      prevDualStakeAmount: 0
     });
 
     delegatorTxids[delegator].push(txid);
@@ -211,16 +217,19 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 expireRound = uint256(ztx.lockTime) / SatoshiPlusHelper.ROUND_INTERVAL;
     require(expireRound > roundTag + 1, "insufficient locking rounds");
 
-    // Settle historical rewards with old multiplier before changing dualStakeAmount
-    if (dr.dualStakeAmount > 0) {
-      uint256 settleRound = roundTag - 1;
-      (uint256 settled, ) = _collectReward(
-        txid, dr.candidate, dr.round, settleRound, ztx
-      );
-      if (settled > 0) {
-        dr.reward += settled;
-      }
-      dr.round = settleRound;
+    // Settle historical rewards with old dual* values before updating them.
+    (uint256 settled, ) = _collectReward(txid, dr.candidate, dr.round, roundTag - 1, ztx);
+    if (settled > 0) {
+      dr.reward += settled;
+    }
+
+    // Record the transition boundary before changing dual* values.
+    // Only the first dualStake call in a round sets prevDual*; subsequent calls in the same
+    // round must not overwrite it, as it reflects the round's opening snapshot.
+    if (dr.dualStakeUpdateRound != roundTag) {
+      dr.dualStakeUpdateRound = roundTag;
+      dr.prevDualMultiplier = dr.dualMultiplier;
+      dr.prevDualStakeAmount = dr.dualStakeAmount;
     }
 
     // Calculate old weighted before changes
@@ -262,7 +271,6 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     if (dr.sourceCandidate == address(0)) {
       dr.sourceCandidate = sourceCandidate;
     }
-    dr.round = roundTag;
 
     // Move weighted amount
     uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
@@ -562,33 +570,46 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
     uint256 calculateRound;
 
     (calculateRound, expired) = _getCalculateRound(txid, settleRound);
-    if (calculateRound < drRound) return (0, expired);
+    if (drRound >= calculateRound) return (0, expired);
 
     DepositReceipt storage dr = receiptMap[txid];
-    if (dr.sourceCandidate != address(0)) {
-      uint256 accruedAtSettle = _getAccruedReward(dr.sourceCandidate, drRound);
-      uint256 accruedAtStart = _getAccruedReward(dr.sourceCandidate, drRound-1);
-      if (accruedAtSettle > accruedAtStart) {
-        uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
-        reward = (accruedAtSettle - accruedAtStart) * weighted / SatoshiPlusHelper.ZEC_DECIMAL;
-      }
-      dr.sourceCandidate = address(0);
-    }
+    bool hasSource = dr.sourceCandidate != address(0);
+    bool usePrev = dr.dualStakeUpdateRound == drRound + 1;
+    if (hasSource || usePrev) {
+      address rewardCandidate = hasSource ? dr.sourceCandidate : candidate;
+      uint256 accruedAtSettle = _getAccruedReward(rewardCandidate, drRound + 1);
+      uint256 accruedAtStart = _getAccruedReward(rewardCandidate, drRound);
 
-    if (calculateRound > drRound) {
-      // Base reward
-      uint256 accruedAtSettle = _getAccruedReward(candidate, calculateRound);
-      uint256 accruedAtStart = _getAccruedReward(candidate, drRound);
       if (accruedAtSettle > accruedAtStart) {
-      // reward share = accruedDiff × weighted / ZEC_DECIMAL
-        uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+        uint256 dualMultiplier = usePrev ? dr.prevDualMultiplier : dr.dualMultiplier;
+        uint256 dualStakeAmount = usePrev ? dr.prevDualStakeAmount : dr.dualStakeAmount;
+        uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dualMultiplier, dualStakeAmount);
         reward += (accruedAtSettle - accruedAtStart) * weighted / SatoshiPlusHelper.ZEC_DECIMAL;
       }
 
-      // Update receipt round
-      receiptMap[txid].round = calculateRound;
+      if (hasSource) {
+        dr.sourceCandidate = address(0);
+      }
+
+      if (usePrev) {
+        dr.dualStakeUpdateRound = 0;
+        dr.prevDualMultiplier = 0;
+        dr.prevDualStakeAmount = 0;
+      }
+
+      drRound += 1;
     }
 
+    if (drRound < calculateRound) {
+      uint256 accruedAtSettle = _getAccruedReward(candidate, calculateRound);
+      uint256 accruedAtStart = _getAccruedReward(candidate, drRound);
+      if (accruedAtSettle > accruedAtStart) {
+        uint256 weighted = _calcWeighted(ztx.amount, dr.lockMultiplier, dr.dualMultiplier, dr.dualStakeAmount);
+        reward += (accruedAtSettle - accruedAtStart) * weighted / SatoshiPlusHelper.ZEC_DECIMAL;
+      }
+    }
+
+    receiptMap[txid].round = calculateRound;
     emit rewardCollected(txid, receiptMap[txid].delegator, reward, expired);
   }
 
