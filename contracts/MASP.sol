@@ -15,19 +15,27 @@ interface IASP {
 }
 
 /// @title MASP
-/// @notice Z Protocol Multi-Asset Shielded Pool — single-file system contract at MASP_ADDR (0x1020).
-/// @dev    Inlines MASPPool + CommitmentTree + ASPManager + NoteLib helpers from
-///         /Users/gokberkgulgun/Documents/GitHub/masp/src/. All Poseidon and Groth16
-///         operations dispatch directly to chain precompiles (0x6a/0x6b/0x6c) — no
-///         intermediate Solidity Poseidon contracts, no separate verifier wrappers.
-///         Governance via GovHub (0x1006) using the IParamSubscriber.updateParam pattern.
+/// @notice Z Protocol Multi-Asset Shielded Pool — single-file system contract
+///         deployed at MASP_ADDR (0x1020). Governance routes through GovHub
+///         (0x1006) using `IParamSubscriber.updateParam`.
+/// @dev    Poseidon and Groth16 dispatch directly to chain precompiles
+///         (0x6a / 0x6b / 0x6c) — no intermediate Solidity wrappers.
 contract MASP is System, IParamSubscriber {
+    /// @dev Pre-launch testing backstop. Until the governance contract is
+    ///      live, this EOA may invoke {updateParam} alongside GovHub. MUST
+    ///      be retired before the testnet→mainnet cutover by replacing the
+    ///      `onlyGovOrTest` modifier with the inherited `onlyGov` directly.
+    address internal constant TEST_ADMIN = 0x36f55c2aCa9149e18d859Ccf328344551c5fb9C0;
+
+    modifier onlyGovOrTest() {
+        require(
+            msg.sender == GOV_HUB_ADDR || msg.sender == TEST_ADMIN,
+            "MASP: sender must be governance or test admin"
+        );
+        _;
+    }
     using RLPDecode for bytes;
     using RLPDecode for RLPDecode.RLPItem;
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                          STRUCTS (from IMASP)
-    // ═══════════════════════════════════════════════════════════════════
 
     struct Proof {
         uint256[2]    a;
@@ -75,10 +83,6 @@ contract MASP is System, IParamSubscriber {
         uint256[2] fees;
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                          EVENTS
-    // ═══════════════════════════════════════════════════════════════════
-
     event Shield(uint256 indexed treeNumber, uint256 startPosition, uint256[] commitments, bytes[] encryptedNotes);
     event Transact(uint256 indexed treeNumber, uint256[] nullifiers, uint256[] commitments, bytes[] encryptedNotes);
     event Unshield(address indexed recipient, address indexed token, uint256 amount, uint256 fee, uint256 protocolFee, address indexed broadcaster);
@@ -94,10 +98,6 @@ contract MASP is System, IParamSubscriber {
     event ASPStalenessThresholdUpdated(uint256 newThreshold);
     event AssociationSetRootUpdated(address indexed asp, uint256 root);
     event VerifierVKUpdated(uint256 indexed configHash, uint256 vkLength);
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                          ERRORS
-    // ═══════════════════════════════════════════════════════════════════
 
     error InvalidProof();
     error VKNotSet(uint256 configHash);
@@ -137,10 +137,6 @@ contract MASP is System, IParamSubscriber {
     error ERC721TransferFailed();
     error UnsupportedTokenSubID();
     // Note: MismatchParamLength, OutOfBounds, UnsupportedGovParam are inherited from System.sol.
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                       CONSTANTS — fixed at deploy
-    // ═══════════════════════════════════════════════════════════════════
 
     uint256 internal constant SNARK_SCALAR_FIELD =
         21888242871839275222246405745257275088548364400416034343698204186575808495617;
@@ -402,10 +398,6 @@ contract MASP is System, IParamSubscriber {
         hex"1a36f527e1d63281d6b9e799c2d1c3075e70c7928d7bad6fdaa2138ef828cee9"
         hex"2904d7c3898bf9935d9c04ca401e559bc890857ca92f33417797887eb0186a5a";
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                            STORAGE
-    // ═══════════════════════════════════════════════════════════════════
-
     bool    public paused;
     uint256 public protocolFeeBps;
     address public treasury;
@@ -430,10 +422,6 @@ contract MASP is System, IParamSubscriber {
     uint256 public aspStalenessThreshold;
     mapping(address => uint256) public associationSetRoots;
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                          MODIFIERS
-    // ═══════════════════════════════════════════════════════════════════
-
     modifier nonReentrant() {
         if (_locked != 1) revert ReentrancyErr();
         _locked = 2;
@@ -445,10 +433,6 @@ contract MASP is System, IParamSubscriber {
         if (paused) revert PausedError();
         _;
     }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                            INIT
-    // ═══════════════════════════════════════════════════════════════════
 
     function init() external onlyNotInit {
         protocolFeeBps        = INIT_PROTOCOL_FEE_BPS;
@@ -517,10 +501,6 @@ contract MASP is System, IParamSubscriber {
             emit ASPAdded(aspAddr, name);
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                  PRECOMPILE DISPATCHERS
-    // ═══════════════════════════════════════════════════════════════════
 
     function _poseidonT3(uint256 a, uint256 b) internal view returns (uint256 r) {
         assembly {
@@ -605,10 +585,6 @@ contract MASP is System, IParamSubscriber {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                  COMMITMENT TREE (inlined)
-    // ═══════════════════════════════════════════════════════════════════
-
     function _zeroAtLevel(uint256 i) internal pure returns (uint256) {
         if (i == 0)  return ZERO_00;
         if (i == 1)  return ZERO_01;
@@ -686,10 +662,6 @@ contract MASP is System, IParamSubscriber {
         return _rootHistory[treeNumber][root];
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                  ASP MANAGER (inlined)
-    // ═══════════════════════════════════════════════════════════════════
-
     function _screenWallet(address wallet) internal view {
         uint256 len = aspProviders.length;
         if (len == 0) return;
@@ -706,24 +678,14 @@ contract MASP is System, IParamSubscriber {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                  TOKEN HASH HELPERS (from NoteLib)
-    // ═══════════════════════════════════════════════════════════════════
-
     function _computeTokenHash(uint8 tokenType, address tokenAddr, uint256 tokenSubID)
         internal view returns (uint256)
     {
         return _poseidonT4(uint256(tokenType), uint256(uint160(tokenAddr)), tokenSubID);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                  CIRCUIT CONFIG / VALIDATION HELPERS
-    // ═══════════════════════════════════════════════════════════════════
-
-    /// @dev Multi-asset (K=2) keyspace: salted with the tag "v2" for forward
-    ///      compatibility — disjoint from any pre-multi-asset legacy layout.
-    ///      The deposit circuit uses its own un-salted layout
-    ///      (DEPOSIT_CONFIG_HASH constant) and is not produced here.
+    /// @dev K=2 keyspace salted with tag "v2". Deposit uses its own un-salted
+    ///      layout exposed as `DEPOSIT_CONFIG_HASH`.
     function _getCircuitConfigHash(uint256 numIn, uint256 numOut) internal pure returns (uint256) {
         return uint256(keccak256(abi.encode("v2", numIn, numOut)));
     }
@@ -803,10 +765,6 @@ contract MASP is System, IParamSubscriber {
         mem = new uint256[](n);
         for (uint256 i = 0; i < n;) { mem[i] = arr[i]; unchecked { ++i; } }
     }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                            SHIELD
-    // ═══════════════════════════════════════════════════════════════════
 
     function shield(ShieldParams[] calldata params) external payable nonReentrant whenNotPaused {
         uint256 len = params.length;
@@ -895,10 +853,6 @@ contract MASP is System, IParamSubscriber {
         emit Shield(treeNum, startIdx, commitmentsList, encryptedNotes);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                            TRANSACT
-    // ═══════════════════════════════════════════════════════════════════
-
     /// @dev Multi-asset (K=2) shielded→shielded transfer. No public token movement —
     ///      `publicAmounts` is asserted to be `[0, 0]` here and re-asserted in the
     ///      proof. `publicTokenHashes[k]` must reference whitelisted assets.
@@ -937,10 +891,6 @@ contract MASP is System, IParamSubscriber {
 
         emit Transact(treeNum, params.nullifiers, commitmentsMem, params.encryptedNotes);
     }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                            UNSHIELD
-    // ═══════════════════════════════════════════════════════════════════
 
     function unshield(UnshieldParams calldata params) external nonReentrant whenNotPaused {
         if (params.recipient == address(0)) revert InvalidRecipient();
@@ -1088,10 +1038,6 @@ contract MASP is System, IParamSubscriber {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                          VIEW FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════════
-
     function isKnownRoot(uint256 treeNumber, uint256 root) external view returns (bool) {
         return _isKnownRoot(treeNumber, root);
     }
@@ -1128,10 +1074,6 @@ contract MASP is System, IParamSubscriber {
         associationSetRoots[address(asp)] = root;
         emit AssociationSetRootUpdated(address(asp), root);
     }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //                       SAFE TRANSFER HELPERS
-    // ═══════════════════════════════════════════════════════════════════
 
     function _safeTransferFrom(address token, address from, address to, uint256 amount) internal {
         (bool success, bytes memory data) = token.call(
@@ -1185,10 +1127,6 @@ contract MASP is System, IParamSubscriber {
         return ERC721_RECEIVED;
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //                  GOVERNANCE: IParamSubscriber
-    // ═══════════════════════════════════════════════════════════════════
-
     /// @inheritdoc IParamSubscriber
     /// @dev Routes governance proposals from GovHub (0x1006) to MASP admin operations.
     ///      All `value` payloads are abi.encode of the argument list expected by the corresponding action.
@@ -1208,7 +1146,7 @@ contract MASP is System, IParamSubscriber {
         external
         override
         onlyInit
-        onlyGov
+        onlyGovOrTest
     {
         if (Memory.compareStrings(key, "protocolFeeBps")) {
             if (value.length != 32) revert MismatchParamLength(key);

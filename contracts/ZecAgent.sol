@@ -499,7 +499,7 @@ contract ZecAgent is IAgent, IZecAgent, System, IParamSubscriber {
           zecAmount = _outputView.value();
           outputIndex = uint32(idx);
         }
-      } else {
+      } else if (_arbitraryData.len() > 0) {
         (delegator, candidateId, partnerId, version) = _parsePayload(_arbitraryData);
         opreturn = true;
       }
